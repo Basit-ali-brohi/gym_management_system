@@ -69,7 +69,6 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
     required String memberCode,
     required String fullName,
     String? phone,
-    String? email,
     required int planId,
     required String joinDate,
   }) async {
@@ -79,7 +78,6 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
       'memberCode': memberCode.trim(),
       'fullName': fullName.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-      'email': email?.trim().isEmpty == true ? null : email?.trim(),
       'planId': planId,
       'joinDate': joinDate,
       'startDate': joinDate,
@@ -92,7 +90,6 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
     required int memberId,
     required String fullName,
     String? phone,
-    String? email,
     required String status,
     String? notes,
   }) async {
@@ -101,7 +98,6 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
     await api.patchJson('/members/$memberId', token: token, body: {
       'fullName': fullName.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-      'email': email?.trim().isEmpty == true ? null : email?.trim(),
       'status': status,
       'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
     });
@@ -143,6 +139,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
   bool _hydratedFromRoute = false;
+  bool _openedPrefill = false;
   String _statusFilter = 'all';
   DateTime? _fromDate;
   DateTime? _toDate;
@@ -166,21 +163,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final now = DateTime.now();
     final name = 'members_${_date.format(now)}.csv';
     final lines = <String>[
-      [
-        'member_code',
-        'full_name',
-        'phone',
-        'email',
-        'status',
-        'join_date',
-        'branch_name',
-      ].map(_csvEscape).join(','),
+      ['id', 'member_code', 'full_name', 'phone', 'status', 'join_date', 'branch_name'].map(_csvEscape).join(','),
       ...items.map((m) {
         return [
+          m.id.toString(),
           m.memberCode,
           m.fullName,
           m.phone ?? '',
-          m.email ?? '',
           m.status,
           m.joinDate,
           m.branchName ?? '',
@@ -195,19 +184,91 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     );
   }
 
+  Future<void> _openMembersPdfActions(BuildContext context) async {
+    final today = _date.format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Members PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runMembersPdf(context, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runMembersPdf(context, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runMembersPdf(BuildContext context, {required bool preview, required String today}) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/members.pdf', token: token);
+      final name = 'members_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final membersAsync = ref.watch(membersControllerProvider);
     final theme = Theme.of(context);
-    final roles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final rawRoles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final roles = rawRoles
+        .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
+        .where((r) => r.isNotEmpty)
+        .toSet();
     final canDelete = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
-    final q = GoRouterState.of(context).uri.queryParameters['q']?.trim();
+    final qp = GoRouterState.of(context).uri.queryParameters;
+    final q = qp['q']?.trim();
     if (!_hydratedFromRoute && q != null && q.isNotEmpty) {
       _hydratedFromRoute = true;
       _searchCtrl.text = q;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(membersControllerProvider.notifier).load(q: q);
+      });
+    }
+    final prefill = qp['prefill']?.trim();
+    final prefillName = qp['fullName']?.trim();
+    final prefillPhone = qp['phone']?.trim();
+    if (!_openedPrefill && prefill == 'lead' && (prefillName?.isNotEmpty ?? false)) {
+      _openedPrefill = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await _openAddMember(context, prefillFullName: prefillName, prefillPhone: prefillPhone);
       });
     }
     final fromStr = _fromDate == null ? '' : _date.format(_fromDate!);
@@ -274,7 +335,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             final search = TextField(
               controller: _searchCtrl,
               decoration: const InputDecoration(
-                labelText: 'Search (code / name / phone / email)',
+                labelText: 'Search (code / name / phone)',
                 prefixIcon: Icon(Icons.search),
               ),
               onChanged: (v) {
@@ -298,6 +359,12 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'PDF',
+                  onPressed: () => _openMembersPdfActions(context),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                ),
+                const SizedBox(width: 6),
                 _HoverScaleButton(
                   child: FilledButton.icon(
                     onPressed: () => _openAddMember(context),
@@ -485,15 +552,16 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             return LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 900) {
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                  return Padding(
+                    padding: const EdgeInsets.all(12),
                     child: DataTable(
+                        columnSpacing: 18,
+                        horizontalMargin: 12,
                           columns: const [
                             DataColumn(label: Text('ID')),
                             DataColumn(label: Text('Code')),
                             DataColumn(label: Text('Name')),
                             DataColumn(label: Text('Phone')),
-                            DataColumn(label: Text('Email')),
                             DataColumn(label: Text('Joined')),
                             DataColumn(label: Text('Status')),
                             DataColumn(label: Text('Action')),
@@ -502,33 +570,47 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             for (final m in items)
                               DataRow(
                                 cells: [
-                                  DataCell(Text(m.id.toString())),
-                                  DataCell(Text(m.memberCode)),
-                                  DataCell(Text(m.fullName)),
-                                  DataCell(Text(m.phone ?? '-')),
-                                  DataCell(Text(m.email ?? '-')),
-                                  DataCell(Text(_formatDate(m.joinDate))),
+                                  DataCell(SizedBox(width: 46, child: Text(m.id.toString()))),
+                                  DataCell(SizedBox(width: 92, child: Text(m.memberCode, overflow: TextOverflow.ellipsis))),
+                                  DataCell(SizedBox(width: 220, child: Text(m.fullName, overflow: TextOverflow.ellipsis))),
+                                  DataCell(SizedBox(width: 150, child: Text(m.phone ?? '-', overflow: TextOverflow.ellipsis))),
+                                  DataCell(SizedBox(width: 110, child: Text(_formatDate(m.joinDate)))),
                                   DataCell(_StatusChip(status: m.status)),
                                   DataCell(
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         IconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openMemberDetail(context, m),
-                                          icon: const Icon(Icons.visibility),
-                                        ),
-                                        IconButton(
                                           tooltip: 'Edit',
                                           onPressed: () => _openEditMember(context, m),
                                           icon: const Icon(Icons.edit_outlined),
+                                          visualDensity: VisualDensity.compact,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                          iconSize: 20,
                                         ),
-                                        if (canDelete)
+                                        const SizedBox(width: 2),
+                                        IconButton(
+                                          tooltip: 'View',
+                                          onPressed: () => _openMemberDetail(context, m),
+                                          icon: const Icon(Icons.visibility),
+                                          visualDensity: VisualDensity.compact,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                          iconSize: 20,
+                                        ),
+                                        if (canDelete) ...[
+                                          const SizedBox(width: 2),
                                           IconButton(
                                             tooltip: 'Delete',
                                             onPressed: () => _confirmDelete(context, m),
                                             icon: const Icon(Icons.delete_outline),
+                                            visualDensity: VisualDensity.compact,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                            iconSize: 20,
                                           ),
+                                        ],
                                       ],
                                     ),
                                   ),
@@ -551,7 +633,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                       subtitle: Text([
                         'ID: ${m.id}',
                         if (m.phone != null && m.phone!.isNotEmpty) m.phone!,
-                        if (m.email != null && m.email!.isNotEmpty) m.email!,
                         if (m.branchName != null && m.branchName!.isNotEmpty) m.branchName!,
                       ].join(' • ')),
                       trailing: Row(
@@ -601,119 +682,121 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (context) {
         final viewInsets = MediaQuery.viewInsetsOf(context);
+        final maxHeight = MediaQuery.sizeOf(context).height * 0.9;
         return Padding(
           padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: viewInsets.bottom + 16),
-          child: FutureBuilder<Map<String, dynamic>>(
-            future: future,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const SizedBox(height: 280, child: Center(child: CircularProgressIndicator()));
-              }
-              if (snap.hasError) {
-                return SizedBox(
-                  height: 220,
-                  child: Center(child: Text(snap.error.toString())),
-                );
-              }
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: FutureBuilder<Map<String, dynamic>>(
+              future: future,
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(child: Text(snap.error.toString()));
+                }
 
-              final data = snap.data ?? <String, dynamic>{};
-              final m = (data['member'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-              final sub = (data['subscription'] as Map?)?.cast<String, dynamic>();
-              final invoices = (data['invoices'] as List<dynamic>? ?? [])
-                  .whereType<Map>()
-                  .map((e) => e.cast<String, dynamic>())
-                  .toList();
-              final checkinsTotal = (data['checkinsTotal'] as num?)?.toInt() ?? 0;
-              final lastCheckinAt = data['lastCheckinAt']?.toString();
-              final planName = sub?['planName']?.toString();
-              final endDate = sub?['endDate']?.toString();
+                final data = snap.data ?? <String, dynamic>{};
+                final m = (data['member'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+                final sub = (data['subscription'] as Map?)?.cast<String, dynamic>();
+                final invoices = (data['invoices'] as List<dynamic>? ?? [])
+                    .whereType<Map>()
+                    .map((e) => e.cast<String, dynamic>())
+                    .toList();
+                final checkinsTotal = (data['checkinsTotal'] as num?)?.toInt() ?? 0;
+                final lastCheckinAt = data['lastCheckinAt']?.toString();
+                final planName = sub?['planName']?.toString();
+                final endDate = sub?['endDate']?.toString();
 
-              final fullName = m['fullName']?.toString() ?? member.fullName;
-              final initials = fullName
-                  .trim()
-                  .split(RegExp(r'\s+'))
-                  .where((s) => s.isNotEmpty)
-                  .take(2)
-                  .map((s) => s[0].toUpperCase())
-                  .join();
+                final fullName = m['fullName']?.toString() ?? member.fullName;
+                final initials = fullName
+                    .trim()
+                    .split(RegExp(r'\s+'))
+                    .where((s) => s.isNotEmpty)
+                    .take(2)
+                    .map((s) => s[0].toUpperCase())
+                    .join();
 
-              String prettyDate(String raw) {
-                final parsed = DateTime.tryParse(raw);
-                if (parsed == null) return raw;
-                return _pretty.format(parsed);
-              }
+                String prettyDate(String raw) {
+                  final parsed = DateTime.tryParse(raw);
+                  if (parsed == null) return raw;
+                  return _pretty.format(parsed);
+                }
 
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
+                return SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      CircleAvatar(radius: 24, child: Text(initials.isEmpty ? 'M' : initials)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(fullName, style: Theme.of(context).textTheme.titleLarge),
-                            Text('Code: ${m['memberCode'] ?? member.memberCode} • ID: ${m['id'] ?? member.id}'),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
                         children: [
-                          Text('Membership', style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 6),
-                          Text('Plan: ${planName ?? '-'}'),
-                          Text('Expiry: ${endDate ?? '-'}'),
-                          const SizedBox(height: 10),
-                          Text('History', style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 6),
-                          Text('Total check-ins: $checkinsTotal'),
-                          Text('Last check-in: ${lastCheckinAt == null ? '-' : prettyDate(lastCheckinAt)}'),
+                          CircleAvatar(radius: 24, child: Text(initials.isEmpty ? 'M' : initials)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(fullName, style: Theme.of(context).textTheme.titleLarge),
+                                Text('Code: ${m['memberCode'] ?? member.memberCode} • ID: ${m['id'] ?? member.id}'),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
+                          ),
                         ],
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Last Invoices', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  if (invoices.isEmpty)
-                    Text('No invoices', style: Theme.of(context).textTheme.bodySmall)
-                  else
-                    SizedBox(
-                      height: 220,
-                      child: ListView.separated(
-                        itemCount: invoices.length,
-                        separatorBuilder: (context, index) => const Divider(height: 1),
-                        itemBuilder: (context, i) {
-                          final inv = invoices[i];
-                          return ListTile(
-                            dense: true,
-                            title: Text(inv['invoiceNo']?.toString() ?? ''),
-                            subtitle: Text('Total: ${inv['total']} • ${inv['status']}'),
-                            trailing: Text(prettyDate(inv['createdAt']?.toString() ?? '')),
-                          );
-                        },
+                      const SizedBox(height: 12),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Membership', style: Theme.of(context).textTheme.titleMedium),
+                              const SizedBox(height: 6),
+                              Text('Plan: ${planName ?? '-'}'),
+                              Text('Expiry: ${endDate ?? '-'}'),
+                              const SizedBox(height: 10),
+                              Text('History', style: Theme.of(context).textTheme.titleMedium),
+                              const SizedBox(height: 6),
+                              Text('Total check-ins: $checkinsTotal'),
+                              Text('Last check-in: ${lastCheckinAt == null ? '-' : prettyDate(lastCheckinAt)}'),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                ],
-              );
-            },
+                      const SizedBox(height: 12),
+                      Text('Last Invoices', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      if (invoices.isEmpty)
+                        Text('No invoices', style: Theme.of(context).textTheme.bodySmall)
+                      else
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: invoices.length,
+                          separatorBuilder: (context, index) => const Divider(height: 1),
+                          itemBuilder: (context, i) {
+                            final inv = invoices[i];
+                            return ListTile(
+                              dense: true,
+                              title: Text(inv['invoiceNo']?.toString() ?? ''),
+                              subtitle: Text('Total: ${inv['total']} • ${inv['status']}'),
+                              trailing: Text(prettyDate(inv['createdAt']?.toString() ?? '')),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         );
       },
@@ -726,11 +809,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     return _date.format(parsed);
   }
 
-  Future<void> _openAddMember(BuildContext context) async {
+  Future<void> _openAddMember(
+    BuildContext context, {
+    String? prefillFullName,
+    String? prefillPhone,
+  }) async {
     final memberCodeCtrl = TextEditingController();
-    final fullNameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
+    final fullNameCtrl = TextEditingController(text: prefillFullName?.trim() ?? '');
+    final phoneCtrl = TextEditingController(text: prefillPhone?.trim() ?? '');
     final formKey = GlobalKey<FormState>();
     DateTime joinDate = DateTime.now();
     int? selectedPlanId;
@@ -748,7 +834,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               memberCode: memberCodeCtrl.text,
               fullName: fullNameCtrl.text,
               phone: phoneCtrl.text,
-              email: emailCtrl.text,
               planId: selectedPlanId!,
               joinDate: _date.format(joinDate),
             );
@@ -810,13 +895,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                 controller: phoneCtrl,
                                 decoration: const InputDecoration(labelText: 'Phone (optional)'),
                                 keyboardType: TextInputType.phone,
-                              ),
-                            ),
-                            field(
-                              TextFormField(
-                                controller: emailCtrl,
-                                decoration: const InputDecoration(labelText: 'Email (optional)'),
-                                keyboardType: TextInputType.emailAddress,
                               ),
                             ),
                           ],
@@ -947,13 +1025,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     memberCodeCtrl.dispose();
     fullNameCtrl.dispose();
     phoneCtrl.dispose();
-    emailCtrl.dispose();
   }
 
   Future<void> _openEditMember(BuildContext context, Member member) async {
     final fullNameCtrl = TextEditingController(text: member.fullName);
     final phoneCtrl = TextEditingController(text: member.phone ?? '');
-    final emailCtrl = TextEditingController(text: member.email ?? '');
     final notesCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
     var status = member.status;
@@ -1104,13 +1180,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               ),
                             ),
                             field(
-                              TextFormField(
-                                controller: emailCtrl,
-                                decoration: const InputDecoration(labelText: 'Email (optional)'),
-                                keyboardType: TextInputType.emailAddress,
-                              ),
-                            ),
-                            field(
                               DropdownButtonFormField<String>(
                                 key: ValueKey(status),
                                 initialValue: status,
@@ -1169,7 +1238,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     memberId: member.id,
                     fullName: fullNameCtrl.text,
                     phone: phoneCtrl.text,
-                    email: emailCtrl.text,
                     status: status,
                     notes: notesCtrl.text,
                   );
@@ -1192,7 +1260,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     fullNameCtrl.dispose();
     phoneCtrl.dispose();
-    emailCtrl.dispose();
     notesCtrl.dispose();
   }
 

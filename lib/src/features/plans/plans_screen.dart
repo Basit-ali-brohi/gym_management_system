@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
+import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -91,6 +92,68 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
 class PlansScreen extends ConsumerWidget {
   const PlansScreen({super.key});
 
+  Future<void> _openPlansPdfActions(BuildContext context, WidgetRef ref) async {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Plans PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runPlansPdf(context, ref, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runPlansPdf(context, ref, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runPlansPdf(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool preview,
+    required String today,
+  }) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/plans.pdf', token: token);
+      final name = 'plans_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final plansAsync = ref.watch(plansControllerProvider);
@@ -163,6 +226,12 @@ class PlansScreen extends ConsumerWidget {
               label: const Text('Add Plan'),
             ),
             const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'PDF',
+              onPressed: () => _openPlansPdfActions(context, ref),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
+            const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
               onPressed: () => ref.read(plansControllerProvider.notifier).load(),
@@ -285,59 +354,84 @@ class PlansScreen extends ConsumerWidget {
             return LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 900) {
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                  return Padding(
+                    padding: const EdgeInsets.all(12),
                     child: DataTable(
-                          columns: const [
-                            DataColumn(label: Text('Name')),
-                            DataColumn(label: Text('Duration')),
-                            DataColumn(label: Text('Price')),
-                            DataColumn(label: Text('Admission')),
-                            DataColumn(label: Text('Status')),
-                            DataColumn(label: Text('Action')),
-                          ],
-                          rows: [
-                            for (final p in items)
-                              DataRow(
-                                cells: [
-                                  DataCell(Text(p.name)),
-                                  DataCell(Text('${p.durationDays} days')),
-                                  DataCell(Text(number.format(p.price))),
-                                  DataCell(Text(number.format(p.admissionFee))),
-                                  DataCell(
-                                    canManage
-                                        ? _StatusToggleButton(
-                                            status: p.status,
-                                            onPressed: () => toggleStatus(p),
-                                          )
-                                        : _StatusChip(status: p.status),
-                                  ),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openViewPlan(context, p),
-                                          icon: const Icon(Icons.visibility),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Edit',
-                                          onPressed: () => _openEditPlan(context, ref, p),
-                                          icon: const Icon(Icons.edit_outlined),
-                                        ),
-                                        if (canManage)
-                                          IconButton(
-                                            tooltip: 'Delete',
-                                            onPressed: () => _confirmDelete(context, ref, p),
-                                            icon: const Icon(Icons.delete_outline),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                      columnSpacing: 18,
+                      horizontalMargin: 12,
+                      columns: const [
+                        DataColumn(label: Text('Name')),
+                        DataColumn(label: Text('Duration')),
+                        DataColumn(label: Text('Price')),
+                        DataColumn(label: Text('Admission')),
+                        DataColumn(label: Text('Status')),
+                        DataColumn(label: Text('Action')),
+                      ],
+                      rows: [
+                        for (final p in items)
+                          DataRow(
+                            cells: [
+                              DataCell(
+                                SizedBox(
+                                  width: 220,
+                                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                                ),
                               ),
-                          ],
+                              DataCell(SizedBox(width: 110, child: Text('${p.durationDays} days'))),
+                              DataCell(SizedBox(width: 110, child: Text(number.format(p.price)))),
+                              DataCell(SizedBox(width: 110, child: Text(number.format(p.admissionFee)))),
+                              DataCell(
+                                SizedBox(
+                                  width: 140,
+                                  child: canManage
+                                      ? _StatusToggleButton(
+                                          status: p.status,
+                                          onPressed: () => toggleStatus(p),
+                                        )
+                                      : _StatusChip(status: p.status),
+                                ),
+                              ),
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'View',
+                                      onPressed: () => _openViewPlan(context, p),
+                                      icon: const Icon(Icons.visibility),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                      iconSize: 20,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    IconButton(
+                                      tooltip: 'Edit',
+                                      onPressed: () => _openEditPlan(context, ref, p),
+                                      icon: const Icon(Icons.edit_outlined),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                      iconSize: 20,
+                                    ),
+                                    if (canManage) ...[
+                                      const SizedBox(width: 2),
+                                      IconButton(
+                                        tooltip: 'Delete',
+                                        onPressed: () => _confirmDelete(context, ref, p),
+                                        icon: const Icon(Icons.delete_outline),
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                        iconSize: 20,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
                   );
                 }

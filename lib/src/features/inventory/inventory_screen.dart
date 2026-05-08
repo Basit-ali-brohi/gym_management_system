@@ -264,6 +264,63 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     );
   }
 
+  Future<void> _openInventoryPdfActions(BuildContext context) async {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Inventory PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInventoryPdf(context, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInventoryPdf(context, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runInventoryPdf(BuildContext context, {required bool preview, required String today}) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/inventory.pdf', token: token);
+      final name = 'inventory_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -272,7 +329,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     final query = ref.watch(inventoryQueryProvider);
     final sort = ref.watch(inventorySortProvider);
     final itemsAsync = ref.watch(productsControllerProvider);
-    final roles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final rawRoles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final roles = rawRoles
+        .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
+        .where((r) => r.isNotEmpty)
+        .toSet();
     final canDelete = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
 
     if (_searchCtrl.text != query.q && !_searchFocus.hasFocus) {
@@ -507,6 +568,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                               ),
                             ),
                             const SizedBox(width: 10),
+                            IconButton(
+                              tooltip: 'PDF',
+                              onPressed: () => _openInventoryPdfActions(context),
+                              icon: const Icon(Icons.picture_as_pdf_outlined),
+                            ),
+                            const SizedBox(width: 6),
                             _HoverScaleButton(
                               child: FilledButton.icon(
                                 onPressed: () => _openAddProduct(context, ref),

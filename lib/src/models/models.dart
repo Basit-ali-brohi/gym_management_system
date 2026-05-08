@@ -167,6 +167,10 @@ class GymSettings {
     required this.enableAnimations,
     required this.address,
     required this.logoUrl,
+    required this.websiteUrl,
+    required this.facebookUrl,
+    required this.instagramUrl,
+    required this.whatsapp,
   });
 
   final String? gymName;
@@ -176,6 +180,10 @@ class GymSettings {
   final bool enableAnimations;
   final String? address;
   final String? logoUrl;
+  final String? websiteUrl;
+  final String? facebookUrl;
+  final String? instagramUrl;
+  final String? whatsapp;
 
   factory GymSettings.fromJson(Map<String, dynamic> json) {
     return GymSettings(
@@ -186,6 +194,10 @@ class GymSettings {
       enableAnimations: json['enableAnimations'] == true,
       address: json['address']?.toString(),
       logoUrl: json['logoUrl']?.toString(),
+      websiteUrl: json['websiteUrl']?.toString(),
+      facebookUrl: json['facebookUrl']?.toString(),
+      instagramUrl: json['instagramUrl']?.toString(),
+      whatsapp: json['whatsapp']?.toString(),
     );
   }
 }
@@ -340,6 +352,47 @@ class StaffUser {
       status: json['status']?.toString() ?? 'active',
       roles: (json['roles'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       createdAt: json['createdAt']?.toString() ?? '',
+    );
+  }
+}
+
+class Lead {
+  const Lead({
+    required this.id,
+    required this.fullName,
+    required this.phone,
+    required this.source,
+    required this.interest,
+    required this.nextContactDate,
+    required this.status,
+    required this.notes,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final int id;
+  final String fullName;
+  final String? phone;
+  final String? source;
+  final String? interest;
+  final String? nextContactDate;
+  final String status;
+  final String? notes;
+  final String createdAt;
+  final String updatedAt;
+
+  factory Lead.fromJson(Map<String, dynamic> json) {
+    return Lead(
+      id: (json['id'] as num).toInt(),
+      fullName: json['fullName']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      source: json['source']?.toString(),
+      interest: json['interest']?.toString(),
+      nextContactDate: json['nextContactDate']?.toString(),
+      status: json['status']?.toString() ?? 'new',
+      notes: json['notes']?.toString(),
+      createdAt: json['createdAt']?.toString() ?? '',
+      updatedAt: json['updatedAt']?.toString() ?? '',
     );
   }
 }

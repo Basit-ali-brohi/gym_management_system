@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
+import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/web_image_picker_stub.dart' if (dart.library.html) '../../core/web_image_picker_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -27,6 +29,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _taxCtrl = TextEditingController(text: '5');
   final _addressCtrl = TextEditingController();
   final _logoUrlCtrl = TextEditingController();
+  final _websiteCtrl = TextEditingController();
+  final _facebookCtrl = TextEditingController();
+  final _instagramCtrl = TextEditingController();
+  final _whatsappCtrl = TextEditingController();
 
   bool _enableSound = true;
   bool _enableAnimations = true;
@@ -39,6 +45,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _taxCtrl.dispose();
     _addressCtrl.dispose();
     _logoUrlCtrl.dispose();
+    _websiteCtrl.dispose();
+    _facebookCtrl.dispose();
+    _instagramCtrl.dispose();
+    _whatsappCtrl.dispose();
     super.dispose();
   }
 
@@ -62,6 +72,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _enableAnimations = s.enableAnimations;
           _addressCtrl.text = s.address ?? '';
           _logoUrlCtrl.text = s.logoUrl ?? '';
+          _websiteCtrl.text = s.websiteUrl ?? '';
+          _facebookCtrl.text = s.facebookUrl ?? '';
+          _instagramCtrl.text = s.instagramUrl ?? '';
+          _whatsappCtrl.text = s.whatsapp ?? '';
         });
       });
     }
@@ -80,6 +94,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     onPressed: () => _save(context),
                     icon: const Icon(Icons.save),
                     label: const Text('Save'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'PDF',
+                    onPressed: () => _openSettingsPdfActions(context),
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
                   ),
                 ],
               ),
@@ -158,11 +178,100 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 520,
+                            child: TextField(
+                              controller: _logoUrlCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Logo (URL or Upload)',
+                                prefixIcon: Icon(Icons.image_outlined),
+                              ),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              try {
+                                final dataUrl = await pickImageDataUrl(maxBytes: 250000);
+                                if (dataUrl == null) return;
+                                if (!mounted) return;
+                                setState(() => _logoUrlCtrl.text = dataUrl);
+                              } catch (e) {
+                                if (!mounted) return;
+                                final msg = e.toString().contains('file_too_large')
+                                    ? 'Logo too large (max 250KB).'
+                                    : 'Logo upload failed.';
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+                              }
+                            },
+                            icon: const Icon(Icons.upload_file),
+                            label: const Text('Upload Logo'),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() => _logoUrlCtrl.clear()),
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                      if (_logoUrlCtrl.text.trim().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              padding: const EdgeInsets.all(8),
+                              child: Image.network(
+                                _logoUrlCtrl.text.trim(),
+                                height: 56,
+                                width: 56,
+                                errorBuilder: (context, _, __) => const SizedBox(
+                                  height: 56,
+                                  width: 56,
+                                  child: Center(child: Icon(Icons.broken_image_outlined)),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      Text('Social Links', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 12),
                       TextField(
-                        controller: _logoUrlCtrl,
+                        controller: _websiteCtrl,
                         decoration: const InputDecoration(
-                          labelText: 'Logo URL',
-                          prefixIcon: Icon(Icons.image_outlined),
+                          labelText: 'Website',
+                          prefixIcon: Icon(Icons.public),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _facebookCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Facebook URL',
+                          prefixIcon: Icon(Icons.facebook),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _instagramCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Instagram URL',
+                          prefixIcon: Icon(Icons.camera_alt_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _whatsappCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'WhatsApp',
+                          prefixIcon: Icon(Icons.chat_outlined),
                         ),
                       ),
                     ],
@@ -235,6 +344,65 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  Future<void> _openSettingsPdfActions(BuildContext context) async {
+    final today = DateTime.now();
+    final date = '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Settings PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runSettingsPdf(context, preview: true, today: date);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runSettingsPdf(context, preview: false, today: date);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runSettingsPdf(BuildContext context, {required bool preview, required String today}) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/settings.pdf', token: token);
+      final name = 'settings_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
+  }
+
   Future<void> _save(BuildContext context) async {
     try {
       final token = ref.read(authControllerProvider).token;
@@ -249,6 +417,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'enableAnimations': _enableAnimations,
         'address': _addressCtrl.text.trim().isEmpty ? null : _addressCtrl.text.trim(),
         'logoUrl': _logoUrlCtrl.text.trim().isEmpty ? null : _logoUrlCtrl.text.trim(),
+        'websiteUrl': _websiteCtrl.text.trim().isEmpty ? null : _websiteCtrl.text.trim(),
+        'facebookUrl': _facebookCtrl.text.trim().isEmpty ? null : _facebookCtrl.text.trim(),
+        'instagramUrl': _instagramCtrl.text.trim().isEmpty ? null : _instagramCtrl.text.trim(),
+        'whatsapp': _whatsappCtrl.text.trim().isEmpty ? null : _whatsappCtrl.text.trim(),
       });
       ref.invalidate(settingsProvider);
       if (!context.mounted) return;

@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
+import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -185,6 +186,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
   bool _accessLoading = false;
   String _lastAccessQuery = '';
   final _dt = DateFormat('yyyy-MM-dd HH:mm');
+  final _date = DateFormat('yyyy-MM-dd');
 
   @override
   void initState() {
@@ -478,7 +480,22 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Attendance', style: theme.textTheme.headlineSmall),
+        Row(
+          children: [
+            Expanded(child: Text('Attendance', style: theme.textTheme.headlineSmall)),
+            IconButton(
+              tooltip: 'PDF',
+              onPressed: () => _openAttendancePdfActions(context),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
+            const SizedBox(width: 6),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: () => ref.read(attendanceControllerProvider.notifier).loadToday(),
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         Wrap(
           spacing: 12,
@@ -581,6 +598,64 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         ),
       ],
     );
+  }
+
+  Future<void> _openAttendancePdfActions(BuildContext context) async {
+    final today = _date.format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Attendance PDF'),
+          content: Text('Date: $today'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runAttendancePdf(context, preview: true, date: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runAttendancePdf(context, preview: false, date: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runAttendancePdf(BuildContext context, {required bool preview, required String date}) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/attendance.pdf', token: token, query: {'date': date});
+      final name = 'attendance_$date.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
   }
 
   Future<void> _checkIn(BuildContext context, Member member) async {

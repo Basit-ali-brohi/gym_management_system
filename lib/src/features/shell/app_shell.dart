@@ -66,11 +66,11 @@ class AppShell extends ConsumerWidget {
         context: context,
         builder: (context) {
           return AlertDialog(
-            title: const Text('Expiry Alerts (3 days)'),
+            title: const Text('Urgent Alerts (3 days)'),
             content: SizedBox(
               width: 420,
               child: items.isEmpty
-                  ? const Text('No expiring memberships.')
+                  ? const Text('No urgent alerts.')
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: items.length,
@@ -136,26 +136,53 @@ class AppShell extends ConsumerWidget {
     }
 
     final roleList = auth.user?.roles ?? const <String>[];
-    final canSeeRevenue = roleList.contains('owner') || roleList.contains('admin') || roleList.contains('super_admin');
-    final canManageStaff = roleList.contains('owner') || roleList.contains('admin') || roleList.contains('super_admin');
-    final canSeeSettings = roleList.contains('owner') || roleList.contains('admin') || roleList.contains('super_admin');
+    final roles = roleList
+        .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
+        .where((r) => r.isNotEmpty)
+        .toSet();
+    final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+    final canManageStaff = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+    final canSeeSettings = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+    final isReceptionistOnly = roles.contains('receptionist') && !canSeeRevenue;
+    final canSeeInventory = !isReceptionistOnly;
 
     final destinations = <_NavDestination>[
-      const _NavDestination('Dashboard', Icons.dashboard, '/dashboard'),
-      const _NavDestination('Members', Icons.people, '/members'),
-      const _NavDestination('Plans', Icons.card_membership, '/plans'),
-      const _NavDestination('Attendance', Icons.how_to_reg, '/attendance'),
-      if (canSeeRevenue) const _NavDestination('Invoices', Icons.receipt_long, '/invoices'),
-      if (canSeeRevenue) const _NavDestination('Payments', Icons.payments, '/payments'),
-      if (canSeeRevenue) const _NavDestination('Expenses', Icons.account_balance_wallet, '/expenses'),
-      const _NavDestination('Inventory', Icons.inventory_2, '/inventory'),
-      if (canSeeRevenue) const _NavDestination('Reports', Icons.bar_chart, '/reports'),
-      if (canManageStaff) const _NavDestination('Staff', Icons.badge, '/staff'),
-      if (canSeeSettings) const _NavDestination('Settings', Icons.settings, '/settings'),
+      const _NavDestination.header('Overview'),
+      const _NavDestination.item('Dashboard', Icons.dashboard, '/dashboard'),
+      const _NavDestination.header('CRM'),
+      const _NavDestination.item('Leads', Icons.person_search, '/leads'),
+      const _NavDestination.header('Members'),
+      const _NavDestination.item('Members', Icons.people, '/members'),
+      const _NavDestination.item('Plans', Icons.card_membership, '/plans'),
+      const _NavDestination.item('Attendance', Icons.how_to_reg, '/attendance'),
+      if (canSeeRevenue) ...[
+        const _NavDestination.header('Billing'),
+        const _NavDestination.item('Invoices', Icons.receipt_long, '/invoices'),
+        const _NavDestination.item('Payments', Icons.payments, '/payments'),
+        const _NavDestination.header('Finance'),
+        const _NavDestination.item('Expenses', Icons.account_balance_wallet, '/expenses'),
+        const _NavDestination.item('Reports', Icons.bar_chart, '/reports'),
+      ],
+      if (canSeeInventory) ...[
+        const _NavDestination.header('Operations'),
+        const _NavDestination.item('Inventory', Icons.inventory_2, '/inventory'),
+      ],
+      if (canManageStaff || canSeeSettings) ...[
+        const _NavDestination.header('Admin'),
+        if (canManageStaff) const _NavDestination.item('Staff', Icons.badge, '/staff'),
+        if (canSeeSettings) const _NavDestination.item('Settings', Icons.settings, '/settings'),
+      ],
     ];
 
-    final selectedIndex = destinations.indexWhere((d) => d.route == location);
-    final pageTitle = selectedIndex >= 0 ? destinations[selectedIndex].label : 'Dashboard';
+    _NavDestination? selected;
+    for (final d in destinations) {
+      if (d.isHeader) continue;
+      if (d.route == location) {
+        selected = d;
+        break;
+      }
+    }
+    final pageTitle = selected?.label ?? 'Dashboard';
 
     final userName = auth.user?.fullName ?? 'User';
     final initials = userName.trim().isEmpty
@@ -262,11 +289,16 @@ class AppShell extends ConsumerWidget {
 }
 
 class _NavDestination {
-  const _NavDestination(this.label, this.icon, this.route);
+  const _NavDestination._(this.label, this.icon, this.route, this.isHeader);
+
+  const _NavDestination.item(String label, IconData icon, String route) : this._(label, icon, route, false);
+
+  const _NavDestination.header(String label) : this._(label, null, null, true);
 
   final String label;
-  final IconData icon;
-  final String route;
+  final IconData? icon;
+  final String? route;
+  final bool isHeader;
 }
 
 class _AppDrawer extends StatelessWidget {
@@ -312,15 +344,24 @@ class _AppDrawer extends StatelessWidget {
             child: ListView(
               children: [
                 for (final d in destinations)
-                  ListTile(
-                    leading: Icon(d.icon),
-                    selected: selectedRoute == d.route,
-                    title: Text(d.label),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      onGo(d.route);
-                    },
-                  ),
+                  if (d.isHeader)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                      child: Text(
+                        d.label.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    )
+                  else
+                    ListTile(
+                      leading: Icon(d.icon),
+                      selected: selectedRoute == d.route,
+                      title: Text(d.label),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        onGo(d.route!);
+                      },
+                    ),
               ],
             ),
           ),
@@ -520,12 +561,24 @@ class _Sidebar extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               children: [
                 for (final d in destinations)
-                  _SidebarItem(
-                    icon: d.icon,
-                    label: d.label,
-                    selected: selectedRoute == d.route,
-                    onTap: () => onGo(d.route),
-                  ),
+                  if (d.isHeader)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(6, 12, 6, 6),
+                      child: Text(
+                        d.label.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    )
+                  else
+                    _SidebarItem(
+                      icon: d.icon!,
+                      label: d.label,
+                      selected: selectedRoute == d.route,
+                      onTap: () => onGo(d.route!),
+                    ),
               ],
             ),
           ),

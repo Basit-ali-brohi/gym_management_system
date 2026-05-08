@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
+import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -145,6 +146,69 @@ class _ExpensesController extends StateNotifier<AsyncValue<List<Expense>>> {
 class ExpensesScreen extends ConsumerWidget {
   const ExpensesScreen({super.key});
 
+  Future<void> _openExpensesPdfActions(BuildContext context, WidgetRef ref) async {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Expenses PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runExpensesPdf(context, ref, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runExpensesPdf(context, ref, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runExpensesPdf(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool preview,
+    required String today,
+  }) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/expenses.pdf', token: token);
+      final name = 'expenses_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -168,6 +232,12 @@ class ExpensesScreen extends ConsumerWidget {
                 label: const Text('Add'),
               ),
               const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'PDF',
+                onPressed: () => _openExpensesPdfActions(context, ref),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+              ),
+              const SizedBox(width: 6),
               IconButton(
                 tooltip: 'Refresh',
                 onPressed: () => ref.read(expensesControllerProvider.notifier).load(),

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
+import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../auth/auth_controller.dart';
 
 final dashboardSummaryProvider = FutureProvider.autoDispose<DashboardSummary>((ref) async {
@@ -150,11 +151,16 @@ class _DashboardScaffold extends ConsumerStatefulWidget {
 
 class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
   bool _hideExpiring = false;
+  bool _exportingPdf = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final roles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final rawRoles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
+    final roles = rawRoles
+        .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
+        .where((r) => r.isNotEmpty)
+        .toSet();
     final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
 
     return Stack(
@@ -166,6 +172,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
               _HeroBanner(
                 tenantSlug: widget.tenantSlug,
                 onRefresh: widget.onRefresh,
+                onExportPdf: () => _openDashboardPdfActions(context),
               ),
               const SizedBox(height: 16),
               widget.summaryAsync.when(
@@ -377,7 +384,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Expiry Alert (3 days)',
+                          'Urgent Alerts (3 days)',
                           style: theme.textTheme.titleSmall,
                         ),
                       ),
@@ -424,13 +431,76 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
       ),
     );
   }
+
+  Future<void> _openDashboardPdfActions(BuildContext context) async {
+    if (_exportingPdf) return;
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Dashboard PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runDashboardPdf(context, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runDashboardPdf(context, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runDashboardPdf(BuildContext context, {required bool preview, required String today}) async {
+    setState(() => _exportingPdf = true);
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/dashboard.pdf', token: token);
+      final name = 'dashboard_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
 }
 
 class _HeroBanner extends StatelessWidget {
-  const _HeroBanner({required this.tenantSlug, required this.onRefresh});
+  const _HeroBanner({required this.tenantSlug, required this.onRefresh, required this.onExportPdf});
 
   final String tenantSlug;
   final VoidCallback onRefresh;
+  final VoidCallback onExportPdf;
 
   @override
   Widget build(BuildContext context) {
@@ -522,10 +592,20 @@ class _HeroBanner extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(
-                        tooltip: 'Refresh',
-                        onPressed: onRefresh,
-                        icon: const Icon(Icons.refresh),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Refresh',
+                            onPressed: onRefresh,
+                            icon: const Icon(Icons.refresh),
+                          ),
+                          IconButton(
+                            tooltip: 'PDF',
+                            onPressed: onExportPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                          ),
+                        ],
                       ),
                       Container(
                         padding: const EdgeInsets.all(14),

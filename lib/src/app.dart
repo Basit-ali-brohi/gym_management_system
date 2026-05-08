@@ -10,6 +10,7 @@ import 'features/billing/invoices_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/expenses/expenses_screen.dart';
 import 'features/inventory/inventory_screen.dart';
+import 'features/leads/leads_screen.dart';
 import 'features/members/members_screen.dart';
 import 'features/payments/payments_screen.dart';
 import 'features/plans/plans_screen.dart';
@@ -42,6 +43,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (auth.isLoading) return null;
       if (!auth.isAuthenticated && !isLoggingIn) return '/login';
       if (auth.isAuthenticated && isLoggingIn) return '/dashboard';
+
+      final location = state.matchedLocation;
+      final roleList = auth.user?.roles ?? const <String>[];
+      final roles = roleList
+          .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
+          .where((r) => r.isNotEmpty)
+          .toSet();
+      final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+      final canManageStaff = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+      final canSeeSettings = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+      final isReceptionistOnly = roles.contains('receptionist') && !canSeeRevenue;
+      final canSeeInventory = !isReceptionistOnly;
+
+      if (!canSeeRevenue && (location == '/invoices' || location == '/payments' || location == '/expenses' || location == '/reports')) {
+        return '/dashboard';
+      }
+      if (!canSeeInventory && location == '/inventory') return '/dashboard';
+      if (!canManageStaff && location == '/staff') return '/dashboard';
+      if (!canSeeSettings && location == '/settings') return '/dashboard';
       return null;
     },
     routes: [
@@ -55,6 +75,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/dashboard',
             pageBuilder: (context, state) => _fadePage(state, const DashboardScreen()),
+          ),
+          GoRoute(
+            path: '/leads',
+            pageBuilder: (context, state) => _fadePage(state, const LeadsScreen()),
           ),
           GoRoute(
             path: '/members',

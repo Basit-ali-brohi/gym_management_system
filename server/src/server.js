@@ -43,6 +43,29 @@ const requireRole = (...roles) => {
   };
 };
 
+const buildStamp = new Date().toISOString();
+const pdfRoutePaths = [
+  '/pdf/dashboard.pdf',
+  '/pdf/leads.pdf',
+  '/pdf/members.pdf',
+  '/pdf/plans.pdf',
+  '/pdf/attendance.pdf',
+  '/pdf/inventory.pdf',
+  '/pdf/invoices.pdf',
+  '/pdf/payments.pdf',
+  '/pdf/expenses.pdf',
+  '/pdf/staff.pdf',
+  '/pdf/settings.pdf'
+];
+
+app.get('/', (req, res) => {
+  return res.json({ ok: true, service: 'gym-management-saas-api', buildStamp });
+});
+
+app.get('/__version', (req, res) => {
+  return res.json({ ok: true, service: 'gym-management-saas-api', buildStamp, pdfRoutes: pdfRoutePaths });
+});
+
 const addDays = (date, days) => {
   const d = new Date(date);
   d.setDate(d.getDate() + Number(days));
@@ -58,6 +81,56 @@ const toDateOnly = (d) => {
 
 const toMysqlDateTime = (d) => {
   return d.toISOString().slice(0, 19).replace('T', ' ');
+};
+
+const fmtDateOnlyStr = (raw) => {
+  if (raw == null) return '';
+  const s = String(raw);
+  const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+  if (m) return m[0];
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return toDateOnly(d);
+  return s;
+};
+
+const fmtDateTimeShort = (raw) => {
+  if (raw == null) return '';
+  const s = String(raw);
+  const iso = s.replace('T', ' ');
+  const m = iso.match(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/);
+  if (m) return m[0];
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${toDateOnly(d)} ${hh}:${mm}`;
+};
+
+const pdfDrawRow = (
+  doc,
+  cols,
+  { y = null, rowHeight = 14, fontSize = 10, color = '#000000', bottomPadding = 8, onNewPage = null } = {}
+) => {
+  const pageHeight = Number(doc.page.height ?? 842);
+  const bottomMargin = Number(doc.page.margins.bottom ?? 40);
+  const bottomY = pageHeight - bottomMargin - Number(bottomPadding ?? 0);
+
+  let rowY = y ?? doc.y;
+  if (rowY + rowHeight > bottomY) {
+    doc.addPage();
+    if (typeof onNewPage === 'function') onNewPage(doc);
+    rowY = y ?? doc.y;
+  }
+  doc.fontSize(fontSize).fillColor(color);
+  for (const c of cols) {
+    const text = c?.text == null ? '' : String(c.text);
+    const x = Number(c?.x ?? 0);
+    const width = Number(c?.width ?? 0);
+    const align = c?.align ?? 'left';
+    doc.text(text, x, rowY, { width, align, ellipsis: true, lineBreak: false });
+  }
+  doc.fillColor('#000000');
+  doc.y = rowY + rowHeight;
 };
 
 const newInvoiceNo = () => {
@@ -147,7 +220,11 @@ const ensureOperationalTables = async () => {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       tenant_id BIGINT UNSIGNED NOT NULL,
       address VARCHAR(255) NULL,
-      logo_url VARCHAR(255) NULL,
+      logo_url MEDIUMTEXT NULL,
+      website_url VARCHAR(255) NULL,
+      facebook_url VARCHAR(255) NULL,
+      instagram_url VARCHAR(255) NULL,
+      whatsapp VARCHAR(64) NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -155,6 +232,64 @@ const ensureOperationalTables = async () => {
       CONSTRAINT fk_gym_profile_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;`
   );
+  try {
+    const websiteCol = await queryOne("SHOW COLUMNS FROM gym_profile LIKE 'website_url'");
+    if (!websiteCol) await execute("ALTER TABLE gym_profile ADD COLUMN website_url VARCHAR(255) NULL");
+  } catch {}
+  try {
+    const facebookCol = await queryOne("SHOW COLUMNS FROM gym_profile LIKE 'facebook_url'");
+    if (!facebookCol) await execute("ALTER TABLE gym_profile ADD COLUMN facebook_url VARCHAR(255) NULL");
+  } catch {}
+  try {
+    const instagramCol = await queryOne("SHOW COLUMNS FROM gym_profile LIKE 'instagram_url'");
+    if (!instagramCol) await execute("ALTER TABLE gym_profile ADD COLUMN instagram_url VARCHAR(255) NULL");
+  } catch {}
+  try {
+    const whatsappCol = await queryOne("SHOW COLUMNS FROM gym_profile LIKE 'whatsapp'");
+    if (!whatsappCol) await execute("ALTER TABLE gym_profile ADD COLUMN whatsapp VARCHAR(64) NULL");
+  } catch {}
+  try {
+    await execute("ALTER TABLE gym_profile MODIFY COLUMN logo_url MEDIUMTEXT NULL");
+  } catch {}
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS leads (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      full_name VARCHAR(191) NOT NULL,
+      phone VARCHAR(32) NULL,
+      source VARCHAR(64) NULL,
+      interest VARCHAR(191) NULL,
+      next_contact_date DATE NULL,
+      status ENUM('new','trial','converted','lost') NOT NULL DEFAULT 'new',
+      notes VARCHAR(255) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY ix_leads_tenant (tenant_id),
+      KEY ix_leads_status (status),
+      KEY ix_leads_created (created_at),
+      CONSTRAINT fk_leads_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB;`
+  );
+
+  try {
+    const interestCol = await queryOne("SHOW COLUMNS FROM leads LIKE 'interest'");
+    if (!interestCol) await execute("ALTER TABLE leads ADD COLUMN interest VARCHAR(191) NULL");
+  } catch {}
+  try {
+    const nextContactCol = await queryOne("SHOW COLUMNS FROM leads LIKE 'next_contact_date'");
+    if (!nextContactCol) await execute("ALTER TABLE leads ADD COLUMN next_contact_date DATE NULL");
+  } catch {}
+  try {
+    await execute("ALTER TABLE leads MODIFY COLUMN status ENUM('new','contacted','trial','converted','lost') NOT NULL DEFAULT 'new'");
+  } catch {}
+  try {
+    await execute("UPDATE leads SET status = 'trial' WHERE status = 'contacted'");
+  } catch {}
+  try {
+    await execute("ALTER TABLE leads MODIFY COLUMN status ENUM('new','trial','converted','lost') NOT NULL DEFAULT 'new'");
+  } catch {}
 
   await execute(
     `CREATE TABLE IF NOT EXISTS system_logs (
@@ -177,6 +312,86 @@ const ensureOperationalTables = async () => {
       CONSTRAINT fk_system_logs_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;`
   );
+};
+
+const decodeLogoDataUrl = (logoUrl) => {
+  const raw = typeof logoUrl === 'string' ? logoUrl.trim() : '';
+  if (!raw.startsWith('data:image/')) return null;
+  const commaIdx = raw.indexOf(',');
+  if (commaIdx < 0) return null;
+  const meta = raw.slice(5, commaIdx);
+  const b64 = raw.slice(commaIdx + 1);
+  if (!meta.includes(';base64')) return null;
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    if (!buf || buf.length === 0) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+};
+
+const loadGymProfileForTenant = async (tenantId) => {
+  const tenant = await queryOne('SELECT name FROM tenants WHERE id = :tenantId LIMIT 1', { tenantId });
+  const profile = await queryOne(
+    `SELECT address, logo_url, website_url, facebook_url, instagram_url, whatsapp
+     FROM gym_profile
+     WHERE tenant_id = :tenantId
+     LIMIT 1`,
+    { tenantId }
+  );
+  return {
+    gymName: tenant?.name ?? null,
+    address: profile?.address ?? null,
+    logoUrl: profile?.logo_url ?? null,
+    websiteUrl: profile?.website_url ?? null,
+    facebookUrl: profile?.facebook_url ?? null,
+    instagramUrl: profile?.instagram_url ?? null,
+    whatsapp: profile?.whatsapp ?? null
+  };
+};
+
+const drawGymPdfHeader = (doc, profile, { title = null, subtitle = null } = {}) => {
+  const startX = doc.page.margins.left ?? 40;
+  const startY = doc.y;
+  const maxX = doc.page.width - (doc.page.margins.right ?? 40);
+  const logoBuf = decodeLogoDataUrl(profile?.logoUrl);
+
+  const textX = logoBuf ? startX + 64 : startX;
+  const headerRightX = maxX;
+
+  if (logoBuf) {
+    try {
+      doc.image(logoBuf, startX, startY, { width: 52, height: 52 });
+    } catch {}
+  }
+
+  if (profile?.gymName) {
+    doc.fontSize(14).text(String(profile.gymName), textX, startY, { width: 320 });
+  } else {
+    doc.fontSize(14).text('Gym', textX, startY, { width: 320 });
+  }
+  doc.fontSize(9).fillColor('#555555');
+  if (profile?.address) doc.text(String(profile.address), textX, doc.y, { width: 320 });
+  const socials = [
+    profile?.websiteUrl ? `Web: ${profile.websiteUrl}` : null,
+    profile?.facebookUrl ? `FB: ${profile.facebookUrl}` : null,
+    profile?.instagramUrl ? `IG: ${profile.instagramUrl}` : null,
+    profile?.whatsapp ? `WhatsApp: ${profile.whatsapp}` : null
+  ].filter(Boolean);
+  if (socials.length) doc.text(socials.join('  •  '), textX, doc.y, { width: 440 });
+  doc.fillColor('#000000');
+
+  if (title) {
+    doc.fontSize(16).text(String(title), startX, startY, { align: 'right' });
+  }
+  if (subtitle) {
+    doc.fontSize(9).fillColor('#555555').text(String(subtitle), startX, doc.y, { align: 'right' });
+    doc.fillColor('#000000');
+  }
+
+  doc.y = Math.max(doc.y, startY + 64);
+  doc.moveDown(0.4);
 };
 
 const appendSystemLog = async (
@@ -305,6 +520,64 @@ class MemberRepository {
        LIMIT :limit`,
       params
     );
+  }
+}
+
+class LeadRepository {
+  async list(tenantId, { q = '', status = '', limit = 200 } = {}) {
+    const where = ['l.tenant_id = :tenantId'];
+    const params = { tenantId, limit };
+    if (q?.length) {
+      where.push('(l.full_name LIKE :q OR l.phone LIKE :q OR l.source LIKE :q OR l.interest LIKE :q OR l.notes LIKE :q)');
+      params.q = `%${q}%`;
+    }
+    if (status === 'new' || status === 'trial' || status === 'converted' || status === 'lost') {
+      where.push('l.status = :status');
+      params.status = status;
+    }
+    return queryMany(
+      `SELECT l.id, l.full_name, l.phone, l.source, l.interest, l.next_contact_date, l.status, l.notes, l.created_at, l.updated_at
+       FROM leads l
+       WHERE ${where.join(' AND ')}
+       ORDER BY l.id DESC
+       LIMIT :limit`,
+      params
+    );
+  }
+
+  async create(
+    tenantId,
+    { fullName, phone = null, source = null, interest = null, nextContactDate = null, status = 'new', notes = null }
+  ) {
+    const result = await execute(
+      `INSERT INTO leads (tenant_id, full_name, phone, source, interest, next_contact_date, status, notes)
+       VALUES (:tenantId, :fullName, :phone, :source, :interest, :nextContactDate, :status, :notes)`,
+      { tenantId, fullName, phone, source, interest, nextContactDate, status, notes }
+    );
+    return Number(result.insertId);
+  }
+
+  async update(
+    tenantId,
+    id,
+    { fullName, phone = null, source = null, interest = null, nextContactDate = null, status = 'new', notes = null }
+  ) {
+    await execute(
+      `UPDATE leads
+       SET full_name = :fullName,
+           phone = :phone,
+           source = :source,
+           interest = :interest,
+           next_contact_date = :nextContactDate,
+           status = :status,
+           notes = :notes
+       WHERE tenant_id = :tenantId AND id = :id`,
+      { tenantId, id, fullName, phone, source, interest, nextContactDate, status, notes }
+    );
+  }
+
+  async remove(tenantId, id) {
+    await execute('DELETE FROM leads WHERE tenant_id = :tenantId AND id = :id', { tenantId, id });
   }
 }
 
@@ -977,7 +1250,7 @@ app.post('/dev/seed', async (req, res) => {
       tenant = { id: Number(result.insertId), slug: tenantSlug, name: tenantName };
     }
 
-    const defaultRoles = ['owner', 'admin', 'staff'];
+    const defaultRoles = ['owner', 'admin', 'staff', 'receptionist'];
     for (const roleName of defaultRoles) {
       await conn.query(
         'INSERT IGNORE INTO roles (tenant_id, name) VALUES (:tenantId, :name)',
@@ -1319,7 +1592,46 @@ app.post('/auth/login', async (req, res) => {
      WHERE ur.user_id = :userId`,
     { userId: Number(user.id) }
   );
-  const roleNames = roles.map((r) => r.name);
+  let roleNames = roles.map((r) => r.name);
+  if (roleNames.length === 0) {
+    const hasOwner = await queryOne(
+      `SELECT 1 AS ok
+       FROM user_roles ur
+       INNER JOIN roles r ON r.id = ur.role_id
+       INNER JOIN users u ON u.id = ur.user_id
+       WHERE u.tenant_id = :tenantId AND r.name = 'owner'
+       LIMIT 1`,
+      { tenantId: Number(tenant.id) }
+    );
+    if (!hasOwner?.ok) {
+      const oldestUser = await queryOne(
+        `SELECT id
+         FROM users
+         WHERE tenant_id = :tenantId
+         ORDER BY id ASC
+         LIMIT 1`,
+        { tenantId: Number(tenant.id) }
+      );
+      if (Number(oldestUser?.id) === Number(user.id)) {
+        await execute(
+          `INSERT IGNORE INTO roles (tenant_id, name)
+           VALUES (:tenantId, 'owner'), (:tenantId, 'admin'), (:tenantId, 'staff')`,
+          { tenantId: Number(tenant.id) }
+        );
+        const ownerRole = await queryOne(
+          'SELECT id FROM roles WHERE tenant_id = :tenantId AND name = :name LIMIT 1',
+          { tenantId: Number(tenant.id), name: 'owner' }
+        );
+        if (ownerRole?.id) {
+          await execute('INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (:userId, :roleId)', {
+            userId: Number(user.id),
+            roleId: Number(ownerRole.id)
+          });
+          roleNames = ['owner'];
+        }
+      }
+    }
+  }
   const token = signToken({ tid: Number(tenant.id), uid: Number(user.id), roles: roleNames });
 
   return res.json({
@@ -1338,6 +1650,7 @@ await ensureOperationalTables();
 
 const planRepo = new PlanRepository();
 const memberRepo = new MemberRepository();
+const leadRepo = new LeadRepository();
 const subRepo = new SubscriptionRepository();
 const invoiceRepo = new InvoiceRepository();
 const attendanceRepo = new AttendanceRepository();
@@ -1418,6 +1731,46 @@ setInterval(() => {
   );
 }, 24 * 60 * 60 * 1000);
 
+const runExpirySoonAlertJob = async () => {
+  const tenants = await queryMany('SELECT id FROM tenants WHERE status = \'active\'');
+  for (const t of tenants) {
+    const tenantId = Number(t.id);
+    if (!Number.isFinite(tenantId) || tenantId <= 0) continue;
+    const row = await queryOne(
+      `SELECT COUNT(*) AS c
+       FROM subscriptions s
+       INNER JOIN members m ON m.id = s.member_id
+       WHERE s.tenant_id = :tenantId
+         AND s.status = 'active'
+         AND m.status = 'active'
+         AND s.end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)`,
+      { tenantId }
+    );
+    const c = Number(row?.c ?? 0);
+    if (c <= 0) continue;
+    process.stdout.write(`[alerts] tenant=${tenantId} expiring_in_3_days=${c}\n`);
+    await appendSystemLog({
+      tenantId,
+      actorUserId: null,
+      action: 'membership_expiry_soon',
+      entityType: 'subscription',
+      entityId: null,
+      meta: { count: c }
+    });
+  }
+};
+
+runExpirySoonAlertJob().then(
+  () => {},
+  () => {}
+);
+setInterval(() => {
+  runExpirySoonAlertJob().then(
+    () => {},
+    () => {}
+  );
+}, 24 * 60 * 60 * 1000);
+
 app.get('/auth/me', authMiddleware, async (req, res) => {
   const user = await queryOne(
     'SELECT id, email, full_name, status FROM users WHERE id = :id AND tenant_id = :tenantId',
@@ -1434,22 +1787,19 @@ app.get('/auth/me', authMiddleware, async (req, res) => {
 
 app.get('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const row = await settingsRepo.getOrCreate(req.user.tenantId);
-  const tenant = await queryOne('SELECT name FROM tenants WHERE id = :tenantId LIMIT 1', { tenantId: req.user.tenantId });
-  const profile = await queryOne(
-    `SELECT address, logo_url
-     FROM gym_profile
-     WHERE tenant_id = :tenantId
-     LIMIT 1`,
-    { tenantId: req.user.tenantId }
-  );
+  const profile = await loadGymProfileForTenant(req.user.tenantId);
   return res.json({
-    gymName: tenant?.name ?? null,
+    gymName: profile.gymName,
     currency: row.currency,
     defaultTaxPercent: Number(row.default_tax_percent ?? 0),
     enableSounds: Boolean(row.enable_sounds),
     enableAnimations: Boolean(row.enable_animations),
-    address: profile?.address ?? null,
-    logoUrl: profile?.logo_url ?? null
+    address: profile.address,
+    logoUrl: profile.logoUrl,
+    websiteUrl: profile.websiteUrl,
+    facebookUrl: profile.facebookUrl,
+    instagramUrl: profile.instagramUrl,
+    whatsapp: profile.whatsapp
   });
 });
 
@@ -1461,7 +1811,11 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
     enableSounds: z.boolean().optional().default(true),
     enableAnimations: z.boolean().optional().default(true),
     address: z.string().max(255).optional().nullable(),
-    logoUrl: z.string().max(255).optional().nullable()
+    logoUrl: z.string().max(60000).optional().nullable(),
+    websiteUrl: z.string().max(255).optional().nullable(),
+    facebookUrl: z.string().max(255).optional().nullable(),
+    instagramUrl: z.string().max(255).optional().nullable(),
+    whatsapp: z.string().max(64).optional().nullable()
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -1470,13 +1824,23 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
   }
   const updated = await settingsRepo.update(req.user.tenantId, parsed.data);
   await execute(
-    `INSERT INTO gym_profile (tenant_id, address, logo_url)
-     VALUES (:tenantId, :address, :logoUrl)
-     ON DUPLICATE KEY UPDATE address = :address, logo_url = :logoUrl`,
+    `INSERT INTO gym_profile (tenant_id, address, logo_url, website_url, facebook_url, instagram_url, whatsapp)
+     VALUES (:tenantId, :address, :logoUrl, :websiteUrl, :facebookUrl, :instagramUrl, :whatsapp)
+     ON DUPLICATE KEY UPDATE
+       address = :address,
+       logo_url = :logoUrl,
+       website_url = :websiteUrl,
+       facebook_url = :facebookUrl,
+       instagram_url = :instagramUrl,
+       whatsapp = :whatsapp`,
     {
       tenantId: req.user.tenantId,
       address: parsed.data.address ?? null,
-      logoUrl: parsed.data.logoUrl ?? null
+      logoUrl: parsed.data.logoUrl ?? null,
+      websiteUrl: parsed.data.websiteUrl ?? null,
+      facebookUrl: parsed.data.facebookUrl ?? null,
+      instagramUrl: parsed.data.instagramUrl ?? null,
+      whatsapp: parsed.data.whatsapp ?? null
     }
   );
   await appendSystemLog({
@@ -1496,7 +1860,11 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
     enableSounds: Boolean(updated.enable_sounds),
     enableAnimations: Boolean(updated.enable_animations),
     address: parsed.data.address ?? null,
-    logoUrl: parsed.data.logoUrl ?? null
+    logoUrl: parsed.data.logoUrl ?? null,
+    websiteUrl: parsed.data.websiteUrl ?? null,
+    facebookUrl: parsed.data.facebookUrl ?? null,
+    instagramUrl: parsed.data.instagramUrl ?? null,
+    whatsapp: parsed.data.whatsapp ?? null
   });
 });
 
@@ -1699,7 +2067,7 @@ app.delete('/expenses/:id', authMiddleware, requireRole('owner', 'admin'), async
   return res.json({ ok: true });
 });
 
-app.get('/products', authMiddleware, async (req, res) => {
+app.get('/products', authMiddleware, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
   const lowStock = String(req.query.lowStock ?? '').toLowerCase() === 'true';
@@ -2023,7 +2391,11 @@ app.post('/staff', authMiddleware, requireRole('owner', 'admin'), async (req, re
     email: z.string().email().max(191),
     fullName: z.string().min(2).max(191),
     password: z.string().min(6).max(191),
-    roles: z.array(z.enum(['owner', 'admin', 'staff', 'super_admin'])).min(1).max(3).optional().default(['staff'])
+    roles: z.array(z.enum(['owner', 'admin', 'staff', 'receptionist', 'super_admin']))
+      .min(1)
+      .max(3)
+      .optional()
+      .default(['staff'])
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -2039,7 +2411,7 @@ app.put('/staff/:id/roles', authMiddleware, requireRole('owner', 'admin'), async
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_request' });
   const bodySchema = z.object({
-    roles: z.array(z.enum(['owner', 'admin', 'staff', 'super_admin'])).min(1).max(3)
+    roles: z.array(z.enum(['owner', 'admin', 'staff', 'receptionist', 'super_admin'])).min(1).max(3)
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -2130,7 +2502,7 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
      WHERE s.tenant_id = :tenantId
        AND s.status = 'active'
        AND m.status = 'active'
-       AND s.end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 5 DAY)
+       AND s.end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
      ORDER BY s.end_date ASC
      LIMIT 10`,
     { tenantId }
@@ -2172,6 +2544,120 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
       daysLeft: Number(r.days_left)
     }))
   });
+});
+
+app.get('/leads', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+  const rows = await leadRepo.list(req.user.tenantId, { q, status, limit });
+  return res.json({
+    items: rows.map((r) => ({
+      id: Number(r.id),
+      fullName: r.full_name,
+      phone: r.phone ?? null,
+      source: r.source ?? null,
+      interest: r.interest ?? null,
+      nextContactDate: r.next_contact_date ?? null,
+      status: r.status,
+      notes: r.notes ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }))
+  });
+});
+
+app.post('/leads', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const bodySchema = z.object({
+    fullName: z.string().min(2).max(191),
+    phone: z.string().max(32).optional().nullable(),
+    source: z.string().max(64).optional().nullable(),
+    interest: z.string().max(191).optional().nullable(),
+    nextContactDate: z.string().min(10).max(10).optional().nullable(),
+    status: z.enum(['new', 'trial', 'converted', 'lost']).optional().default('new'),
+    notes: z.string().max(255).optional().nullable()
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+  const id = await leadRepo.create(req.user.tenantId, {
+    fullName: parsed.data.fullName,
+    phone: parsed.data.phone ?? null,
+    source: parsed.data.source ?? null,
+    interest: parsed.data.interest ?? null,
+    nextContactDate: parsed.data.nextContactDate ?? null,
+    status: parsed.data.status,
+    notes: parsed.data.notes ?? null
+  });
+  await appendSystemLog({
+    tenantId: req.user.tenantId,
+    actorUserId: req.user.userId,
+    action: 'lead_create',
+    entityType: 'lead',
+    entityId: id,
+    meta: { fullName: parsed.data.fullName, status: parsed.data.status },
+    ip: req.ip,
+    userAgent: req.headers['user-agent']?.toString() ?? null
+  });
+  return res.status(201).json({ id });
+});
+
+app.patch('/leads/:id', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_request' });
+  const bodySchema = z.object({
+    fullName: z.string().min(2).max(191),
+    phone: z.string().max(32).optional().nullable(),
+    source: z.string().max(64).optional().nullable(),
+    interest: z.string().max(191).optional().nullable(),
+    nextContactDate: z.string().min(10).max(10).optional().nullable(),
+    status: z.enum(['new', 'trial', 'converted', 'lost']).optional().default('new'),
+    notes: z.string().max(255).optional().nullable()
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+
+  const exists = await queryOne('SELECT id FROM leads WHERE tenant_id = :tenantId AND id = :id', { tenantId, id });
+  if (!exists) return res.status(404).json({ error: 'lead_not_found' });
+
+  await leadRepo.update(tenantId, id, {
+    fullName: parsed.data.fullName,
+    phone: parsed.data.phone ?? null,
+    source: parsed.data.source ?? null,
+    interest: parsed.data.interest ?? null,
+    nextContactDate: parsed.data.nextContactDate ?? null,
+    status: parsed.data.status,
+    notes: parsed.data.notes ?? null
+  });
+  await appendSystemLog({
+    tenantId: req.user.tenantId,
+    actorUserId: req.user.userId,
+    action: 'lead_update',
+    entityType: 'lead',
+    entityId: id,
+    meta: { status: parsed.data.status },
+    ip: req.ip,
+    userAgent: req.headers['user-agent']?.toString() ?? null
+  });
+  return res.json({ ok: true });
+});
+
+app.delete('/leads/:id', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_request' });
+  await leadRepo.remove(tenantId, id);
+  await appendSystemLog({
+    tenantId: req.user.tenantId,
+    actorUserId: req.user.userId,
+    action: 'lead_delete',
+    entityType: 'lead',
+    entityId: id,
+    meta: null,
+    ip: req.ip,
+    userAgent: req.headers['user-agent']?.toString() ?? null
+  });
+  return res.json({ ok: true });
 });
 
 app.get('/members', authMiddleware, async (req, res) => {
@@ -3002,13 +3488,14 @@ app.patch('/invoices/:id', authMiddleware, requireRole('owner', 'admin'), async 
   return res.json({ ok: true, total });
 });
 
-app.get('/invoices/:id/pdf', authMiddleware, async (req, res) => {
+app.get('/invoices/:id/pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const tenantId = req.user.tenantId;
   const invoiceId = Number(req.params.id);
   if (!Number.isFinite(invoiceId) || invoiceId <= 0) return res.status(400).json({ error: 'invalid_request' });
 
   const inv = await invoiceRepo.getById(tenantId, invoiceId);
   if (!inv) return res.status(404).json({ error: 'invoice_not_found' });
+  const profile = await loadGymProfileForTenant(tenantId);
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${inv.invoice_no}.pdf"`);
@@ -3016,11 +3503,10 @@ app.get('/invoices/:id/pdf', authMiddleware, async (req, res) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(res);
 
-  doc.fontSize(18).text('INVOICE', { align: 'right' });
-  doc.moveDown(0.4);
-  doc.fontSize(10).fillColor('#555555').text(`Invoice No: ${inv.invoice_no}`, { align: 'right' });
-  doc.text(`Date: ${toDateOnly(new Date(inv.created_at))}`, { align: 'right' });
-  doc.fillColor('#000000');
+  drawGymPdfHeader(doc, profile, {
+    title: 'INVOICE',
+    subtitle: `Invoice No: ${inv.invoice_no}  •  Date: ${toDateOnly(new Date(inv.created_at))}`
+  });
 
   doc.moveDown(1.2);
   doc.fontSize(14).text('Bill To', { underline: true });
@@ -3060,7 +3546,7 @@ app.get('/invoices/:id/pdf', authMiddleware, async (req, res) => {
   doc.end();
 });
 
-app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
+app.get('/reports/monthly-revenue.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const tenantId = req.user.tenantId;
   const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
   const validMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : toDateOnly(new Date()).slice(0, 7);
@@ -3070,6 +3556,7 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
   const endDate = new Date(year, month, 0);
   const end = toDateOnly(endDate);
 
+  const profile = await loadGymProfileForTenant(tenantId);
   const rows = await queryMany(
     `SELECT i.invoice_no, i.total, i.created_at, m.full_name, m.member_code
      FROM invoices i
@@ -3082,6 +3569,23 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
     { tenantId, start, end }
   );
   const total = rows.reduce((sum, r) => sum + Number(r.total ?? 0), 0);
+  const collectedRow = await queryOne(
+    `SELECT COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND DATE(paid_at) BETWEEN :start AND :end`,
+    { tenantId, start, end }
+  );
+  const expensesRow = await queryOne(
+    `SELECT COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE tenant_id = :tenantId
+       AND expense_date BETWEEN :start AND :end`,
+    { tenantId, start, end }
+  );
+  const totalCollected = Number(collectedRow?.s ?? 0);
+  const totalExpenses = Number(expensesRow?.s ?? 0);
+  const netProfit = Number((totalCollected - totalExpenses).toFixed(2));
 
   const byDayRows = await queryMany(
     `SELECT DATE(created_at) AS d, COALESCE(SUM(total), 0) AS s
@@ -3099,13 +3603,17 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(res);
 
-  doc.fontSize(18).text('Monthly Revenue Report', { align: 'left' });
-  doc.moveDown(0.2);
-  doc.fontSize(10).fillColor('#555555').text(`Month: ${validMonth}  •  Range: ${start} → ${end}`);
-  doc.fillColor('#000000');
-  doc.moveDown(0.8);
+  drawGymPdfHeader(doc, profile, {
+    title: 'Revenue Report',
+    subtitle: `Month: ${validMonth}  •  Range: ${start} → ${end}`
+  });
+  doc.moveDown(0.4);
 
-  doc.fontSize(12).text(`Total Paid Revenue: ${Number(total).toFixed(2)}`, { align: 'left' });
+  doc.fontSize(12).text(`Total Collected: ${totalCollected.toFixed(2)}`, { align: 'left' });
+  doc.fontSize(12).text(`Total Expenses: ${totalExpenses.toFixed(2)}`, { align: 'left' });
+  doc.fontSize(12).text(`Net Profit: ${netProfit.toFixed(2)}`, { align: 'left' });
+  doc.moveDown(0.6);
+  doc.fontSize(10).fillColor('#555555').text(`Paid Invoices Total: ${Number(total).toFixed(2)}`);
   doc.moveDown(0.8);
 
   doc.fontSize(12).text('Daily Totals', { underline: true });
@@ -3121,20 +3629,42 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
 
   const startX = 40;
   const rightX = 555;
-  doc.fontSize(10).fillColor('#555555');
-  doc.text('Invoice', startX, doc.y, { continued: true });
-  doc.text('Member', startX + 90, doc.y, { continued: true });
-  doc.text('Total', 0, doc.y, { align: 'right' });
-  doc.fillColor('#000000');
-  doc.moveDown(0.3);
-  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
-  doc.moveDown(0.5);
+  const drawPaidInvoicesHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Invoice', x: startX, width: 90 },
+        { text: 'Member', x: startX + 95, width: 330 },
+        { text: 'Total', x: startX + 430, width: 85, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawRevenuePaidInvoicesPage = () => {
+    drawGymPdfHeader(doc, profile, {
+      title: 'Revenue Report',
+      subtitle: `Month: ${validMonth}  •  Range: ${start} → ${end}`
+    });
+    doc.moveDown(0.8);
+    doc.fontSize(12).text('Paid Invoices (cont.)', { underline: true });
+    doc.moveDown(0.4);
+    drawPaidInvoicesHeader();
+  };
+  drawPaidInvoicesHeader();
 
   for (const r of rows) {
-    if (doc.y > 760) doc.addPage();
-    doc.text(String(r.invoice_no ?? ''), startX, doc.y, { continued: true });
-    doc.text(`${r.full_name ?? ''} (${r.member_code ?? ''})`, startX + 90, doc.y, { continued: true });
-    doc.text(Number(r.total ?? 0).toFixed(2), 0, doc.y, { align: 'right' });
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.invoice_no ?? '', x: startX, width: 90 },
+        { text: `${r.full_name ?? ''} (${r.member_code ?? ''})`, x: startX + 95, width: 330 },
+        { text: Number(r.total ?? 0).toFixed(2), x: startX + 430, width: 85, align: 'right' }
+      ],
+      { onNewPage: redrawRevenuePaidInvoicesPage }
+    );
   }
 
   doc.end();
@@ -3142,6 +3672,7 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, async (req, res) => {
 
 app.get('/reports/expired-members.pdf', authMiddleware, async (req, res) => {
   const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
   const rows = await queryMany(
     `SELECT m.id AS member_id, m.member_code, m.full_name, m.phone, s.end_date,
             DATEDIFF(CURDATE(), s.end_date) AS days_expired
@@ -3164,32 +3695,52 @@ app.get('/reports/expired-members.pdf', authMiddleware, async (req, res) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(res);
 
-  doc.fontSize(18).text('Expired Members List', { align: 'left' });
-  doc.moveDown(0.2);
-  doc.fontSize(10).fillColor('#555555').text(`As of: ${toDateOnly(new Date())}  •  Count: ${rows.length}`);
-  doc.fillColor('#000000');
+  drawGymPdfHeader(doc, profile, {
+    title: 'Expired Members',
+    subtitle: `As of: ${toDateOnly(new Date())}  •  Count: ${rows.length}`
+  });
   doc.moveDown(0.8);
 
   const startX = 40;
   const rightX = 555;
-  doc.fontSize(10).fillColor('#555555');
-  doc.text('Code', startX, doc.y, { continued: true });
-  doc.text('Member', startX + 80, doc.y, { continued: true });
-  doc.text('Phone', startX + 300, doc.y, { continued: true });
-  doc.text('Expiry', startX + 390, doc.y, { continued: true });
-  doc.text('Days', 0, doc.y, { align: 'right' });
-  doc.fillColor('#000000');
-  doc.moveDown(0.3);
-  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
-  doc.moveDown(0.5);
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Code', x: startX, width: 70 },
+        { text: 'Member', x: startX + 75, width: 210 },
+        { text: 'Phone', x: startX + 290, width: 90 },
+        { text: 'Expiry', x: startX + 385, width: 70 },
+        { text: 'Days', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawPage = () => {
+    drawGymPdfHeader(doc, profile, {
+      title: 'Expired Members',
+      subtitle: `As of: ${toDateOnly(new Date())}`
+    });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  drawHeader();
 
   for (const r of rows) {
-    if (doc.y > 760) doc.addPage();
-    doc.text(String(r.member_code ?? ''), startX, doc.y, { continued: true });
-    doc.text(String(r.full_name ?? ''), startX + 80, doc.y, { continued: true });
-    doc.text(String(r.phone ?? '-'), startX + 300, doc.y, { continued: true });
-    doc.text(String(r.end_date ?? ''), startX + 390, doc.y, { continued: true });
-    doc.text(String(r.days_expired ?? ''), 0, doc.y, { align: 'right' });
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.member_code ?? '', x: startX, width: 70 },
+        { text: r.full_name ?? '', x: startX + 75, width: 210 },
+        { text: r.phone ?? '-', x: startX + 290, width: 90 },
+        { text: fmtDateOnlyStr(r.end_date), x: startX + 385, width: 70 },
+        { text: r.days_expired ?? '', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { onNewPage: redrawPage }
+    );
   }
 
   doc.end();
@@ -3199,6 +3750,7 @@ app.get('/reports/daily-attendance.pdf', authMiddleware, async (req, res) => {
   const tenantId = req.user.tenantId;
   const dateRaw = typeof req.query.date === 'string' ? req.query.date.trim() : '';
   const validDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : toDateOnly(new Date());
+  const profile = await loadGymProfileForTenant(tenantId);
 
   const rows = await queryMany(
     `SELECT a.checked_in_at, a.checked_out_at, m.full_name, m.member_code
@@ -3215,23 +3767,38 @@ app.get('/reports/daily-attendance.pdf', authMiddleware, async (req, res) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(res);
 
-  doc.fontSize(18).text('Daily Attendance Log', { align: 'left' });
-  doc.moveDown(0.2);
-  doc.fontSize(10).fillColor('#555555').text(`Date: ${validDate}  •  Count: ${rows.length}`);
-  doc.fillColor('#000000');
+  drawGymPdfHeader(doc, profile, {
+    title: 'Daily Attendance',
+    subtitle: `Date: ${validDate}  •  Count: ${rows.length}`
+  });
   doc.moveDown(0.8);
 
   const startX = 40;
   const rightX = 555;
-  doc.fontSize(10).fillColor('#555555');
-  doc.text('Code', startX, doc.y, { continued: true });
-  doc.text('Member', startX + 80, doc.y, { continued: true });
-  doc.text('In', startX + 330, doc.y, { continued: true });
-  doc.text('Out', 0, doc.y, { align: 'right' });
-  doc.fillColor('#000000');
-  doc.moveDown(0.3);
-  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
-  doc.moveDown(0.5);
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Code', x: startX, width: 70 },
+        { text: 'Member', x: startX + 75, width: 235 },
+        { text: 'In', x: startX + 315, width: 60 },
+        { text: 'Out', x: startX + 380, width: 135, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawPage = () => {
+    drawGymPdfHeader(doc, profile, {
+      title: 'Daily Attendance',
+      subtitle: `Date: ${validDate}`
+    });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  drawHeader();
 
   const fmt = (raw) => {
     const d = new Date(raw);
@@ -3242,11 +3809,780 @@ app.get('/reports/daily-attendance.pdf', authMiddleware, async (req, res) => {
   };
 
   for (const r of rows) {
-    if (doc.y > 760) doc.addPage();
-    doc.text(String(r.member_code ?? ''), startX, doc.y, { continued: true });
-    doc.text(String(r.full_name ?? ''), startX + 80, doc.y, { continued: true });
-    doc.text(fmt(r.checked_in_at), startX + 330, doc.y, { continued: true });
-    doc.text(r.checked_out_at ? fmt(r.checked_out_at) : '-', 0, doc.y, { align: 'right' });
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.member_code ?? '', x: startX, width: 70 },
+        { text: r.full_name ?? '', x: startX + 75, width: 235 },
+        { text: fmt(r.checked_in_at), x: startX + 315, width: 60 },
+        { text: r.checked_out_at ? fmt(r.checked_out_at) : '-', x: startX + 380, width: 135, align: 'right' }
+      ],
+      { onNewPage: redrawPage }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/dashboard.pdf', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const canSeeRevenue = (req.user.roles ?? []).some((r) => r === 'owner' || r === 'admin' || r === 'super_admin');
+  const profile = await loadGymProfileForTenant(tenantId);
+
+  const membersTotal = await queryOne('SELECT COUNT(*) AS c FROM members WHERE tenant_id = :tenantId', { tenantId });
+  const activeMembers = await queryOne(
+    "SELECT COUNT(*) AS c FROM members WHERE tenant_id = :tenantId AND status = 'active'",
+    { tenantId }
+  );
+  const plansTotal = await queryOne('SELECT COUNT(*) AS c FROM membership_plans WHERE tenant_id = :tenantId', { tenantId });
+  const todayCheckins = await queryOne(
+    'SELECT COUNT(*) AS c FROM attendance_logs WHERE tenant_id = :tenantId AND DATE(checked_in_at) = CURDATE()',
+    { tenantId }
+  );
+  const unpaidInvoices = await queryOne("SELECT COUNT(*) AS c FROM invoices WHERE tenant_id = :tenantId AND status = 'unpaid'", {
+    tenantId
+  });
+  const unpaidAmount = await queryOne(
+    "SELECT COALESCE(SUM(total), 0) AS s FROM invoices WHERE tenant_id = :tenantId AND status = 'unpaid'",
+    { tenantId }
+  );
+  const revenueLast30Days = await queryOne(
+    "SELECT COALESCE(SUM(total), 0) AS s FROM invoices WHERE tenant_id = :tenantId AND status = 'paid' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+    { tenantId }
+  );
+  const revenueTotal = await queryOne(
+    "SELECT COALESCE(SUM(total), 0) AS s FROM invoices WHERE tenant_id = :tenantId AND status = 'paid'",
+    { tenantId }
+  );
+  const membershipCounts = await queryOne(
+    `SELECT
+        SUM(CASE WHEN x.end_date IS NOT NULL AND x.end_date >= CURDATE() THEN 1 ELSE 0 END) AS active_c,
+        SUM(CASE WHEN x.end_date IS NULL OR x.end_date < CURDATE() THEN 1 ELSE 0 END) AS expired_c
+     FROM (
+       SELECT m.id AS member_id,
+              (SELECT MAX(s.end_date)
+               FROM subscriptions s
+               WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id) AS end_date
+       FROM members m
+       WHERE m.tenant_id = :tenantId AND m.status = 'active'
+     ) x`,
+    { tenantId }
+  );
+  const expiringMembers = await queryMany(
+    `SELECT m.member_code, m.full_name, s.end_date, DATEDIFF(s.end_date, CURDATE()) AS days_left
+     FROM subscriptions s
+     INNER JOIN members m ON m.id = s.member_id
+     WHERE s.tenant_id = :tenantId
+       AND s.status = 'active'
+       AND m.status = 'active'
+       AND s.end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+     ORDER BY s.end_date ASC
+     LIMIT 10`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="dashboard_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Dashboard', subtitle: `Date: ${today}` });
+  doc.moveDown(0.8);
+
+  const money = (v) => Number(v ?? 0).toFixed(2);
+  const line = (label, value) => {
+    doc.fontSize(11).text(String(label), { continued: true });
+    doc.text(String(value), { align: 'right' });
+  };
+
+  line('Total Members', Number(membersTotal?.c ?? 0));
+  line('Active Members', Number(activeMembers?.c ?? 0));
+  line('Membership Active', Number(membershipCounts?.active_c ?? 0));
+  line('Membership Expired', Number(membershipCounts?.expired_c ?? 0));
+  line('Plans', Number(plansTotal?.c ?? 0));
+  line("Today's Check-ins", Number(todayCheckins?.c ?? 0));
+  line('Unpaid Invoices', Number(unpaidInvoices?.c ?? 0));
+  if (canSeeRevenue) {
+    line('Unpaid Amount', money(unpaidAmount?.s ?? 0));
+    line('Revenue (30d)', money(revenueLast30Days?.s ?? 0));
+    line('Total Revenue', money(revenueTotal?.s ?? 0));
+  }
+
+  doc.moveDown(1.2);
+  doc.fontSize(12).text('Urgent Alerts (3 days)', { underline: true });
+  doc.moveDown(0.5);
+
+  const startX = 40;
+  const rightX = 555;
+  pdfDrawRow(
+    doc,
+    [
+      { text: 'Code', x: startX, width: 70 },
+      { text: 'Member', x: startX + 75, width: 280 },
+      { text: 'Expiry', x: startX + 360, width: 90 },
+      { text: 'Days', x: startX + 455, width: 60, align: 'right' }
+    ],
+    { color: '#555555' }
+  );
+  doc.moveDown(0.3);
+  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+  doc.moveDown(0.5);
+
+  if (!expiringMembers.length) {
+    doc.text('No urgent alerts.');
+    doc.end();
+    return;
+  }
+  const redrawUrgentHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Dashboard', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    doc.fontSize(12).text('Urgent Alerts (3 days)', { underline: true });
+    doc.moveDown(0.5);
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Code', x: startX, width: 70 },
+        { text: 'Member', x: startX + 75, width: 280 },
+        { text: 'Expiry', x: startX + 360, width: 90 },
+        { text: 'Days', x: startX + 455, width: 60, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  for (const r of expiringMembers) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.member_code ?? '', x: startX, width: 70 },
+        { text: r.full_name ?? '', x: startX + 75, width: 280 },
+        { text: fmtDateOnlyStr(r.end_date ?? ''), x: startX + 360, width: 90 },
+        { text: r.days_left ?? '', x: startX + 455, width: 60, align: 'right' }
+      ],
+      { onNewPage: redrawUrgentHeader }
+    );
+  }
+  doc.end();
+});
+
+app.get('/pdf/leads.pdf', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT full_name, phone, source, interest, next_contact_date, status
+     FROM leads
+     WHERE tenant_id = :tenantId
+     ORDER BY id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="leads_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Leads', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Name', x: startX, width: 160 },
+        { text: 'Phone', x: startX + 160, width: 80 },
+        { text: 'Source', x: startX + 240, width: 75 },
+        { text: 'Interest', x: startX + 315, width: 95 },
+        { text: 'Next', x: startX + 410, width: 60 },
+        { text: 'Status', x: startX + 470, width: 45, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+  const redraw = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Leads', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.full_name ?? '', x: startX, width: 160 },
+        { text: r.phone ?? '-', x: startX + 160, width: 80 },
+        { text: r.source ?? '-', x: startX + 240, width: 75 },
+        { text: r.interest ?? '-', x: startX + 315, width: 95 },
+        { text: r.next_contact_date ? fmtDateOnlyStr(r.next_contact_date) : '-', x: startX + 410, width: 60 },
+        { text: r.status ?? '', x: startX + 470, width: 45, align: 'right' }
+      ],
+      { onNewPage: redraw }
+    );
+  }
+  doc.end();
+});
+
+app.get('/pdf/members.pdf', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT member_code, full_name, phone, status, join_date
+     FROM members
+     WHERE tenant_id = :tenantId
+     ORDER BY id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="members_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Members', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Code', x: startX, width: 70 },
+        { text: 'Member', x: startX + 75, width: 210 },
+        { text: 'Phone', x: startX + 290, width: 90 },
+        { text: 'Join', x: startX + 385, width: 70 },
+        { text: 'Status', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawMembersHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Members', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.member_code ?? '', x: startX, width: 70 },
+        { text: r.full_name ?? '', x: startX + 75, width: 210 },
+        { text: r.phone ?? '-', x: startX + 290, width: 90 },
+        { text: fmtDateOnlyStr(r.join_date ?? ''), x: startX + 385, width: 70 },
+        { text: r.status ?? '', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { onNewPage: redrawMembersHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/plans.pdf', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT name, duration_days, price, admission_fee, status
+     FROM membership_plans
+     WHERE tenant_id = :tenantId
+     ORDER BY status DESC, name ASC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="plans_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Plans', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Plan', x: startX, width: 250 },
+        { text: 'Days', x: startX + 255, width: 50, align: 'right' },
+        { text: 'Price', x: startX + 310, width: 70, align: 'right' },
+        { text: 'Fee', x: startX + 385, width: 70, align: 'right' },
+        { text: 'Status', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawPlansHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Plans', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.name ?? '', x: startX, width: 250 },
+        { text: r.duration_days ?? '', x: startX + 255, width: 50, align: 'right' },
+        { text: Number(r.price ?? 0).toFixed(2), x: startX + 310, width: 70, align: 'right' },
+        { text: Number(r.admission_fee ?? 0).toFixed(2), x: startX + 385, width: 70, align: 'right' },
+        { text: r.status ?? '', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { onNewPage: redrawPlansHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/attendance.pdf', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const dateRaw = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : toDateOnly(new Date());
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT a.checked_in_at, a.checked_out_at, m.full_name, m.member_code
+     FROM attendance_logs a
+     INNER JOIN members m ON m.id = a.member_id
+     WHERE a.tenant_id = :tenantId AND DATE(a.checked_in_at) = :d
+     ORDER BY a.checked_in_at ASC
+     LIMIT 800`,
+    { tenantId, d: validDate }
+  );
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="attendance_${validDate}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Attendance', subtitle: `Date: ${validDate}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Code', x: startX, width: 70 },
+        { text: 'Member', x: startX + 75, width: 235 },
+        { text: 'In', x: startX + 315, width: 60 },
+        { text: 'Out', x: startX + 380, width: 135, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const fmt = (raw) => {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return String(raw ?? '');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
+  const redrawAttendanceHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Attendance', subtitle: `Date: ${validDate}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.member_code ?? '', x: startX, width: 70 },
+        { text: r.full_name ?? '', x: startX + 75, width: 235 },
+        { text: fmt(r.checked_in_at), x: startX + 315, width: 60 },
+        { text: r.checked_out_at ? fmt(r.checked_out_at) : '-', x: startX + 380, width: 135, align: 'right' }
+      ],
+      { onNewPage: redrawAttendanceHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/inventory.pdf', authMiddleware, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT p.name, p.sku, p.price, p.status,
+            COALESCE(SUM(CASE WHEN sm.movement_type = 'in' THEN sm.qty ELSE -sm.qty END), 0) AS on_hand
+     FROM products p
+     LEFT JOIN stock_movements sm ON sm.tenant_id = p.tenant_id AND sm.product_id = p.id
+     WHERE p.tenant_id = :tenantId
+     GROUP BY p.id
+     ORDER BY p.status DESC, p.name ASC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="inventory_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Inventory', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Item', x: startX, width: 230 },
+        { text: 'SKU', x: startX + 235, width: 80 },
+        { text: 'Price', x: startX + 320, width: 60, align: 'right' },
+        { text: 'On Hand', x: startX + 385, width: 70, align: 'right' },
+        { text: 'Status', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawInventoryHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Inventory', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.name ?? '', x: startX, width: 230 },
+        { text: r.sku ?? '-', x: startX + 235, width: 80 },
+        { text: Number(r.price ?? 0).toFixed(2), x: startX + 320, width: 60, align: 'right' },
+        { text: r.on_hand ?? 0, x: startX + 385, width: 70, align: 'right' },
+        { text: r.status ?? '', x: startX + 460, width: 55, align: 'right' }
+      ],
+      { onNewPage: redrawInventoryHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/invoices.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT i.invoice_no, i.total, i.status, i.created_at, m.full_name, m.member_code
+     FROM invoices i
+     INNER JOIN members m ON m.id = i.member_id
+     WHERE i.tenant_id = :tenantId
+     ORDER BY i.id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="invoices_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Invoices', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Invoice', x: startX, width: 110 },
+        { text: 'Member', x: startX + 115, width: 230 },
+        { text: 'Total', x: startX + 350, width: 60, align: 'right' },
+        { text: 'Status', x: startX + 415, width: 45 },
+        { text: 'Date', x: startX + 465, width: 50, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawInvoicesHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Invoices', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.invoice_no ?? '', x: startX, width: 110 },
+        { text: `${r.full_name ?? ''} (${r.member_code ?? ''})`, x: startX + 115, width: 230 },
+        { text: Number(r.total ?? 0).toFixed(2), x: startX + 350, width: 60, align: 'right' },
+        { text: r.status ?? '', x: startX + 415, width: 45 },
+        { text: fmtDateOnlyStr(r.created_at), x: startX + 465, width: 50, align: 'right' }
+      ],
+      { onNewPage: redrawInvoicesHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/payments.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT i.invoice_no, p.amount, p.method, p.paid_at
+     FROM payments p
+     INNER JOIN invoices i ON i.id = p.invoice_id
+     WHERE p.tenant_id = :tenantId
+     ORDER BY p.id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="payments_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Payments', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Invoice', x: startX, width: 150 },
+        { text: 'Amount', x: startX + 155, width: 80, align: 'right' },
+        { text: 'Method', x: startX + 240, width: 80 },
+        { text: 'Paid At', x: startX + 325, width: 190, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawPaymentsHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Payments', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.invoice_no ?? '', x: startX, width: 150 },
+        { text: Number(r.amount ?? 0).toFixed(2), x: startX + 155, width: 80, align: 'right' },
+        { text: r.method ?? '', x: startX + 240, width: 80 },
+        { text: fmtDateTimeShort(r.paid_at), x: startX + 325, width: 190, align: 'right' }
+      ],
+      { onNewPage: redrawPaymentsHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/expenses.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT category, amount, expense_date, notes
+     FROM expenses
+     WHERE tenant_id = :tenantId
+     ORDER BY id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="expenses_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Expenses', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Category', x: startX, width: 200 },
+        { text: 'Amount', x: startX + 205, width: 80, align: 'right' },
+        { text: 'Date', x: startX + 290, width: 70 },
+        { text: 'Notes', x: startX + 365, width: 150 }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawExpensesHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Expenses', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const r of rows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.category ?? '', x: startX, width: 200 },
+        { text: Number(r.amount ?? 0).toFixed(2), x: startX + 205, width: 80, align: 'right' },
+        { text: fmtDateOnlyStr(r.expense_date), x: startX + 290, width: 70 },
+        { text: r.notes ?? '', x: startX + 365, width: 150 }
+      ],
+      { onNewPage: redrawExpensesHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/staff.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const rows = await queryMany(
+    `SELECT u.id, u.email, u.full_name, u.status
+     FROM users u
+     WHERE u.tenant_id = :tenantId
+     ORDER BY u.id DESC
+     LIMIT 500`,
+    { tenantId }
+  );
+  const roles = await queryMany(
+    `SELECT ur.user_id, r.name
+     FROM user_roles ur
+     INNER JOIN roles r ON r.id = ur.role_id
+     INNER JOIN users u ON u.id = ur.user_id
+     WHERE u.tenant_id = :tenantId
+     ORDER BY ur.user_id ASC`,
+    { tenantId }
+  );
+  const byUser = new Map();
+  for (const r of roles) {
+    const uid = Number(r.user_id);
+    if (!byUser.has(uid)) byUser.set(uid, []);
+    byUser.get(uid).push(String(r.name));
+  }
+
+  const today = toDateOnly(new Date());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="staff_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Staff', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
+  doc.moveDown(0.8);
+
+  const startX = 40;
+  const rightX = 555;
+  const drawHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Name', x: startX, width: 150 },
+        { text: 'Email', x: startX + 155, width: 170 },
+        { text: 'Roles', x: startX + 330, width: 130 },
+        { text: 'Status', x: startX + 465, width: 50, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  drawHeader();
+
+  const redrawStaffHeader = () => {
+    drawGymPdfHeader(doc, profile, { title: 'Staff', subtitle: `Date: ${today}` });
+    doc.moveDown(0.8);
+    drawHeader();
+  };
+  for (const u of rows) {
+    const roleList = (byUser.get(Number(u.id)) ?? []).join(', ');
+    pdfDrawRow(
+      doc,
+      [
+        { text: u.full_name ?? '', x: startX, width: 150 },
+        { text: u.email ?? '', x: startX + 155, width: 170 },
+        { text: roleList, x: startX + 330, width: 130 },
+        { text: u.status ?? '', x: startX + 465, width: 50, align: 'right' }
+      ],
+      { onNewPage: redrawStaffHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/settings.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const profile = await loadGymProfileForTenant(tenantId);
+  const today = toDateOnly(new Date());
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="settings_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, { title: 'Gym Profile', subtitle: `Date: ${today}` });
+  doc.moveDown(1.2);
+
+  const rows = [
+    ['Gym Name', profile?.gymName ?? ''],
+    ['Address', profile?.address ?? ''],
+    ['Website', profile?.websiteUrl ?? ''],
+    ['Facebook', profile?.facebookUrl ?? ''],
+    ['Instagram', profile?.instagramUrl ?? ''],
+    ['WhatsApp', profile?.whatsapp ?? ''],
+  ];
+  for (const [k, v] of rows) {
+    doc.fontSize(11).text(String(k), { continued: true });
+    doc.text(String(v ?? ''), { align: 'right' });
+    doc.moveDown(0.2);
   }
 
   doc.end();
@@ -3408,4 +4744,6 @@ const port = Number(process.env.PORT ?? 8081);
 const host = process.env.HOST?.length ? process.env.HOST : '0.0.0.0';
 app.listen(port, host, () => {
   process.stdout.write(`API listening on http://${host}:${port}\n`);
+  process.stdout.write(`Build: ${buildStamp}\n`);
+  process.stdout.write(`Version: http://localhost:${port}/__version\n`);
 });

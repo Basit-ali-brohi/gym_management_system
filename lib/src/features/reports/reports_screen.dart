@@ -169,7 +169,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: () => _downloadMonthlyRevenue(context, monthLabel),
+                    onPressed: () => _openPdfActions(
+                      context,
+                      title: 'Monthly Revenue Report',
+                      path: '/reports/monthly-revenue.pdf',
+                      fileName: 'monthly_revenue_$monthLabel.pdf',
+                      query: {'month': monthLabel},
+                    ),
                     icon: const Icon(Icons.picture_as_pdf),
                     label: const Text('PDF'),
                   ),
@@ -181,7 +187,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               subtitle: 'PDF • All members whose latest membership is expired',
               icon: Icons.person_off,
               trailing: FilledButton.icon(
-                onPressed: () => _downloadExpiredMembers(context),
+                onPressed: () => _openPdfActions(
+                  context,
+                  title: 'Expired Members List',
+                  path: '/reports/expired-members.pdf',
+                  fileName: 'expired_members_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
+                ),
                 icon: const Icon(Icons.picture_as_pdf),
                 label: const Text('PDF'),
               ),
@@ -200,7 +211,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: () => _downloadDailyAttendance(context, dateLabel),
+                    onPressed: () => _openPdfActions(
+                      context,
+                      title: 'Daily Attendance Log',
+                      path: '/reports/daily-attendance.pdf',
+                      fileName: 'attendance_$dateLabel.pdf',
+                      query: {'date': dateLabel},
+                    ),
                     icon: const Icon(Icons.picture_as_pdf),
                     label: const Text('PDF'),
                   ),
@@ -238,35 +255,46 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     setState(() => _attendanceDate = picked);
   }
 
-  Future<void> _downloadMonthlyRevenue(BuildContext context, String monthLabel) async {
-    await _downloadPdf(
-      context,
-      path: '/reports/monthly-revenue.pdf',
-      fileName: 'monthly_revenue_$monthLabel.pdf',
-      query: {'month': monthLabel},
-    );
-  }
-
-  Future<void> _downloadExpiredMembers(BuildContext context) async {
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    await _downloadPdf(
-      context,
-      path: '/reports/expired-members.pdf',
-      fileName: 'expired_members_$today.pdf',
-    );
-  }
-
-  Future<void> _downloadDailyAttendance(BuildContext context, String dateLabel) async {
-    await _downloadPdf(
-      context,
-      path: '/reports/daily-attendance.pdf',
-      fileName: 'attendance_$dateLabel.pdf',
-      query: {'date': dateLabel},
-    );
-  }
-
-  Future<void> _downloadPdf(
+  Future<void> _openPdfActions(
     BuildContext context, {
+    required String title,
+    required String path,
+    required String fileName,
+    Map<String, String>? query,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runPdf(context, preview: true, path: path, fileName: fileName, query: query);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runPdf(context, preview: false, path: path, fileName: fileName, query: query);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runPdf(
+    BuildContext context, {
+    required bool preview,
     required String path,
     required String fileName,
     Map<String, String>? query,
@@ -276,12 +304,15 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes(path, token: token, query: query);
-      final savedPath = downloadBytes(fileName: fileName, bytes: bytes, mimeType: 'application/pdf');
+      final savedPath = preview
+          ? previewBytes(fileName: fileName, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: fileName, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
       if (savedPath != null) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download started')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
       }
     } on ApiException catch (e) {
       if (!context.mounted) return;

@@ -172,6 +172,12 @@ class InvoicesScreen extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             IconButton(
+              tooltip: 'PDF',
+              onPressed: () => _openInvoicesListPdfActions(context, ref),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
+            const SizedBox(width: 6),
+            IconButton(
               tooltip: 'Refresh',
               onPressed: () => ref.read(invoicesControllerProvider.notifier).load(),
               icon: const Icon(Icons.refresh),
@@ -314,9 +320,9 @@ class InvoicesScreen extends ConsumerWidget {
                                           icon: const Icon(Icons.edit_outlined),
                                         ),
                                         IconButton(
-                                          tooltip: 'Download PDF',
-                                          onPressed: () => _downloadInvoicePdf(context, ref, inv),
-                                          icon: const Icon(Icons.download),
+                                          tooltip: 'PDF',
+                                          onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                                          icon: const Icon(Icons.picture_as_pdf_outlined),
                                         ),
                                         if (canDelete)
                                           IconButton(
@@ -370,9 +376,9 @@ class InvoicesScreen extends ConsumerWidget {
                               icon: const Icon(Icons.edit_outlined),
                             ),
                             IconButton(
-                              tooltip: 'Download PDF',
-                              onPressed: () => _downloadInvoicePdf(context, ref, inv),
-                              icon: const Icon(Icons.download),
+                              tooltip: 'PDF',
+                              onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                              icon: const Icon(Icons.picture_as_pdf_outlined),
                             ),
                             if (canDelete)
                               IconButton(
@@ -595,22 +601,56 @@ class InvoicesScreen extends ConsumerWidget {
     taxCtrl.dispose();
   }
 
-  Future<void> _downloadInvoicePdf(BuildContext context, WidgetRef ref, Invoice inv) async {
+  Future<void> _openInvoicePdfActions(BuildContext context, WidgetRef ref, Invoice inv) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('${inv.invoiceNo}.pdf'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInvoicePdf(context, ref, inv, preview: true);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInvoicePdf(context, ref, inv, preview: false);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runInvoicePdf(BuildContext context, WidgetRef ref, Invoice inv, {required bool preview}) async {
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
 
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/invoices/${inv.id}/pdf', token: token);
-      final savedPath = downloadBytes(
-        fileName: '${inv.invoiceNo}.pdf',
-        bytes: bytes,
-        mimeType: 'application/pdf',
-      );
+      final name = '${inv.invoiceNo}.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
 
       if (!context.mounted) return;
-      final message = savedPath == null ? 'Downloading PDF…' : 'Saved: $savedPath';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -618,6 +658,69 @@ class InvoicesScreen extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Failed to download PDF')));
+    }
+  }
+
+  Future<void> _openInvoicesListPdfActions(BuildContext context, WidgetRef ref) async {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Invoices PDF'),
+          content: const Text('Preview ya download?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInvoicesListPdf(context, ref, preview: true, today: today);
+              },
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Preview'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _runInvoicesListPdf(context, ref, preview: false, today: today);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runInvoicesListPdf(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool preview,
+    required String today,
+  }) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final bytes = await api.getBytes('/pdf/invoices.pdf', token: token);
+      final name = 'invoices_$today.pdf';
+      final savedPath = preview
+          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
+          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+      if (!context.mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
+      }
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to export PDF')));
     }
   }
 

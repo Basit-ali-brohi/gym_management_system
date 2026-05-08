@@ -17,6 +17,22 @@ String? downloadBytes({
   return path;
 }
 
+String? previewBytes({
+  required String fileName,
+  required List<int> bytes,
+  required String mimeType,
+}) {
+  final sanitized = fileName.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_').trim();
+  final finalName = sanitized.isEmpty ? 'preview.pdf' : sanitized;
+  final dir = Directory.systemTemp.createTempSync('gms_preview_');
+  final path = '${dir.path}${Platform.pathSeparator}$finalName';
+  final file = File(path);
+  file.writeAsBytesSync(bytes, flush: true);
+
+  _tryOpenFile(path);
+  return path;
+}
+
 void _tryOpenFile(String path) {
   if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
 

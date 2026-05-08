@@ -90,6 +90,27 @@ CREATE TABLE IF NOT EXISTS members (
   CONSTRAINT fk_members_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS leads (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  gym_id BIGINT UNSIGNED GENERATED ALWAYS AS (tenant_id) STORED,
+  full_name VARCHAR(191) NOT NULL,
+  phone VARCHAR(32) NULL,
+  source VARCHAR(64) NULL,
+  interest VARCHAR(191) NULL,
+  next_contact_date DATE NULL,
+  status ENUM('new', 'trial', 'converted', 'lost') NOT NULL DEFAULT 'new',
+  notes VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_leads_tenant (tenant_id),
+  KEY ix_leads_gym (gym_id),
+  KEY ix_leads_status (status),
+  KEY ix_leads_created (created_at),
+  CONSTRAINT fk_leads_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS membership_plans (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   tenant_id BIGINT UNSIGNED NOT NULL,
@@ -298,7 +319,11 @@ CREATE TABLE IF NOT EXISTS gym_profile (
   tenant_id BIGINT UNSIGNED NOT NULL,
   gym_id BIGINT UNSIGNED GENERATED ALWAYS AS (tenant_id) STORED,
   address VARCHAR(255) NULL,
-  logo_url VARCHAR(255) NULL,
+  logo_url MEDIUMTEXT NULL,
+  website_url VARCHAR(255) NULL,
+  facebook_url VARCHAR(255) NULL,
+  instagram_url VARCHAR(255) NULL,
+  whatsapp VARCHAR(64) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
