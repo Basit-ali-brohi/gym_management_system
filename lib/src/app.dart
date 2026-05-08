@@ -1,0 +1,302 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import 'core/providers.dart';
+import 'features/attendance/attendance_screen.dart';
+import 'features/auth/auth_controller.dart';
+import 'features/auth/login_screen.dart';
+import 'features/billing/invoices_screen.dart';
+import 'features/dashboard/dashboard_screen.dart';
+import 'features/expenses/expenses_screen.dart';
+import 'features/inventory/inventory_screen.dart';
+import 'features/members/members_screen.dart';
+import 'features/payments/payments_screen.dart';
+import 'features/plans/plans_screen.dart';
+import 'features/reports/reports_screen.dart';
+import 'features/shell/app_shell.dart';
+import 'features/settings/settings_screen.dart';
+import 'features/staff/staff_screen.dart';
+
+final routerNotifierProvider = Provider<RouterNotifier>((ref) => RouterNotifier(ref));
+
+CustomTransitionPage<void> _fadePage(GoRouterState state, Widget child) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      return FadeTransition(opacity: curved, child: child);
+    },
+  );
+}
+
+final routerProvider = Provider<GoRouter>((ref) {
+  final notifier = ref.watch(routerNotifierProvider);
+  return GoRouter(
+    refreshListenable: notifier,
+    initialLocation: '/dashboard',
+    redirect: (context, state) {
+      final auth = ref.read(authControllerProvider);
+      final isLoggingIn = state.matchedLocation == '/login';
+      if (auth.isLoading) return null;
+      if (!auth.isAuthenticated && !isLoggingIn) return '/login';
+      if (auth.isAuthenticated && isLoggingIn) return '/dashboard';
+      return null;
+    },
+    routes: [
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) => _fadePage(state, const LoginScreen()),
+      ),
+      ShellRoute(
+        builder: (context, state, child) => AppShell(child: child),
+        routes: [
+          GoRoute(
+            path: '/dashboard',
+            pageBuilder: (context, state) => _fadePage(state, const DashboardScreen()),
+          ),
+          GoRoute(
+            path: '/members',
+            pageBuilder: (context, state) => _fadePage(state, const MembersScreen()),
+          ),
+          GoRoute(
+            path: '/plans',
+            pageBuilder: (context, state) => _fadePage(state, const PlansScreen()),
+          ),
+          GoRoute(
+            path: '/attendance',
+            pageBuilder: (context, state) => _fadePage(state, const AttendanceScreen()),
+          ),
+          GoRoute(
+            path: '/invoices',
+            pageBuilder: (context, state) => _fadePage(state, const InvoicesScreen()),
+          ),
+          GoRoute(
+            path: '/payments',
+            pageBuilder: (context, state) => _fadePage(state, const PaymentsScreen()),
+          ),
+          GoRoute(
+            path: '/expenses',
+            pageBuilder: (context, state) => _fadePage(state, const ExpensesScreen()),
+          ),
+          GoRoute(
+            path: '/inventory',
+            pageBuilder: (context, state) => _fadePage(state, const InventoryScreen()),
+          ),
+          GoRoute(
+            path: '/reports',
+            pageBuilder: (context, state) => _fadePage(state, const ReportsScreen()),
+          ),
+          GoRoute(
+            path: '/staff',
+            pageBuilder: (context, state) => _fadePage(state, const StaffScreen()),
+          ),
+          GoRoute(
+            path: '/settings',
+            pageBuilder: (context, state) => _fadePage(state, const SettingsScreen()),
+          ),
+        ],
+      ),
+    ],
+  );
+});
+
+class RouterNotifier extends ChangeNotifier {
+  RouterNotifier(this.ref) {
+    ref.listen<AuthState>(authControllerProvider, (prev, next) {
+      if (prev?.isAuthenticated != next.isAuthenticated || prev?.isLoading != next.isLoading) {
+        notifyListeners();
+      }
+    });
+  }
+
+  final Ref ref;
+}
+
+class GymSaasApp extends ConsumerWidget {
+  const GymSaasApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    const gold = Color(0xFFD4AF37);
+    const obsidian = Color(0xFF0B0F14);
+    const surface = Color(0xFF101722);
+    const glass = Color(0x24FFFFFF);
+
+    const darkScheme = ColorScheme(
+      brightness: Brightness.dark,
+      primary: gold,
+      onPrimary: Color(0xFF0B0F14),
+      secondary: gold,
+      onSecondary: Color(0xFF0B0F14),
+      error: Color(0xFFFF5C5C),
+      onError: Color(0xFF0B0F14),
+      surface: surface,
+      onSurface: Color(0xFFEAECEF),
+      surfaceContainerHighest: Color(0xFF141D2B),
+      onSurfaceVariant: Color(0xFFB9C0CC),
+      outline: Color(0xFF2A3342),
+      outlineVariant: Color(0xFF1E2633),
+      shadow: Colors.black,
+      scrim: Colors.black,
+      inverseSurface: Color(0xFFEAECEF),
+      onInverseSurface: Color(0xFF0B0F14),
+      inversePrimary: gold,
+      tertiary: Color(0xFF0F766E),
+      onTertiary: Color(0xFFE7FFF9),
+    );
+
+    const lightScheme = ColorScheme(
+      brightness: Brightness.light,
+      primary: gold,
+      onPrimary: Color(0xFF121212),
+      secondary: gold,
+      onSecondary: Color(0xFF121212),
+      error: Color(0xFFB3261E),
+      onError: Colors.white,
+      surface: Colors.white,
+      onSurface: Color(0xFF15181E),
+      surfaceContainerHighest: Color(0xFFF4F5F7),
+      onSurfaceVariant: Color(0xFF4B5563),
+      outline: Color(0xFFE5E7EB),
+      outlineVariant: Color(0xFFD1D5DB),
+      shadow: Color(0x22000000),
+      scrim: Colors.black,
+      inverseSurface: Color(0xFF15181E),
+      onInverseSurface: Colors.white,
+      inversePrimary: gold,
+      tertiary: Color(0xFF0F766E),
+      onTertiary: Colors.white,
+    );
+
+    return MaterialApp.router(
+      debugShowCheckedModeBanner: false,
+      title: 'Gym Management',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: lightScheme,
+        scaffoldBackgroundColor: const Color(0xFFF7F7F9),
+        canvasColor: Colors.white,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        appBarTheme: const AppBarTheme(centerTitle: false),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: lightScheme.outlineVariant),
+          ),
+          clipBehavior: Clip.antiAlias,
+        ),
+        shadowColor: Colors.black.withAlpha(30),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: lightScheme.outlineVariant),
+          ),
+        ),
+        dividerTheme: DividerThemeData(color: lightScheme.outlineVariant),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFFF1F2F4),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: lightScheme.outlineVariant),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: lightScheme.outlineVariant),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: gold, width: 1.2),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            backgroundColor: gold,
+            foregroundColor: const Color(0xFF121212),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(foregroundColor: lightScheme.onSurface),
+        ),
+        chipTheme: ChipThemeData(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+          backgroundColor: const Color(0xFFF1F2F4),
+          side: BorderSide(color: lightScheme.outlineVariant),
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: darkScheme,
+        scaffoldBackgroundColor: const Color(0xFF0A0E14),
+        canvasColor: obsidian,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        appBarTheme: const AppBarTheme(centerTitle: false),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          color: glass,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: darkScheme.outlineVariant),
+          ),
+          clipBehavior: Clip.antiAlias,
+        ),
+        shadowColor: Colors.black.withAlpha(120),
+        dialogTheme: DialogThemeData(
+          backgroundColor: surface.withAlpha(235),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: darkScheme.outlineVariant),
+          ),
+        ),
+        dividerTheme: DividerThemeData(color: darkScheme.outlineVariant),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0x22FFFFFF),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: darkScheme.outlineVariant),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: darkScheme.outlineVariant),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: gold, width: 1.2),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            backgroundColor: gold,
+            foregroundColor: const Color(0xFF0B0F14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(foregroundColor: darkScheme.onSurface),
+        ),
+        chipTheme: ChipThemeData(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+          backgroundColor: const Color(0x1AFFFFFF),
+          side: BorderSide(color: darkScheme.outlineVariant),
+        ),
+      ),
+      themeMode: themeMode,
+      routerConfig: router,
+    );
+  }
+}
