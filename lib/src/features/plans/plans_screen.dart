@@ -20,7 +20,8 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    final hadData = state.valueOrNull != null;
+    if (!hadData) state = const AsyncValue.loading();
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
@@ -31,9 +32,9 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
           .toList();
       state = AsyncValue.data(items);
     } on ApiException catch (e, st) {
-      state = AsyncValue.error(e.message, st);
+      if (!hadData) state = AsyncValue.error(e.message, st);
     } catch (e, st) {
-      state = AsyncValue.error('plans_load_failed', st);
+      if (!hadData) state = AsyncValue.error('plans_load_failed', st);
     }
   }
 
@@ -89,8 +90,11 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
   }
 }
 
-class PlansScreen extends ConsumerWidget {
+class PlansScreen extends ConsumerStatefulWidget {
   const PlansScreen({super.key});
+
+  @override
+  ConsumerState<PlansScreen> createState() => _PlansScreenState();
 
   Future<void> _openPlansPdfActions(BuildContext context, WidgetRef ref) async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -154,8 +158,7 @@ class PlansScreen extends ConsumerWidget {
     }
   }
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget _build(BuildContext context, WidgetRef ref, _PlansScreenState state) {
     final plansAsync = ref.watch(plansControllerProvider);
     final theme = Theme.of(context);
     final number = NumberFormat.decimalPattern();
@@ -168,6 +171,7 @@ class PlansScreen extends ConsumerWidget {
     final avgDays = itemsPreview.isEmpty
         ? 0
         : (itemsPreview.map((p) => p.durationDays).reduce((a, b) => a + b) / itemsPreview.length).round();
+    final filteredPreview = state._applyPlanUiFilters(itemsPreview);
 
     Widget metricCard({
       required String title,
@@ -263,9 +267,9 @@ class PlansScreen extends ConsumerWidget {
               icon: Icons.block_outlined,
             ),
             metricCard(
-              title: 'Avg Lead Time',
+              title: 'Avg Duration',
               value: '$avgDays days',
-              subtitle: 'Production estimate',
+              subtitle: 'Across plans',
               icon: Icons.timelapse_outlined,
             ),
           ],
@@ -282,43 +286,52 @@ class PlansScreen extends ConsumerWidget {
                 SizedBox(
                   width: 190,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'all',
-                    decoration: const InputDecoration(labelText: 'All Statuses'),
+                    key: ValueKey(state._statusFilter),
+                    initialValue: state._statusFilter,
+                    decoration: const InputDecoration(labelText: 'Status'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'active', child: Text('Active')),
                       DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setStatusFilter(v ?? 'all'),
                   ),
                 ),
                 SizedBox(
                   width: 180,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'name_asc',
-                    decoration: const InputDecoration(labelText: 'Name A–Z'),
+                    key: ValueKey(state._sort),
+                    initialValue: state._sort,
+                    decoration: const InputDecoration(labelText: 'Sort'),
                     items: const [
                       DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
                       DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setSort(v ?? 'name_asc'),
                   ),
                 ),
                 SizedBox(
                   width: 360,
                   child: TextField(
+                    controller: state._searchCtrl,
                     decoration: const InputDecoration(
                       hintText: 'Search plan',
                       prefixIcon: Icon(Icons.search),
                     ),
+                    onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 Text(
-                  'Showing $total of $total',
+                  'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
-                OutlinedButton(onPressed: () {}, child: const Text('Clear')),
+                OutlinedButton(
+                  onPressed: () {
+                    state._clearFilters();
+                  },
+                  child: const Text('Clear'),
+                ),
               ],
             ),
           ),
@@ -327,6 +340,14 @@ class PlansScreen extends ConsumerWidget {
         plansAsync.when(
           data: (items) {
             if (items.isEmpty) return _EmptyState(onAdd: () => _openAddPlan(context, ref));
+
+            final filtered = state._applyPlanUiFilters(items);
+            if (filtered.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
+              );
+            }
 
             Future<void> toggleStatus(Plan p) async {
               if (!canManage) return;
@@ -368,7 +389,7 @@ class PlansScreen extends ConsumerWidget {
                         DataColumn(label: Text('Action')),
                       ],
                       rows: [
-                        for (final p in items)
+                        for (final p in filtered)
                           DataRow(
                             cells: [
                               DataCell(
@@ -439,10 +460,10 @@ class PlansScreen extends ConsumerWidget {
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
+                  itemCount: filtered.length,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final p = items[i];
+                    final p = filtered[i];
                     return ListTile(
                       leading: const Icon(Icons.card_membership),
                       title: Text(p.name),
@@ -777,6 +798,56 @@ class PlansScreen extends ConsumerWidget {
     durationCtrl.dispose();
     priceCtrl.dispose();
     admissionCtrl.dispose();
+  }
+}
+
+class _PlansScreenState extends ConsumerState<PlansScreen> {
+  final _searchCtrl = TextEditingController();
+  String _statusFilter = 'all';
+  String _sort = 'name_asc';
+
+  void _setStatusFilter(String v) => setState(() => _statusFilter = v);
+  void _setSort(String v) => setState(() => _sort = v);
+  void _touchFilters() => setState(() {});
+  void _clearFilters() {
+    _searchCtrl.clear();
+    setState(() {
+      _statusFilter = 'all';
+      _sort = 'name_asc';
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Plan> _applyPlanUiFilters(List<Plan> items) {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered = items.where((p) {
+      if (_statusFilter != 'all' && p.status != _statusFilter) return false;
+      if (q.isNotEmpty) {
+        final hay = '${p.name} ${p.durationDays} ${p.price} ${p.admissionFee} ${p.status}'.toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    if (_sort == 'name_desc') {
+      filtered.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+    } else if (_sort == 'newest') {
+      filtered.sort((a, b) => b.id.compareTo(a.id));
+    } else {
+      filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    }
+
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget._build(context, ref, this);
   }
 }
 

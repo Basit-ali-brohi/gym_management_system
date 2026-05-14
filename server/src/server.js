@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
 import express from 'express';
@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { execute, getPool, queryMany, queryOne } from './db.js';
+
+dotenv.config({ override: true });
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -81,6 +83,21 @@ const toDateOnly = (d) => {
 
 const toMysqlDateTime = (d) => {
   return d.toISOString().slice(0, 19).replace('T', ' ');
+};
+
+const generateMemberCode = async (conn, tenantId) => {
+  const [rows] = await conn.query(
+    `SELECT GREATEST(
+        COALESCE(MAX(CASE WHEN member_code REGEXP '^[0-9]+$' THEN CAST(member_code AS UNSIGNED) END), 0),
+        COALESCE(MAX(CASE WHEN member_code REGEXP '^[A-Za-z]+-[0-9]+$' THEN CAST(SUBSTRING_INDEX(member_code, '-', -1) AS UNSIGNED) END), 0)
+      ) AS max_n
+     FROM members
+     WHERE tenant_id = :tenantId`,
+    { tenantId }
+  );
+  const maxN = Number(rows?.[0]?.max_n ?? 0);
+  const next = Math.max(maxN + 1, 1001);
+  return String(next);
 };
 
 const fmtDateOnlyStr = (raw) => {
@@ -312,6 +329,22 @@ const ensureOperationalTables = async () => {
       CONSTRAINT fk_system_logs_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;`
   );
+
+  try {
+    const frozenUntilCol = await queryOne("SHOW COLUMNS FROM members LIKE 'frozen_until'");
+    if (!frozenUntilCol) await execute("ALTER TABLE members ADD COLUMN frozen_until DATE NULL");
+  } catch {}
+  try {
+    const frozenReasonCol = await queryOne("SHOW COLUMNS FROM members LIKE 'frozen_reason'");
+    if (!frozenReasonCol) await execute("ALTER TABLE members ADD COLUMN frozen_reason VARCHAR(191) NULL");
+  } catch {}
+  try {
+    const frozenAtCol = await queryOne("SHOW COLUMNS FROM members LIKE 'frozen_at'");
+    if (!frozenAtCol) await execute("ALTER TABLE members ADD COLUMN frozen_at TIMESTAMP NULL DEFAULT NULL");
+  } catch {}
+  try {
+    await execute("ALTER TABLE members ADD KEY ix_members_frozen_until (frozen_until)");
+  } catch {}
 };
 
 const decodeLogoDataUrl = (logoUrl) => {
@@ -463,7 +496,7 @@ class PlanRepository {
 class MemberRepository {
   async getActiveById(tenantId, id) {
     return queryOne(
-      `SELECT id, member_code, full_name, phone, email, status, join_date
+      `SELECT id, member_code, full_name, phone, email, status, join_date, frozen_until
        FROM members
        WHERE tenant_id = :tenantId AND id = :id AND status = 'active'`,
       { tenantId, id }
@@ -474,7 +507,7 @@ class MemberRepository {
     const q = String(queryValue ?? '').trim();
     if (!q.length) return null;
     const byCode = await queryOne(
-      `SELECT id, member_code, full_name, phone, email, status, join_date
+      `SELECT id, member_code, full_name, phone, email, status, join_date, frozen_until
        FROM members
        WHERE tenant_id = :tenantId AND status = 'active' AND member_code = :q
        LIMIT 1`,
@@ -482,7 +515,7 @@ class MemberRepository {
     );
     if (byCode) return byCode;
     return queryOne(
-      `SELECT id, member_code, full_name, phone, email, status, join_date
+      `SELECT id, member_code, full_name, phone, email, status, join_date, frozen_until
        FROM members
        WHERE tenant_id = :tenantId AND status = 'active' AND phone = :q
        ORDER BY id DESC
@@ -512,7 +545,27 @@ class MemberRepository {
     }
 
     return queryMany(
-      `SELECT m.id, m.member_code, m.full_name, m.phone, m.email, m.status, m.join_date, b.name AS branch_name
+      `SELECT
+         m.id,
+         m.member_code,
+         m.full_name,
+         m.phone,
+         m.email,
+         m.status,
+         m.join_date,
+         m.frozen_until,
+         (SELECT s.end_date
+          FROM subscriptions s
+       WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id AND s.status = 'active'
+          ORDER BY s.end_date DESC
+          LIMIT 1) AS membership_end_date,
+         (SELECT p.name
+          FROM subscriptions s
+          INNER JOIN membership_plans p ON p.id = s.plan_id
+       WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id AND s.status = 'active'
+          ORDER BY s.end_date DESC
+          LIMIT 1) AS membership_plan_name,
+         b.name AS branch_name
        FROM members m
        LEFT JOIN branches b ON b.id = m.branch_id
        WHERE ${where.join(' AND ')}
@@ -684,6 +737,18 @@ class AttendanceRepository {
        ORDER BY a.id DESC
        LIMIT :limit`,
       { tenantId, limit }
+    );
+  }
+
+  async listSince(tenantId, fromDateTime, limit = 200) {
+    return queryMany(
+      `SELECT a.id, a.member_id, a.checked_in_at, a.checked_out_at, m.full_name, m.member_code
+       FROM attendance_logs a
+       INNER JOIN members m ON m.id = a.member_id
+       WHERE a.tenant_id = :tenantId AND a.checked_in_at >= :fromDateTime
+       ORDER BY a.id DESC
+       LIMIT :limit`,
+      { tenantId, fromDateTime, limit }
     );
   }
 
@@ -1152,14 +1217,16 @@ class SentinelService {
 
     const activeSub = await this.subs.getActiveForMember(tenantId, Number(member.id));
     const today = toDateOnly(new Date());
+    const frozenUntil = member.frozen_until ?? null;
+    const membershipFrozen = frozenUntil && String(frozenUntil) >= today;
     const expiryDate = activeSub?.end_date ?? null;
     const membershipExpired = !expiryDate || String(expiryDate) < today;
 
     const unpaidCount = await this.invoices.countUnpaidForMember(tenantId, Number(member.id));
     const feesPending = unpaidCount > 0;
 
-    if (membershipExpired || feesPending) {
-      const reason = membershipExpired ? 'membership_expired' : 'fees_pending';
+    if (membershipFrozen || membershipExpired || feesPending) {
+      const reason = membershipFrozen ? 'membership_frozen' : membershipExpired ? 'membership_expired' : 'fees_pending';
       await this.attendance.logEvent(tenantId, {
         memberId: Number(member.id),
         queryValue,
@@ -1182,7 +1249,8 @@ class SentinelService {
               endDate: activeSub.end_date
             }
           : null,
-        unpaidInvoices: unpaidCount
+        unpaidInvoices: unpaidCount,
+        frozenUntil: frozenUntil
       };
     }
 
@@ -2488,15 +2556,24 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
        SELECT m.id AS member_id,
               (SELECT MAX(s.end_date)
                FROM subscriptions s
-               WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id) AS end_date
+               WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id AND s.status = 'active') AS end_date
        FROM members m
        WHERE m.tenant_id = :tenantId AND m.status = 'active'
      ) x`,
     { tenantId }
   );
 
+  const frozenMembers = await queryOne(
+    `SELECT COUNT(*) AS c
+     FROM members
+     WHERE tenant_id = :tenantId
+       AND frozen_until IS NOT NULL
+       AND frozen_until >= CURDATE()`,
+    { tenantId }
+  );
+
   const expiringMembers = await queryMany(
-    `SELECT m.id AS member_id, m.member_code, m.full_name, s.end_date, DATEDIFF(s.end_date, CURDATE()) AS days_left
+    `SELECT m.id AS member_id, m.member_code, m.full_name, m.frozen_until, s.end_date, DATEDIFF(s.end_date, CURDATE()) AS days_left
      FROM subscriptions s
      INNER JOIN members m ON m.id = s.member_id
      WHERE s.tenant_id = :tenantId
@@ -2529,6 +2606,7 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
     activeMembers: Number(activeMembers?.c ?? 0),
     membershipActiveMembers: Number(membershipCounts?.active_c ?? 0),
     membershipExpiredMembers: Number(membershipCounts?.expired_c ?? 0),
+    frozenMembers: Number(frozenMembers?.c ?? 0),
     plansTotal: Number(plansTotal?.c ?? 0),
     todayCheckins: Number(todayCheckins?.c ?? 0),
     unpaidInvoices: Number(unpaidInvoices?.c ?? 0),
@@ -2541,7 +2619,8 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
       memberCode: r.member_code,
       fullName: r.full_name,
       endDate: r.end_date,
-      daysLeft: Number(r.days_left)
+      daysLeft: Number(r.days_left),
+      frozenUntil: r.frozen_until ?? null
     }))
   });
 });
@@ -2642,6 +2721,32 @@ app.patch('/leads/:id', authMiddleware, requireRole('owner', 'admin', 'staff', '
   return res.json({ ok: true });
 });
 
+app.post('/leads/:id/convert', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_request' });
+
+  const exists = await queryOne('SELECT id FROM leads WHERE tenant_id = :tenantId AND id = :id', { tenantId, id });
+  if (!exists) return res.status(404).json({ error: 'lead_not_found' });
+
+  await execute('UPDATE leads SET status = :status WHERE tenant_id = :tenantId AND id = :id', {
+    tenantId,
+    id,
+    status: 'converted'
+  });
+  await appendSystemLog({
+    tenantId: req.user.tenantId,
+    actorUserId: req.user.userId,
+    action: 'lead_convert',
+    entityType: 'lead',
+    entityId: id,
+    meta: { status: 'converted' },
+    ip: req.ip,
+    userAgent: req.headers['user-agent']?.toString() ?? null
+  });
+  return res.json({ ok: true });
+});
+
 app.delete('/leads/:id', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
   const tenantId = req.user.tenantId;
   const id = Number(req.params.id);
@@ -2687,7 +2792,27 @@ app.get('/members', authMiddleware, async (req, res) => {
   }
 
   const rows = await queryMany(
-    `SELECT m.id, m.member_code, m.full_name, m.phone, m.email, m.status, m.join_date, b.name AS branch_name
+    `SELECT
+       m.id,
+       m.member_code,
+       m.full_name,
+       m.phone,
+       m.email,
+       m.status,
+       m.join_date,
+       m.frozen_until,
+       (SELECT s.end_date
+        FROM subscriptions s
+        WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id AND s.status = 'active'
+        ORDER BY s.end_date DESC
+        LIMIT 1) AS membership_end_date,
+       (SELECT p.name
+        FROM subscriptions s
+        INNER JOIN membership_plans p ON p.id = s.plan_id
+        WHERE s.tenant_id = m.tenant_id AND s.member_id = m.id AND s.status = 'active'
+        ORDER BY s.end_date DESC
+        LIMIT 1) AS membership_plan_name,
+       b.name AS branch_name
      FROM members m
      LEFT JOIN branches b ON b.id = m.branch_id
      WHERE ${where.join(' AND ')}
@@ -2704,7 +2829,7 @@ app.get('/members/:id', authMiddleware, async (req, res) => {
   if (!Number.isFinite(memberId) || memberId <= 0) return res.status(400).json({ error: 'invalid_request' });
 
   const row = await queryOne(
-    `SELECT id, member_code, full_name, phone, email, status, join_date, notes, created_at
+    `SELECT id, member_code, full_name, phone, email, status, join_date, notes, frozen_until, frozen_reason, frozen_at, created_at
      FROM members
      WHERE tenant_id = :tenantId AND id = :id`,
     { tenantId, id: memberId }
@@ -2719,6 +2844,9 @@ app.get('/members/:id', authMiddleware, async (req, res) => {
     status: row.status,
     joinDate: row.join_date,
     notes: row.notes ?? null,
+    frozenUntil: row.frozen_until ?? null,
+    frozenReason: row.frozen_reason ?? null,
+    frozenAt: row.frozen_at ?? null,
     createdAt: row.created_at
   });
 });
@@ -2879,6 +3007,129 @@ app.post('/members/:id/change-membership', authMiddleware, requireRole('owner', 
   }
 });
 
+app.post('/members/:id/remove-membership', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const memberId = Number(req.params.id);
+  if (!Number.isFinite(memberId) || memberId <= 0) return res.status(400).json({ error: 'invalid_request' });
+
+  const exists = await queryOne('SELECT id FROM members WHERE tenant_id = :tenantId AND id = :id', {
+    tenantId,
+    id: memberId
+  });
+  if (!exists) return res.status(404).json({ error: 'member_not_found' });
+
+  await execute(
+    `UPDATE subscriptions
+     SET status = 'cancelled'
+     WHERE tenant_id = :tenantId AND member_id = :memberId`,
+    { tenantId, memberId }
+  );
+
+  const remainingActive = await queryOne(
+    "SELECT COUNT(*) AS c FROM subscriptions WHERE tenant_id = :tenantId AND member_id = :memberId AND status = 'active'",
+    { tenantId, memberId }
+  );
+  return res.json({ ok: true, remainingActiveSubscriptions: Number(remainingActive?.c ?? 0) });
+});
+
+app.post('/members/:id/freeze', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const memberId = Number(req.params.id);
+  if (!Number.isFinite(memberId) || memberId <= 0) return res.status(400).json({ error: 'invalid_request' });
+
+  const bodySchema = z.object({
+    untilDate: z.string().min(10).max(10),
+    reason: z.string().max(191).optional().nullable()
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+
+  const exists = await queryOne('SELECT id FROM members WHERE tenant_id = :tenantId AND id = :id', {
+    tenantId,
+    id: memberId
+  });
+  if (!exists) return res.status(404).json({ error: 'member_not_found' });
+
+  const today = toDateOnly(new Date());
+  if (String(parsed.data.untilDate) < today) return res.status(400).json({ error: 'invalid_until_date' });
+
+  await execute(
+    `UPDATE members
+     SET frozen_until = :untilDate, frozen_reason = :reason, frozen_at = NOW()
+     WHERE tenant_id = :tenantId AND id = :id`,
+    {
+      tenantId,
+      id: memberId,
+      untilDate: parsed.data.untilDate,
+      reason: parsed.data.reason?.trim()?.length ? parsed.data.reason.trim() : null
+    }
+  );
+  return res.json({ ok: true, frozenUntil: parsed.data.untilDate });
+});
+
+app.post('/members/:id/unfreeze', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const memberId = Number(req.params.id);
+  if (!Number.isFinite(memberId) || memberId <= 0) return res.status(400).json({ error: 'invalid_request' });
+
+  const exists = await queryOne('SELECT id FROM members WHERE tenant_id = :tenantId AND id = :id', {
+    tenantId,
+    id: memberId
+  });
+  if (!exists) return res.status(404).json({ error: 'member_not_found' });
+
+  await execute(
+    `UPDATE members
+     SET frozen_until = NULL, frozen_reason = NULL, frozen_at = NULL
+     WHERE tenant_id = :tenantId AND id = :id`,
+    { tenantId, id: memberId }
+  );
+  return res.json({ ok: true });
+});
+
+app.get('/members/expiring', authMiddleware, requireRole('owner', 'admin', 'staff', 'receptionist'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const days = Math.min(Math.max(Number(req.query.days ?? 7), 1), 60);
+  const untilDate = toDateOnly(addDays(new Date(), days));
+
+  const rows = await queryMany(
+    `SELECT m.id AS member_id, m.member_code, m.full_name, m.phone, m.frozen_until,
+            x.end_date, DATEDIFF(x.end_date, CURDATE()) AS days_left, p.name AS plan_name
+     FROM members m
+     INNER JOIN (
+       SELECT s1.member_id, s1.end_date, s1.plan_id
+       FROM subscriptions s1
+       INNER JOIN (
+         SELECT member_id, MAX(end_date) AS max_end
+         FROM subscriptions
+         WHERE tenant_id = :tenantId
+         GROUP BY member_id
+       ) latest ON latest.member_id = s1.member_id AND latest.max_end = s1.end_date
+       WHERE s1.tenant_id = :tenantId
+     ) x ON x.member_id = m.id
+     INNER JOIN membership_plans p ON p.id = x.plan_id
+     WHERE m.tenant_id = :tenantId
+       AND m.status = 'active'
+       AND x.end_date BETWEEN CURDATE() AND :untilDate
+     ORDER BY x.end_date ASC
+     LIMIT 200`,
+    { tenantId, untilDate }
+  );
+
+  return res.json({
+    items: rows.map((r) => ({
+      memberId: Number(r.member_id),
+      memberCode: r.member_code,
+      fullName: r.full_name,
+      phone: r.phone ?? null,
+      planName: r.plan_name,
+      endDate: r.end_date,
+      daysLeft: Number(r.days_left),
+      frozenUntil: r.frozen_until ?? null
+    }))
+  });
+});
+
 app.delete('/members/:id', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const tenantId = req.user.tenantId;
   const memberId = Number(req.params.id);
@@ -2900,7 +3151,7 @@ app.get('/members/:id/detail', authMiddleware, async (req, res) => {
   if (!Number.isFinite(memberId) || memberId <= 0) return res.status(400).json({ error: 'invalid_request' });
 
   const member = await queryOne(
-    `SELECT id, member_code, full_name, phone, email, status, join_date, created_at
+    `SELECT id, member_code, full_name, phone, email, status, join_date, frozen_until, frozen_reason, frozen_at, created_at
      FROM members
      WHERE tenant_id = :tenantId AND id = :id`,
     { tenantId, id: memberId }
@@ -2912,6 +3163,7 @@ app.get('/members/:id/detail', authMiddleware, async (req, res) => {
      FROM subscriptions s
      INNER JOIN membership_plans p ON p.id = s.plan_id
      WHERE s.tenant_id = :tenantId AND s.member_id = :memberId
+       AND s.status = 'active'
      ORDER BY s.end_date DESC
      LIMIT 1`,
     { tenantId, memberId }
@@ -2962,6 +3214,9 @@ app.get('/members/:id/detail', authMiddleware, async (req, res) => {
       email: member.email,
       status: member.status,
       joinDate: member.join_date,
+      frozenUntil: member.frozen_until ?? null,
+      frozenReason: member.frozen_reason ?? null,
+      frozenAt: member.frozen_at ?? null,
       createdAt: member.created_at
     },
     subscription: activeSub
@@ -3015,7 +3270,12 @@ app.get('/members/:id/detail', authMiddleware, async (req, res) => {
 
 app.post('/members/register', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const bodySchema = z.object({
-    memberCode: z.string().min(2).max(32),
+    memberCode: z.preprocess((v) => {
+      if (v == null) return undefined;
+      if (typeof v !== 'string') return v;
+      const t = v.trim();
+      return t.length ? t : undefined;
+    }, z.string().min(2).max(32).optional()),
     fullName: z.string().min(2).max(191),
     phone: z.string().max(32).optional().nullable(),
     email: z.string().email().max(191).optional().nullable(),
@@ -3049,76 +3309,87 @@ app.post('/members/register', authMiddleware, requireRole('owner', 'admin'), asy
   try {
     await conn.beginTransaction();
 
-    const [memberResult] = await conn.execute(
-      `INSERT INTO members (tenant_id, branch_id, member_code, full_name, phone, email, gender, join_date, notes)
-       VALUES (:tenantId, :branchId, :memberCode, :fullName, :phone, :email, :gender, :joinDate, :notes)`,
-      {
-        tenantId,
-        branchId: parsed.data.branchId ?? null,
-        memberCode: parsed.data.memberCode,
-        fullName: parsed.data.fullName,
-        phone: parsed.data.phone ?? null,
-        email: parsed.data.email ?? null,
-        gender: parsed.data.gender ?? null,
-        joinDate,
-        notes: parsed.data.notes ?? null
-      }
-    );
-    const memberId = Number(memberResult.insertId);
+    let memberCode = parsed.data.memberCode;
+    for (let i = 0; i < 4; i += 1) {
+      if (!memberCode?.length) memberCode = await generateMemberCode(conn, tenantId);
+      try {
+        const [memberResult] = await conn.execute(
+          `INSERT INTO members (tenant_id, branch_id, member_code, full_name, phone, email, gender, join_date, notes)
+           VALUES (:tenantId, :branchId, :memberCode, :fullName, :phone, :email, :gender, :joinDate, :notes)`,
+          {
+            tenantId,
+            branchId: parsed.data.branchId ?? null,
+            memberCode,
+            fullName: parsed.data.fullName,
+            phone: parsed.data.phone ?? null,
+            email: parsed.data.email ?? null,
+            gender: parsed.data.gender ?? null,
+            joinDate,
+            notes: parsed.data.notes ?? null
+          }
+        );
+        const memberId = Number(memberResult.insertId);
 
-    const [subResult] = await conn.execute(
-      `INSERT INTO subscriptions (tenant_id, member_id, plan_id, start_date, end_date, status)
-       VALUES (:tenantId, :memberId, :planId, :startDate, :endDate, 'active')`,
-      {
-        tenantId,
-        memberId,
-        planId: parsed.data.planId,
-        startDate: toDateOnly(startDate),
-        endDate: toDateOnly(endDate)
-      }
-    );
-    const subscriptionId = Number(subResult.insertId);
+        const [subResult] = await conn.execute(
+          `INSERT INTO subscriptions (tenant_id, member_id, plan_id, start_date, end_date, status)
+           VALUES (:tenantId, :memberId, :planId, :startDate, :endDate, 'active')`,
+          {
+            tenantId,
+            memberId,
+            planId: parsed.data.planId,
+            startDate: toDateOnly(startDate),
+            endDate: toDateOnly(endDate)
+          }
+        );
+        const subscriptionId = Number(subResult.insertId);
 
-    let invoiceId = null;
-    let invoiceNo = null;
-    if (parsed.data.createInvoice) {
-      const subtotal = Number(plan.price) + Number(plan.admission_fee ?? 0);
-      const total = Number(subtotal.toFixed(2));
-      invoiceNo = newInvoiceNo();
-      const [invResult] = await conn.execute(
-        `INSERT INTO invoices (tenant_id, member_id, subscription_id, invoice_no, subtotal, discount, tax, total, status, due_date)
-         VALUES (:tenantId, :memberId, :subscriptionId, :invoiceNo, :subtotal, 0, 0, :total, 'unpaid', :dueDate)`,
-        {
-          tenantId,
-          memberId,
-          subscriptionId,
-          invoiceNo,
-          subtotal,
-          total,
-          dueDate: toDateOnly(startDate)
+        let invoiceId = null;
+        let invoiceNo = null;
+        if (parsed.data.createInvoice) {
+          const subtotal = Number(plan.price) + Number(plan.admission_fee ?? 0);
+          const total = Number(subtotal.toFixed(2));
+          invoiceNo = newInvoiceNo();
+          const [invResult] = await conn.execute(
+            `INSERT INTO invoices (tenant_id, member_id, subscription_id, invoice_no, subtotal, discount, tax, total, status, due_date)
+             VALUES (:tenantId, :memberId, :subscriptionId, :invoiceNo, :subtotal, 0, 0, :total, 'unpaid', :dueDate)`,
+            {
+              tenantId,
+              memberId,
+              subscriptionId,
+              invoiceNo,
+              subtotal,
+              total,
+              dueDate: toDateOnly(startDate)
+            }
+          );
+          invoiceId = Number(invResult.insertId);
         }
-      );
-      invoiceId = Number(invResult.insertId);
-    }
 
-    await conn.commit();
-    await triggerAutomation(
-      {
-        tenantId,
-        event: 'member_welcome',
-        memberId,
-        payload: { fullName: parsed.data.fullName, phone: parsed.data.phone ?? null, email: parsed.data.email ?? null }
-      },
-      conn
-    );
-    return res.status(201).json({
-      memberId,
-      subscriptionId,
-      startDate: toDateOnly(startDate),
-      endDate: toDateOnly(endDate),
-      invoiceId,
-      invoiceNo
-    });
+        await conn.commit();
+        await triggerAutomation(
+          {
+            tenantId,
+            event: 'member_welcome',
+            memberId,
+            payload: { fullName: parsed.data.fullName, phone: parsed.data.phone ?? null, email: parsed.data.email ?? null }
+          },
+          conn
+        );
+        return res.status(201).json({
+          memberId,
+          memberCode,
+          subscriptionId,
+          startDate: toDateOnly(startDate),
+          endDate: toDateOnly(endDate),
+          invoiceId,
+          invoiceNo
+        });
+      } catch (e) {
+        if (String(e?.code ?? '') !== 'ER_DUP_ENTRY') throw e;
+        memberCode = null;
+      }
+    }
+    throw new Error('member_code_conflict');
   } catch {
     await conn.rollback();
     return res.status(400).json({ error: 'member_register_failed' });
@@ -3129,7 +3400,12 @@ app.post('/members/register', authMiddleware, requireRole('owner', 'admin'), asy
 
 app.post('/members', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const bodySchema = z.object({
-    memberCode: z.string().min(2).max(32),
+    memberCode: z.preprocess((v) => {
+      if (v == null) return undefined;
+      if (typeof v !== 'string') return v;
+      const t = v.trim();
+      return t.length ? t : undefined;
+    }, z.string().min(2).max(32).optional()),
     fullName: z.string().min(2).max(191),
     phone: z.string().max(32).optional().nullable(),
     email: z.string().email().max(191).optional().nullable(),
@@ -3142,31 +3418,46 @@ app.post('/members', authMiddleware, requireRole('owner', 'admin'), async (req, 
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
 
   const joinDate = parsed.data.joinDate?.length ? parsed.data.joinDate : new Date().toISOString().slice(0, 10);
+  const connPool = await getPool();
+  const conn = await connPool.getConnection();
   try {
-    const result = await execute(
-      `INSERT INTO members (tenant_id, branch_id, member_code, full_name, phone, email, gender, join_date, notes)
-       VALUES (:tenantId, :branchId, :memberCode, :fullName, :phone, :email, :gender, :joinDate, :notes)`,
-      {
-        tenantId: req.user.tenantId,
-        branchId: parsed.data.branchId ?? null,
-        memberCode: parsed.data.memberCode,
-        fullName: parsed.data.fullName,
-        phone: parsed.data.phone ?? null,
-        email: parsed.data.email ?? null,
-        gender: parsed.data.gender ?? null,
-        joinDate,
-        notes: parsed.data.notes ?? null
+    let memberCode = parsed.data.memberCode;
+    for (let i = 0; i < 4; i += 1) {
+      if (!memberCode?.length) memberCode = await generateMemberCode(conn, req.user.tenantId);
+      try {
+        const [memberResult] = await conn.execute(
+          `INSERT INTO members (tenant_id, branch_id, member_code, full_name, phone, email, gender, join_date, notes)
+           VALUES (:tenantId, :branchId, :memberCode, :fullName, :phone, :email, :gender, :joinDate, :notes)`,
+          {
+            tenantId: req.user.tenantId,
+            branchId: parsed.data.branchId ?? null,
+            memberCode,
+            fullName: parsed.data.fullName,
+            phone: parsed.data.phone ?? null,
+            email: parsed.data.email ?? null,
+            gender: parsed.data.gender ?? null,
+            joinDate,
+            notes: parsed.data.notes ?? null
+          }
+        );
+        const memberId = Number(memberResult.insertId);
+        await triggerAutomation({
+          tenantId: req.user.tenantId,
+          event: 'member_welcome',
+          memberId,
+          payload: { fullName: parsed.data.fullName, phone: parsed.data.phone ?? null, email: parsed.data.email ?? null }
+        });
+        return res.status(201).json({ id: memberId, memberCode });
+      } catch (e) {
+        if (String(e?.code ?? '') !== 'ER_DUP_ENTRY') throw e;
+        memberCode = null;
       }
-    );
-    await triggerAutomation({
-      tenantId: req.user.tenantId,
-      event: 'member_welcome',
-      memberId: Number(result.insertId),
-      payload: { fullName: parsed.data.fullName, phone: parsed.data.phone ?? null, email: parsed.data.email ?? null }
-    });
-    return res.status(201).json({ id: Number(result.insertId) });
+    }
+    return res.status(400).json({ error: 'member_create_failed' });
   } catch {
     return res.status(400).json({ error: 'member_create_failed' });
+  } finally {
+    conn.release();
   }
 });
 
@@ -3355,6 +3646,21 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
     await attendanceRepo.logEvent(tenantId, { memberId: memberId ?? null, queryValue, status: 'denied', reason: 'member_not_found' });
     return res.status(404).json({ error: 'member_not_found' });
   }
+  const today = toDateOnly(new Date());
+  if (member.frozen_until && String(member.frozen_until) >= today) {
+    await attendanceRepo.logEvent(tenantId, { memberId: Number(member.id), queryValue, status: 'denied', reason: 'membership_frozen' });
+    return res.json({
+      ok: false,
+      allowed: false,
+      reason: 'membership_frozen',
+      memberId: Number(member.id),
+      memberName: member.full_name,
+      memberCode: member.member_code,
+      membershipEndDate: null,
+      unpaidInvoices: 0,
+      frozenUntil: member.frozen_until
+    });
+  }
 
   const activeSub = await subRepo.getActiveForMember(tenantId, Number(member.id));
   const membershipEndDate = activeSub?.end_date ?? null;
@@ -3394,20 +3700,68 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
   });
 });
 
+app.get('/attendance', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const range = typeof req.query.range === 'string' ? req.query.range.trim() : 'today';
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+
+  if (range === 'today' || !range.length) {
+    const rows = await attendanceRepo.listToday(tenantId, limit);
+    return res.json({ items: rows });
+  }
+
+  let days = 0;
+  if (range === '7d') days = 7;
+  if (range === '30d') days = 30;
+  if (!days) return res.status(400).json({ error: 'invalid_request' });
+
+  const from = addDays(new Date(), -(days - 1));
+  from.setHours(0, 0, 0, 0);
+  const rows = await attendanceRepo.listSince(tenantId, toMysqlDateTime(from), limit);
+  return res.json({ items: rows });
+});
+
 app.get('/attendance/today', authMiddleware, async (req, res) => {
   const rows = await attendanceRepo.listToday(req.user.tenantId, 200);
   return res.json({ items: rows });
 });
 
 app.get('/invoices', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+  const from = typeof req.query.from === 'string' ? req.query.from.trim() : '';
+  const to = typeof req.query.to === 'string' ? req.query.to.trim() : '';
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+
+  const where = ['i.tenant_id = :tenantId'];
+  const params = { tenantId, limit };
+
+  if (q?.length) {
+    where.push('(i.invoice_no LIKE :q OR m.full_name LIKE :q OR m.member_code LIKE :q OR m.phone LIKE :q)');
+    params.q = `%${q}%`;
+  }
+  if (status?.length && status !== 'all') {
+    where.push('i.status = :status');
+    params.status = status;
+  }
+  if (from?.length) {
+    where.push('DATE(i.created_at) >= :from');
+    params.from = from;
+  }
+  if (to?.length) {
+    where.push('DATE(i.created_at) <= :to');
+    params.to = to;
+  }
+
   const rows = await queryMany(
-    `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at, m.full_name
+    `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at, m.full_name, m.member_code, m.phone
      FROM invoices i
      INNER JOIN members m ON m.id = i.member_id
-     WHERE i.tenant_id = :tenantId
+     WHERE ${where.join(' AND ')}
      ORDER BY i.id DESC
-     LIMIT 200`,
-    { tenantId: req.user.tenantId }
+     LIMIT :limit`,
+    params
   );
   return res.json({ items: rows });
 });
@@ -4354,6 +4708,52 @@ app.get('/pdf/invoices.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
       { onNewPage: redrawInvoicesHeader }
     );
   }
+
+  doc.end();
+});
+
+app.get('/pdf/invoice/:id.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const invoiceId = Number(req.params.id);
+  if (!Number.isFinite(invoiceId) || invoiceId <= 0) return res.status(400).json({ error: 'invalid_request' });
+
+  const profile = await loadGymProfileForTenant(tenantId);
+  const inv = await invoiceRepo.getById(tenantId, invoiceId);
+  if (!inv) return res.status(404).json({ error: 'invoice_not_found' });
+
+  const money = (v) => Number(v ?? 0).toFixed(2);
+  const today = toDateOnly(new Date());
+  const safeNo = String(inv.invoice_no ?? invoiceId).replaceAll(/[^A-Za-z0-9_-]/g, '_');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="invoice_${safeNo}_${today}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  drawGymPdfHeader(doc, profile, {
+    title: 'Invoice',
+    subtitle: `Invoice: ${inv.invoice_no ?? ''}  •  Status: ${inv.status ?? ''}`
+  });
+  doc.moveDown(0.8);
+
+  doc.fontSize(11).fillColor('#000000');
+  doc.text(`Member: ${inv.member_name ?? ''} (${inv.member_code ?? ''})`);
+  if (inv.phone) doc.text(`Phone: ${inv.phone}`);
+  if (inv.email) doc.text(`Email: ${inv.email}`);
+  doc.moveDown(0.3);
+  doc.fillColor('#444444').fontSize(10);
+  doc.text(`Created: ${fmtDateOnlyStr(inv.created_at)}   Due: ${fmtDateOnlyStr(inv.due_date)}`);
+  doc.moveDown(0.8);
+
+  doc.fillColor('#000000').fontSize(12).text('Summary', { underline: true });
+  doc.moveDown(0.6);
+  doc.fontSize(11);
+  doc.text(`Subtotal: ${money(inv.subtotal)}`, { align: 'right' });
+  doc.text(`Discount: ${money(inv.discount)}`, { align: 'right' });
+  doc.text(`Tax: ${money(inv.tax)}`, { align: 'right' });
+  doc.moveDown(0.2);
+  doc.fontSize(13).text(`Total: ${money(inv.total)}`, { align: 'right' });
+  doc.moveDown(1.2);
+  doc.fontSize(10).fillColor('#666666').text('Thank you for your business.', { align: 'center' });
 
   doc.end();
 });

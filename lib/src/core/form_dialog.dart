@@ -31,6 +31,36 @@ Future<T?> showAppFormDialog<T>({
   );
 }
 
+Future<bool> showAppConfirmDialog({
+  required BuildContext context,
+  required String title,
+  String? message,
+  String confirmLabel = 'Confirm',
+  String cancelLabel = 'Cancel',
+  bool danger = false,
+}) async {
+  final theme = Theme.of(context);
+  final c = danger ? theme.colorScheme.error : theme.colorScheme.primary;
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Text(title),
+        content: message == null || message.trim().isEmpty ? null : Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(cancelLabel)),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(confirmLabel),
+          ),
+        ],
+      );
+    },
+  );
+  return result ?? false;
+}
+
 class AppFormDialog extends StatelessWidget {
   const AppFormDialog({
     super.key,

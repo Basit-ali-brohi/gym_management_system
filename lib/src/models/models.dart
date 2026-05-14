@@ -39,6 +39,9 @@ class Member {
     required this.status,
     required this.joinDate,
     required this.branchName,
+    this.membershipEndDate,
+    this.membershipPlanName,
+    this.frozenUntil,
   });
 
   final int id;
@@ -49,6 +52,37 @@ class Member {
   final String status;
   final String joinDate;
   final String? branchName;
+  final String? membershipEndDate;
+  final String? membershipPlanName;
+  final String? frozenUntil;
+
+  Member copyWith({
+    int? id,
+    String? memberCode,
+    String? fullName,
+    String? phone,
+    String? email,
+    String? status,
+    String? joinDate,
+    String? branchName,
+    String? membershipEndDate,
+    String? membershipPlanName,
+    String? frozenUntil,
+  }) {
+    return Member(
+      id: id ?? this.id,
+      memberCode: memberCode ?? this.memberCode,
+      fullName: fullName ?? this.fullName,
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      status: status ?? this.status,
+      joinDate: joinDate ?? this.joinDate,
+      branchName: branchName ?? this.branchName,
+      membershipEndDate: membershipEndDate ?? this.membershipEndDate,
+      membershipPlanName: membershipPlanName ?? this.membershipPlanName,
+      frozenUntil: frozenUntil ?? this.frozenUntil,
+    );
+  }
 
   factory Member.fromJson(Map<String, dynamic> json) {
     return Member(
@@ -60,6 +94,9 @@ class Member {
       status: json['status']?.toString() ?? 'active',
       joinDate: json['join_date']?.toString() ?? '',
       branchName: json['branch_name']?.toString(),
+      membershipEndDate: json['membership_end_date']?.toString(),
+      membershipPlanName: json['membership_plan_name']?.toString(),
+      frozenUntil: json['frozen_until']?.toString(),
     );
   }
 }
@@ -147,10 +184,17 @@ class Invoice {
   final String memberName;
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
+    num parseNum(dynamic v) {
+      if (v == null) return 0;
+      if (v is num) return v;
+      if (v is String) return num.tryParse(v) ?? 0;
+      return 0;
+    }
+
     return Invoice(
       id: (json['id'] as num).toInt(),
       invoiceNo: json['invoice_no']?.toString() ?? '',
-      total: json['total'] as num? ?? 0,
+      total: parseNum(json['total']),
       status: json['status']?.toString() ?? '',
       createdAt: json['created_at']?.toString() ?? '',
       memberName: json['full_name']?.toString() ?? '',

@@ -17,7 +17,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('SaaS Login'), findsOneWidget);
+    expect(find.text('Gym Management'), findsOneWidget);
   });
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -42,7 +44,8 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
   final Ref ref;
  
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    final hadData = state.valueOrNull != null;
+    if (!hadData) state = const AsyncValue.loading();
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -55,9 +58,9 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
           .toList();
       state = AsyncValue.data(items);
     } on ApiException catch (e, st) {
-      state = AsyncValue.error(e.message, st);
+      if (!hadData) state = AsyncValue.error(e.message, st);
     } catch (e, st) {
-      state = AsyncValue.error('leads_load_failed', st);
+      if (!hadData) state = AsyncValue.error('leads_load_failed', st);
     }
   }
  
@@ -119,9 +122,29 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
   }
 }
  
-class LeadsScreen extends ConsumerWidget {
+class LeadsScreen extends ConsumerStatefulWidget {
   const LeadsScreen({super.key});
- 
+
+  @override
+  ConsumerState<LeadsScreen> createState() => _LeadsScreenState();
+}
+
+class _LeadsScreenState extends ConsumerState<LeadsScreen> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+  bool _overdueOnly = false;
+  bool _sortByNextContact = true;
+  String _sourceFilter = 'all';
+  String _interestFilter = 'all';
+  String _nextContactFilter = 'all';
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Color _statusColor(String status) {
     switch (status) {
       case 'trial':
@@ -149,7 +172,7 @@ class LeadsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _openLeadsPdfActions(BuildContext context, WidgetRef ref) async {
+  Future<void> _openLeadsPdfActions(BuildContext context) async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     await showDialog<void>(
       context: context,
@@ -162,7 +185,7 @@ class LeadsScreen extends ConsumerWidget {
             OutlinedButton.icon(
               onPressed: () async {
                 Navigator.of(context).pop();
-                await _runLeadsPdf(context, ref, preview: true, today: today);
+                await _runLeadsPdf(context, preview: true, today: today);
               },
               icon: const Icon(Icons.visibility_outlined),
               label: const Text('Preview'),
@@ -170,7 +193,7 @@ class LeadsScreen extends ConsumerWidget {
             FilledButton.icon(
               onPressed: () async {
                 Navigator.of(context).pop();
-                await _runLeadsPdf(context, ref, preview: false, today: today);
+                await _runLeadsPdf(context, preview: false, today: today);
               },
               icon: const Icon(Icons.download_outlined),
               label: const Text('Download'),
@@ -183,10 +206,7 @@ class LeadsScreen extends ConsumerWidget {
  
   Future<void> _runLeadsPdf(
     BuildContext context,
-    WidgetRef ref, {
-    required bool preview,
-    required String today,
-  }) async {
+    {required bool preview, required String today}) async {
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -211,16 +231,52 @@ class LeadsScreen extends ConsumerWidget {
     }
   }
  
-  Future<void> _openLeadForm(BuildContext context, WidgetRef ref, {Lead? lead}) async {
+  Future<void> _openLeadForm(BuildContext context, {Lead? lead}) async {
     final isEdit = lead != null;
     final nameCtrl = TextEditingController(text: lead?.fullName ?? '');
     final phoneCtrl = TextEditingController(text: lead?.phone ?? '');
-    final sourceCtrl = TextEditingController(text: lead?.source ?? '');
-    final interestCtrl = TextEditingController(text: lead?.interest ?? '');
     final notesCtrl = TextEditingController(text: lead?.notes ?? '');
     String status = lead?.status ?? 'new';
+    final leads = ref.read(leadsControllerProvider).valueOrNull ?? const <Lead>[];
+    final commonSources = <String>[
+      'Walk-in',
+      'Facebook',
+      'Instagram',
+      'Google',
+      'Referral',
+      'WhatsApp',
+      'Call',
+      'Other',
+    ];
+    final commonInterests = <String>[
+      'Weight loss',
+      'Strength training',
+      'Personal training',
+      'Fat loss + cardio',
+      'Muscle gain',
+      'Fitness',
+      'Rehab',
+    ];
+    final sourceOptions = <String>{
+      ...commonSources,
+      for (final l in leads)
+        if ((l.source ?? '').trim().isNotEmpty) l.source!.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final interestOptions = <String>{
+      ...commonInterests,
+      for (final l in leads)
+        if ((l.interest ?? '').trim().isNotEmpty) l.interest!.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    TextEditingController? sourceAutoCtrl;
+    TextEditingController? interestAutoCtrl;
     DateTime? nextContact =
         (lead?.nextContactDate != null && lead!.nextContactDate!.trim().isNotEmpty) ? DateTime.tryParse(lead.nextContactDate!) : null;
+    if (!isEdit && nextContact == null) {
+      final t = DateTime.now();
+      nextContact = DateTime(t.year, t.month, t.day).add(const Duration(days: 1));
+    }
     final formKey = GlobalKey<FormState>();
     final date = DateFormat('yyyy-MM-dd');
     final pretty = DateFormat('dd MMM yyyy');
@@ -247,14 +303,71 @@ class LeadsScreen extends ConsumerWidget {
                   decoration: const InputDecoration(labelText: 'Phone'),
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: sourceCtrl,
-                  decoration: const InputDecoration(labelText: 'Source (Facebook, Walk-in, Referral)'),
+                Autocomplete<String>(
+                  initialValue: TextEditingValue(text: lead?.source ?? ''),
+                  optionsBuilder: (value) {
+                    final q = value.text.trim().toLowerCase();
+                    if (q.isEmpty) return sourceOptions.take(8);
+                    return sourceOptions.where((o) => o.toLowerCase().contains(q)).take(8);
+                  },
+                  onSelected: (v) => sourceAutoCtrl?.text = v,
+                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                    sourceAutoCtrl ??= textEditingController;
+                    return TextFormField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      decoration: const InputDecoration(labelText: 'Source', hintText: 'Walk-in, Facebook, Referral...'),
+                    );
+                  },
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: interestCtrl,
-                  decoration: const InputDecoration(labelText: 'Interest (Weight loss, Strength, etc.)'),
+                Autocomplete<String>(
+                  initialValue: TextEditingValue(text: lead?.interest ?? ''),
+                  optionsBuilder: (value) {
+                    final q = value.text.trim().toLowerCase();
+                    if (q.isEmpty) return interestOptions.take(8);
+                    return interestOptions.where((o) => o.toLowerCase().contains(q)).take(8);
+                  },
+                  onSelected: (v) => interestAutoCtrl?.text = v,
+                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                    interestAutoCtrl ??= textEditingController;
+                    return TextFormField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      decoration: const InputDecoration(labelText: 'Interest', hintText: 'Weight loss, Strength...'),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final t = DateTime.now();
+                        setModalState(() => nextContact = DateTime(t.year, t.month, t.day));
+                      },
+                      icon: const Icon(Icons.today_outlined),
+                      label: const Text('Today'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final t = DateTime.now();
+                        setModalState(() => nextContact = DateTime(t.year, t.month, t.day).add(const Duration(days: 1)));
+                      },
+                      icon: const Icon(Icons.event_outlined),
+                      label: const Text('Tomorrow'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final t = DateTime.now();
+                        setModalState(() => nextContact = DateTime(t.year, t.month, t.day).add(const Duration(days: 7)));
+                      },
+                      icon: const Icon(Icons.date_range_outlined),
+                      label: const Text('Next week'),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 InkWell(
@@ -277,7 +390,7 @@ class LeadsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: status,
+                  initialValue: status,
                   decoration: const InputDecoration(labelText: 'Status'),
                   items: const [
                     DropdownMenuItem(value: 'new', child: Text('New')),
@@ -304,13 +417,15 @@ class LeadsScreen extends ConsumerWidget {
           onPressed: () async {
             if (!(formKey.currentState?.validate() ?? false)) return;
             final controller = ref.read(leadsControllerProvider.notifier);
+            final source = sourceAutoCtrl?.text.trim() ?? '';
+            final interest = interestAutoCtrl?.text.trim() ?? '';
             if (isEdit) {
               await controller.updateLead(
-                id: lead!.id,
+                id: lead.id,
                 fullName: nameCtrl.text,
                 phone: phoneCtrl.text,
-                source: sourceCtrl.text,
-                interest: interestCtrl.text,
+                source: source,
+                interest: interest,
                 nextContactDate: nextContact == null ? null : date.format(nextContact!),
                 status: status,
                 notes: notesCtrl.text,
@@ -319,8 +434,8 @@ class LeadsScreen extends ConsumerWidget {
               await controller.addLead(
                 fullName: nameCtrl.text,
                 phone: phoneCtrl.text,
-                source: sourceCtrl.text,
-                interest: interestCtrl.text,
+                source: source,
+                interest: interest,
                 nextContactDate: nextContact == null ? null : date.format(nextContact!),
                 status: status,
                 notes: notesCtrl.text,
@@ -334,60 +449,327 @@ class LeadsScreen extends ConsumerWidget {
     ).whenComplete(() {
       nameCtrl.dispose();
       phoneCtrl.dispose();
-      sourceCtrl.dispose();
-      interestCtrl.dispose();
       notesCtrl.dispose();
     });
   }
+
+  bool _isOverdue(Lead l, DateTime today) {
+    final raw = l.nextContactDate?.trim();
+    if (raw == null || raw.isEmpty) return false;
+    final d = DateTime.tryParse(raw);
+    if (d == null) return false;
+    final dateOnly = DateTime(d.year, d.month, d.day);
+    final t = DateTime(today.year, today.month, today.day);
+    if (l.status == 'converted' || l.status == 'lost') return false;
+    return dateOnly.isBefore(t);
+  }
+
+  String _fmtDateOnly(String? raw) {
+    final s = raw?.trim();
+    if (s == null || s.isEmpty) return '-';
+    final m = RegExp(r'^\d{4}-\d{2}-\d{2}').firstMatch(s);
+    if (m != null) return m.group(0)!;
+    final d = DateTime.tryParse(s);
+    if (d == null) return s;
+    final y = d.year.toString().padLeft(4, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '$y-$mm-$dd';
+  }
+
+  Future<void> _openLeadDetails(BuildContext context, Lead l) async {
+    final theme = Theme.of(context);
+    final today = DateTime.now();
+    final overdue = _isOverdue(l, today);
+    final pretty = DateFormat('dd MMM yyyy');
+    final d = (l.nextContactDate == null || l.nextContactDate!.trim().isEmpty) ? null : DateTime.tryParse(l.nextContactDate!.trim());
+    final nextText = d == null ? '-' : pretty.format(d);
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Expanded(child: Text(l.fullName)),
+              _statusBadge(context, l.status),
+            ],
+          ),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _InfoRow(label: 'Phone', value: (l.phone ?? '-').trim().isEmpty ? '-' : l.phone!.trim(), icon: Icons.call_outlined),
+                const SizedBox(height: 10),
+                _InfoRow(label: 'Source', value: (l.source ?? '-').trim().isEmpty ? '-' : l.source!.trim(), icon: Icons.public_outlined),
+                const SizedBox(height: 10),
+                _InfoRow(label: 'Interest', value: (l.interest ?? '-').trim().isEmpty ? '-' : l.interest!.trim(), icon: Icons.bolt_outlined),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                    color: overdue ? theme.colorScheme.error.withAlpha(14) : theme.colorScheme.surfaceContainerHighest.withAlpha(120),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(overdue ? Icons.warning_amber_outlined : Icons.event_outlined, color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Next Contact', style: theme.textTheme.labelLarge),
+                            const SizedBox(height: 2),
+                            Text(nextText, style: theme.textTheme.bodyMedium?.copyWith(color: overdue ? theme.colorScheme.error : null)),
+                          ],
+                        ),
+                      ),
+                      if (overdue)
+                        Text('Overdue', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.error, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerLeft, child: Text('Quick Status', style: theme.textTheme.labelLarge)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    if (l.status != 'new')
+                      OutlinedButton(
+                        onPressed: () async {
+                          await ref.read(leadsControllerProvider.notifier).updateLead(
+                                id: l.id,
+                                fullName: l.fullName,
+                                phone: l.phone,
+                                source: l.source,
+                                interest: l.interest,
+                                nextContactDate: l.nextContactDate,
+                                status: 'new',
+                                notes: l.notes,
+                              );
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        child: const Text('Mark New'),
+                      ),
+                    if (l.status != 'trial')
+                      OutlinedButton(
+                        onPressed: () async {
+                          await ref.read(leadsControllerProvider.notifier).updateLead(
+                                id: l.id,
+                                fullName: l.fullName,
+                                phone: l.phone,
+                                source: l.source,
+                                interest: l.interest,
+                                nextContactDate: l.nextContactDate,
+                                status: 'trial',
+                                notes: l.notes,
+                              );
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        child: const Text('Mark Trial'),
+                      ),
+                    if (l.status != 'converted')
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: theme.colorScheme.tertiary),
+                        onPressed: () async {
+                          await ref.read(leadsControllerProvider.notifier).updateLead(
+                                id: l.id,
+                                fullName: l.fullName,
+                                phone: l.phone,
+                                source: l.source,
+                                interest: l.interest,
+                                nextContactDate: l.nextContactDate,
+                                status: 'converted',
+                                notes: l.notes,
+                              );
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        child: const Text('Mark Converted'),
+                      ),
+                    if (l.status != 'lost')
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(foregroundColor: theme.colorScheme.error),
+                        onPressed: () async {
+                          await ref.read(leadsControllerProvider.notifier).updateLead(
+                                id: l.id,
+                                fullName: l.fullName,
+                                phone: l.phone,
+                                source: l.source,
+                                interest: l.interest,
+                                nextContactDate: l.nextContactDate,
+                                status: 'lost',
+                                notes: l.notes,
+                              );
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        child: const Text('Mark Lost'),
+                      ),
+                  ],
+                ),
+                if ((l.notes ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Align(alignment: Alignment.centerLeft, child: Text('Notes', style: theme.textTheme.labelLarge)),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                      color: theme.colorScheme.surface,
+                    ),
+                    child: Text(l.notes!.trim()),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                final uri = Uri(
+                  path: '/members',
+                  queryParameters: {
+                    'prefill': 'lead',
+                    'leadId': l.id.toString(),
+                    'fullName': l.fullName,
+                    if ((l.phone ?? '').trim().isNotEmpty) 'phone': l.phone!.trim(),
+                  },
+                );
+                context.go(uri.toString());
+              },
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              label: const Text('Convert'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _openLeadForm(context, lead: l);
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: theme.colorScheme.error),
+              onPressed: () async {
+                final ok = await showAppConfirmDialog(
+                  context: context,
+                  title: 'Delete lead?',
+                  message: l.fullName,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                );
+                if (!ok) return;
+                if (!context.mounted) return;
+                Navigator.of(context).pop();
+                await ref.read(leadsControllerProvider.notifier).deleteLead(l.id);
+              },
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _applyQuery({String? q, String? status}) {
+    final current = ref.read(leadsQueryProvider);
+    final next = current.copyWith(q: q ?? current.q, status: status ?? current.status);
+    ref.read(leadsQueryProvider.notifier).state = next;
+    ref.read(leadsControllerProvider.notifier).load();
+  }
  
+  bool _matchesNextContact(Lead l, DateTime today) {
+    if (_nextContactFilter == 'all') return true;
+    final raw = l.nextContactDate?.trim();
+    if (raw == null || raw.isEmpty) return false;
+    final d = DateTime.tryParse(raw);
+    if (d == null) return false;
+    final dateOnly = DateTime(d.year, d.month, d.day);
+    final t = DateTime(today.year, today.month, today.day);
+    if (_nextContactFilter == 'today') return dateOnly == t;
+    if (_nextContactFilter == 'tomorrow') return dateOnly == t.add(const Duration(days: 1));
+    if (_nextContactFilter == 'next7') return !dateOnly.isBefore(t) && dateOnly.isBefore(t.add(const Duration(days: 7)));
+    return true;
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final q = ref.watch(leadsQueryProvider);
     final async = ref.watch(leadsControllerProvider);
+    final itemsPreview = async.valueOrNull ?? const <Lead>[];
+    final sources = <String>{
+      for (final l in itemsPreview)
+        if ((l.source ?? '').trim().isNotEmpty) l.source!.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final interests = <String>{
+      for (final l in itemsPreview)
+        if ((l.interest ?? '').trim().isNotEmpty) l.interest!.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (_searchCtrl.text != q.q) {
+      _searchCtrl.text = q.q;
+      _searchCtrl.selection = TextSelection.collapsed(offset: _searchCtrl.text.length);
+    }
  
     return Scaffold(
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        children: [
             Row(
               children: [
                 Text('Leads', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
                 const Spacer(),
                 IconButton(
                   tooltip: 'PDF',
-                  onPressed: () => _openLeadsPdfActions(context, ref),
+                  onPressed: () => _openLeadsPdfActions(context),
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                 ),
                 FilledButton.icon(
-                  onPressed: () => _openLeadForm(context, ref),
+                  onPressed: () => _openLeadForm(context),
                   icon: const Icon(Icons.add),
                   label: const Text('Add Lead'),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
+                SizedBox(
+                  width: 520,
                   child: TextField(
+                    controller: _searchCtrl,
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
                       labelText: 'Search (name / phone / source)',
                     ),
                     onChanged: (v) {
-                      ref.read(leadsQueryProvider.notifier).state = q.copyWith(q: v);
-                      ref.read(leadsControllerProvider.notifier).load();
+                      _debounce?.cancel();
+                      _debounce = Timer(const Duration(milliseconds: 350), () {
+                        _applyQuery(q: v);
+                      });
                     },
+                    onSubmitted: (v) => _applyQuery(q: v),
                   ),
                 ),
-                const SizedBox(width: 12),
                 SizedBox(
                   width: 220,
                   child: DropdownButtonFormField<String>(
-                    value: q.status,
+                    key: ValueKey<String>(q.status),
+                    initialValue: q.status,
                     decoration: const InputDecoration(labelText: 'Status'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All')),
@@ -396,25 +778,139 @@ class LeadsScreen extends ConsumerWidget {
                       DropdownMenuItem(value: 'converted', child: Text('Converted')),
                       DropdownMenuItem(value: 'lost', child: Text('Lost')),
                     ],
-                    onChanged: (v) {
-                      ref.read(leadsQueryProvider.notifier).state = q.copyWith(status: v ?? 'all');
-                      ref.read(leadsControllerProvider.notifier).load();
-                    },
+                    onChanged: (v) => _applyQuery(status: v ?? 'all'),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(
+                  width: 220,
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey(_sourceFilter),
+                    initialValue: _sourceFilter,
+                    decoration: const InputDecoration(labelText: 'Source'),
+                    items: [
+                      const DropdownMenuItem(value: 'all', child: Text('All Sources')),
+                      for (final s in sources) DropdownMenuItem(value: s, child: Text(s)),
+                    ],
+                    onChanged: (v) => setState(() => _sourceFilter = v ?? 'all'),
+                  ),
+                ),
+                SizedBox(
+                  width: 240,
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey(_interestFilter),
+                    initialValue: _interestFilter,
+                    decoration: const InputDecoration(labelText: 'Interest'),
+                    items: [
+                      const DropdownMenuItem(value: 'all', child: Text('All Interests')),
+                      for (final s in interests) DropdownMenuItem(value: s, child: Text(s)),
+                    ],
+                    onChanged: (v) => setState(() => _interestFilter = v ?? 'all'),
+                  ),
+                ),
                 IconButton(
                   tooltip: 'Refresh',
                   onPressed: () => ref.read(leadsControllerProvider.notifier).load(),
                   icon: const Icon(Icons.refresh),
                 ),
+                OutlinedButton(
+                  onPressed: () {
+                    _searchCtrl.clear();
+                    setState(() {
+                      _overdueOnly = false;
+                      _sortByNextContact = true;
+                      _sourceFilter = 'all';
+                      _interestFilter = 'all';
+                      _nextContactFilter = 'all';
+                    });
+                    _applyQuery(q: '', status: 'all');
+                  },
+                  child: const Text('Clear'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                FilterChip(
+                  selected: _overdueOnly,
+                  onSelected: (v) => setState(() => _overdueOnly = v),
+                  label: const Text('Overdue'),
+                  avatar: const Icon(Icons.warning_amber_outlined, size: 18),
+                ),
+                FilterChip(
+                  selected: _sortByNextContact,
+                  onSelected: (v) => setState(() => _sortByNextContact = v),
+                  label: const Text('Sort by Next Contact'),
+                  avatar: const Icon(Icons.sort_outlined, size: 18),
+                ),
+                ChoiceChip(
+                  label: const Text('Any date'),
+                  selected: _nextContactFilter == 'all',
+                  onSelected: (_) => setState(() => _nextContactFilter = 'all'),
+                ),
+                ChoiceChip(
+                  label: const Text('Today'),
+                  selected: _nextContactFilter == 'today',
+                  onSelected: (_) => setState(() => _nextContactFilter = 'today'),
+                ),
+                ChoiceChip(
+                  label: const Text('Tomorrow'),
+                  selected: _nextContactFilter == 'tomorrow',
+                  onSelected: (_) => setState(() => _nextContactFilter = 'tomorrow'),
+                ),
+                ChoiceChip(
+                  label: const Text('Next 7 days'),
+                  selected: _nextContactFilter == 'next7',
+                  onSelected: (_) => setState(() => _nextContactFilter = 'next7'),
+                ),
               ],
             ),
             const SizedBox(height: 14),
-            Expanded(
-              child: async.when(
-                data: (items) {
-                  if (items.isEmpty) return const Center(child: Text('No leads'));
+            async.when(
+              data: (items) {
+                  final today = DateTime.now();
+                  final filtered = items
+                      .where((l) => !_overdueOnly || _isOverdue(l, today))
+                      .where((l) => _sourceFilter == 'all' || (l.source ?? '').trim() == _sourceFilter)
+                      .where((l) => _interestFilter == 'all' || (l.interest ?? '').trim() == _interestFilter)
+                      .where((l) => _matchesNextContact(l, today))
+                      .toList();
+                  if (_sortByNextContact) {
+                    filtered.sort((a, b) {
+                      final ad = (a.nextContactDate == null || a.nextContactDate!.trim().isEmpty)
+                          ? null
+                          : DateTime.tryParse(a.nextContactDate!.trim());
+                      final bd = (b.nextContactDate == null || b.nextContactDate!.trim().isEmpty)
+                          ? null
+                          : DateTime.tryParse(b.nextContactDate!.trim());
+                      if (ad == null && bd == null) return 0;
+                      if (ad == null) return 1;
+                      if (bd == null) return -1;
+                      return ad.compareTo(bd);
+                    });
+                  }
+                  if (filtered.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.person_search_outlined, size: 44, color: theme.colorScheme.onSurfaceVariant),
+                          const SizedBox(height: 10),
+                          Text('No leads found', style: theme.textTheme.titleMedium),
+                          const SizedBox(height: 4),
+                          Text('Try changing search / filters', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: () => _openLeadForm(context),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add Lead'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
                   return Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
@@ -424,9 +920,6 @@ class LeadsScreen extends ConsumerWidget {
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: DataTable(
-                        headingRowHeight: 44,
-                        dataRowMinHeight: 48,
-                        dataRowMaxHeight: 56,
                         columnSpacing: 18,
                         horizontalMargin: 16,
                         columns: const [
@@ -439,14 +932,19 @@ class LeadsScreen extends ConsumerWidget {
                           DataColumn(label: Text('Actions')),
                         ],
                         rows: [
-                          for (final l in items)
+                          for (final l in filtered)
                             DataRow(
                               cells: [
-                                DataCell(SizedBox(width: 180, child: Text(l.fullName, overflow: TextOverflow.ellipsis))),
+                                DataCell(
+                                  SizedBox(width: 180, child: Text(l.fullName, overflow: TextOverflow.ellipsis)),
+                                  onTap: () => _openLeadDetails(context, l),
+                                ),
                                 DataCell(SizedBox(width: 120, child: Text(l.phone ?? '-', overflow: TextOverflow.ellipsis))),
                                 DataCell(SizedBox(width: 140, child: Text(l.source ?? '-', overflow: TextOverflow.ellipsis))),
                                 DataCell(SizedBox(width: 160, child: Text(l.interest ?? '-', overflow: TextOverflow.ellipsis))),
-                                DataCell(Text(l.nextContactDate == null || l.nextContactDate!.isEmpty ? '-' : l.nextContactDate!)),
+                                DataCell(
+                                  Text(_fmtDateOnly(l.nextContactDate)),
+                                ),
                                 DataCell(_statusBadge(context, l.status)),
                                 DataCell(
                                   Row(
@@ -459,6 +957,7 @@ class LeadsScreen extends ConsumerWidget {
                                             path: '/members',
                                             queryParameters: {
                                               'prefill': 'lead',
+                                              'leadId': l.id.toString(),
                                               'fullName': l.fullName,
                                               if ((l.phone ?? '').trim().isNotEmpty) 'phone': l.phone!.trim(),
                                             },
@@ -469,34 +968,21 @@ class LeadsScreen extends ConsumerWidget {
                                       ),
                                       IconButton(
                                         tooltip: 'Edit',
-                                        onPressed: () => _openLeadForm(context, ref, lead: l),
+                                        onPressed: () => _openLeadForm(context, lead: l),
                                         icon: const Icon(Icons.edit_outlined),
                                       ),
                                       IconButton(
                                         tooltip: 'Delete',
                                         onPressed: () async {
-                                          await showDialog<void>(
+                                          final ok = await showAppConfirmDialog(
                                             context: context,
-                                            builder: (context) {
-                                              return AlertDialog(
-                                                title: const Text('Delete lead?'),
-                                                content: Text(l.fullName),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () => Navigator.of(context).pop(),
-                                                    child: const Text('Cancel'),
-                                                  ),
-                                                  FilledButton(
-                                                    onPressed: () async {
-                                                      Navigator.of(context).pop();
-                                                      await ref.read(leadsControllerProvider.notifier).deleteLead(l.id);
-                                                    },
-                                                    child: const Text('Delete'),
-                                                  ),
-                                                ],
-                                              );
-                                            },
+                                            title: 'Delete lead?',
+                                            message: l.fullName,
+                                            confirmLabel: 'Delete',
+                                            danger: true,
                                           );
+                                          if (!ok) return;
+                                          await ref.read(leadsControllerProvider.notifier).deleteLead(l.id);
                                         },
                                         icon: const Icon(Icons.delete_outline),
                                       ),
@@ -510,12 +996,53 @@ class LeadsScreen extends ConsumerWidget {
                     ),
                   );
                 },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text(e.toString())),
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 30),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 30),
+                child: Center(child: Text(e.toString())),
               ),
             ),
           ],
-        ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value, required this.icon});
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        color: theme.colorScheme.surface,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: theme.textTheme.labelLarge),
+                const SizedBox(height: 2),
+                Text(value, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

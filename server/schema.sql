@@ -80,12 +80,16 @@ CREATE TABLE IF NOT EXISTS members (
   join_date DATE NOT NULL,
   status ENUM('active', 'expired', 'inactive') NOT NULL DEFAULT 'active',
   notes VARCHAR(255) NULL,
+  frozen_until DATE NULL,
+  frozen_reason VARCHAR(191) NULL,
+  frozen_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_members_tenant_code (tenant_id, member_code),
   KEY ix_members_tenant (tenant_id),
   KEY ix_members_gym (gym_id),
   KEY ix_members_branch (branch_id),
+  KEY ix_members_frozen_until (frozen_until),
   CONSTRAINT fk_members_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   CONSTRAINT fk_members_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

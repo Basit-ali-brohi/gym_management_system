@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
@@ -43,7 +46,8 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
     _lastStatus = status;
     _lastFrom = from;
     _lastTo = to;
-    state = const AsyncValue.loading();
+    final hadData = state.valueOrNull != null;
+    if (!hadData) state = const AsyncValue.loading();
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
@@ -59,23 +63,95 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
           .toList();
       state = AsyncValue.data(items);
     } on ApiException catch (e, st) {
-      state = AsyncValue.error(e.message, st);
+      if (!hadData) state = AsyncValue.error(e.message, st);
     } catch (e, st) {
-      state = AsyncValue.error('members_load_failed', st);
+      if (!hadData) state = AsyncValue.error('members_load_failed', st);
     }
   }
 
+  void applyMembershipSnapshot({
+    required int memberId,
+    String? membershipPlanName,
+    String? membershipEndDate,
+  }) {
+    final items = state.valueOrNull;
+    if (items == null) return;
+    final plan = (membershipPlanName ?? '').trim();
+    final end = (membershipEndDate ?? '').trim();
+    if (plan.isEmpty && end.isEmpty) return;
+    state = AsyncValue.data([
+      for (final m in items)
+        if (m.id == memberId)
+          m.copyWith(
+            status: m.status == 'inactive' ? m.status : 'active',
+            membershipPlanName: plan.isEmpty ? null : plan,
+            membershipEndDate: end.isEmpty ? null : end,
+          )
+        else
+          m
+    ]);
+  }
+
+  void clearMembershipSnapshot({required int memberId}) {
+    final items = state.valueOrNull;
+    if (items == null) return;
+    state = AsyncValue.data([
+      for (final m in items)
+        if (m.id == memberId)
+          Member(
+            id: m.id,
+            memberCode: m.memberCode,
+            fullName: m.fullName,
+            phone: m.phone,
+            email: m.email,
+            status: m.status,
+            joinDate: m.joinDate,
+            branchName: m.branchName,
+            membershipEndDate: null,
+            membershipPlanName: null,
+            frozenUntil: m.frozenUntil,
+          )
+        else
+          m
+    ]);
+  }
+
+  void applyFreezeSnapshot({required int memberId, required String? frozenUntil}) {
+    final items = state.valueOrNull;
+    if (items == null) return;
+    state = AsyncValue.data([
+      for (final m in items)
+        if (m.id == memberId)
+          Member(
+            id: m.id,
+            memberCode: m.memberCode,
+            fullName: m.fullName,
+            phone: m.phone,
+            email: m.email,
+            status: m.status,
+            joinDate: m.joinDate,
+            branchName: m.branchName,
+            membershipEndDate: m.membershipEndDate,
+            membershipPlanName: m.membershipPlanName,
+            frozenUntil: frozenUntil,
+          )
+        else
+          m
+    ]);
+  }
+
   Future<void> createMember({
-    required String memberCode,
+    String? memberCode,
     required String fullName,
     String? phone,
     required int planId,
     required String joinDate,
+    int? leadId,
   }) async {
     final token = ref.read(authControllerProvider).token;
     final api = ref.read(apiClientProvider);
     await api.postJson('/members/register', token: token, body: {
-      'memberCode': memberCode.trim(),
+      'memberCode': memberCode?.trim().isEmpty == true ? null : memberCode?.trim(),
       'fullName': fullName.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
       'planId': planId,
@@ -83,6 +159,9 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
       'startDate': joinDate,
       'createInvoice': true,
     });
+    if (leadId != null && leadId > 0) {
+      await api.postJson('/leads/$leadId/convert', token: token);
+    }
     await load(q: _lastQuery, status: _lastStatus, from: _lastFrom, to: _lastTo);
   }
 
@@ -101,6 +180,20 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
       'status': status,
       'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
     });
+    final items = state.valueOrNull;
+    if (items != null) {
+      state = AsyncValue.data([
+        for (final m in items)
+          if (m.id == memberId)
+            m.copyWith(
+              fullName: fullName.trim(),
+              phone: phone?.trim().isEmpty == true ? null : phone?.trim(),
+              status: status,
+            )
+          else
+            m
+      ]);
+    }
     await load(q: _lastQuery, status: _lastStatus, from: _lastFrom, to: _lastTo);
   }
 
@@ -108,6 +201,10 @@ class MembersController extends StateNotifier<AsyncValue<List<Member>>> {
     final token = ref.read(authControllerProvider).token;
     final api = ref.read(apiClientProvider);
     await api.deleteJson('/members/$memberId', token: token);
+    final items = state.valueOrNull;
+    if (items != null) {
+      state = AsyncValue.data([for (final m in items) if (m.id != memberId) m]);
+    }
     await load(q: _lastQuery, status: _lastStatus, from: _lastFrom, to: _lastTo);
   }
 
@@ -137,12 +234,18 @@ class MembersScreen extends ConsumerStatefulWidget {
 
 class _MembersScreenState extends ConsumerState<MembersScreen> {
   final _searchCtrl = TextEditingController();
+  final _tableHScroll = ScrollController();
   Timer? _debounce;
   bool _hydratedFromRoute = false;
   bool _openedPrefill = false;
   String _statusFilter = 'all';
   DateTime? _fromDate;
   DateTime? _toDate;
+  int? _pendingLeadId;
+  String _planFilter = 'all';
+  bool _frozenOnly = false;
+  bool _expiringOnly = false;
+  String _sort = 'name_asc';
 
   final _date = DateFormat('yyyy-MM-dd');
   final _pretty = DateFormat('dd MMM yyyy');
@@ -151,6 +254,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   void dispose() {
     _debounce?.cancel();
     _searchCtrl.dispose();
+    _tableHScroll.dispose();
     super.dispose();
   }
 
@@ -241,6 +345,68 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     }
   }
 
+  List<Member> _applyMemberUiFilters(List<Member> items) {
+    DateTime? parseDateOnly(String? raw) {
+      final s = raw?.trim();
+      if (s == null || s.isEmpty) return null;
+      final m = RegExp(r'^\d{4}-\d{2}-\d{2}').firstMatch(s);
+      final d = DateTime.tryParse(m?.group(0) ?? s);
+      if (d == null) return null;
+      return DateTime(d.year, d.month, d.day);
+    }
+
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final from = _fromDate == null ? null : DateTime(_fromDate!.year, _fromDate!.month, _fromDate!.day);
+    final to = _toDate == null ? null : DateTime(_toDate!.year, _toDate!.month, _toDate!.day);
+
+    final filtered = items.where((m) {
+      if (_statusFilter != 'all' && m.status != _statusFilter) return false;
+      if (_frozenOnly && !_isFrozenUntil(m.frozenUntil)) return false;
+      if (_expiringOnly) {
+        final left = _daysLeft(m.membershipEndDate);
+        if (left == null || left < 0 || left > 7) return false;
+      }
+      if (from != null || to != null) {
+        final jd = parseDateOnly(m.joinDate);
+        if (jd == null) return false;
+        if (from != null && jd.isBefore(from)) return false;
+        if (to != null && jd.isAfter(to)) return false;
+      }
+      if (_planFilter == 'all') return true;
+      if (_planFilter == 'none') {
+        final hasPlan = (m.membershipPlanName?.trim().isNotEmpty ?? false) || (m.membershipEndDate?.trim().isNotEmpty ?? false);
+        if (hasPlan) return false;
+      } else {
+        if ((m.membershipPlanName?.trim() ?? '') != _planFilter) return false;
+      }
+      if (q.isNotEmpty) {
+        final hay = '${m.memberCode} ${m.fullName} ${(m.phone ?? '')} ${(m.membershipPlanName ?? '')}'.toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    int nameCmp(Member a, Member b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+
+    if (_sort == 'name_asc') {
+      filtered.sort(nameCmp);
+    } else if (_sort == 'name_desc') {
+      filtered.sort((a, b) => nameCmp(b, a));
+    } else if (_sort == 'newest') {
+      filtered.sort((a, b) {
+        final ad = parseDateOnly(a.joinDate);
+        final bd = parseDateOnly(b.joinDate);
+        if (ad == null && bd == null) return b.id.compareTo(a.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final d = bd.compareTo(ad);
+        return d != 0 ? d : b.id.compareTo(a.id);
+      });
+    }
+
+    return filtered;
+  }
+
   @override
   Widget build(BuildContext context) {
     final membersAsync = ref.watch(membersControllerProvider);
@@ -251,6 +417,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         .where((r) => r.isNotEmpty)
         .toSet();
     final canDelete = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+    final canManageMembership = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
     final qp = GoRouterState.of(context).uri.queryParameters;
     final q = qp['q']?.trim();
     if (!_hydratedFromRoute && q != null && q.isNotEmpty) {
@@ -264,8 +431,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final prefill = qp['prefill']?.trim();
     final prefillName = qp['fullName']?.trim();
     final prefillPhone = qp['phone']?.trim();
+    final leadIdRaw = qp['leadId']?.trim();
+    final leadId = leadIdRaw == null ? null : int.tryParse(leadIdRaw);
     if (!_openedPrefill && prefill == 'lead' && (prefillName?.isNotEmpty ?? false)) {
       _openedPrefill = true;
+      _pendingLeadId = leadId;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
         await _openAddMember(context, prefillFullName: prefillName, prefillPhone: prefillPhone);
@@ -274,6 +444,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final fromStr = _fromDate == null ? '' : _date.format(_fromDate!);
     final toStr = _toDate == null ? '' : _date.format(_toDate!);
     final statusStr = _statusFilter == 'all' ? '' : _statusFilter;
+    final plansAsync = ref.watch(plansLookupProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -282,6 +453,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
           builder: (context, constraints) {
             final stacked = constraints.maxWidth < 700;
             final items = membersAsync.valueOrNull ?? const <Member>[];
+            final filteredPreview = _applyMemberUiFilters(items);
             final total = items.length;
             final active = items.where((m) => m.status == 'active').length;
             final expired = items.where((m) => m.status == 'expired').length;
@@ -454,30 +626,73 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               DropdownMenuItem(value: 'expired', child: Text('Expired')),
                               DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
                             ],
-                            onChanged: (v) async {
-                              final next = v ?? 'all';
-                              setState(() => _statusFilter = next);
-                              await ref.read(membersControllerProvider.notifier).load(
-                                    q: _searchCtrl.text.trim(),
-                                    status: next == 'all' ? '' : next,
-                                    from: fromStr,
-                                    to: toStr,
-                                  );
-                            },
+                            onChanged: (v) => setState(() => _statusFilter = v ?? 'all'),
                           ),
                         ),
                         SizedBox(
                           width: 180,
                           child: DropdownButtonFormField<String>(
-                            initialValue: 'name_asc',
+                            key: ValueKey(_sort),
+                            initialValue: _sort,
                             decoration: const InputDecoration(labelText: 'Sort'),
                             items: const [
                               DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
                               DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
                               DropdownMenuItem(value: 'newest', child: Text('Newest')),
                             ],
-                            onChanged: (_) {},
+                            onChanged: (v) => setState(() => _sort = v ?? 'name_asc'),
                           ),
+                        ),
+                        SizedBox(
+                          width: 220,
+                          child: plansAsync.when(
+                            data: (plans) {
+                              final names = <String>{
+                                for (final p in plans) p.name.trim(),
+                              }.where((e) => e.isNotEmpty).toList()
+                                ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+                              return DropdownButtonFormField<String>(
+                                key: ValueKey(_planFilter),
+                                initialValue: _planFilter,
+                                decoration: const InputDecoration(labelText: 'Plan'),
+                                items: [
+                                  const DropdownMenuItem(value: 'all', child: Text('All Plans')),
+                                  const DropdownMenuItem(value: 'none', child: Text('No Plan')),
+                                  for (final n in names) DropdownMenuItem(value: n, child: Text(n)),
+                                ],
+                                onChanged: (v) => setState(() => _planFilter = v ?? 'all'),
+                              );
+                            },
+                            error: (e, st) => DropdownButtonFormField<String>(
+                              key: ValueKey(_planFilter),
+                              initialValue: _planFilter,
+                              decoration: const InputDecoration(labelText: 'Plan'),
+                              items: const [
+                                DropdownMenuItem(value: 'all', child: Text('All Plans')),
+                                DropdownMenuItem(value: 'none', child: Text('No Plan')),
+                              ],
+                              onChanged: (v) => setState(() => _planFilter = v ?? 'all'),
+                            ),
+                            loading: () => DropdownButtonFormField<String>(
+                              initialValue: _planFilter,
+                              decoration: const InputDecoration(labelText: 'Plan'),
+                              items: const [
+                                DropdownMenuItem(value: 'all', child: Text('All Plans')),
+                                DropdownMenuItem(value: 'none', child: Text('No Plan')),
+                              ],
+                              onChanged: (v) => setState(() => _planFilter = v ?? 'all'),
+                            ),
+                          ),
+                        ),
+                        FilterChip(
+                          label: const Text('Frozen'),
+                          selected: _frozenOnly,
+                          onSelected: (v) => setState(() => _frozenOnly = v),
+                        ),
+                        FilterChip(
+                          label: const Text('Expiring (≤7d)'),
+                          selected: _expiringOnly,
+                          onSelected: (v) => setState(() => _expiringOnly = v),
                         ),
                         OutlinedButton.icon(
                           onPressed: () async {
@@ -489,12 +704,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             );
                             if (picked == null) return;
                             setState(() => _fromDate = picked);
-                            await ref.read(membersControllerProvider.notifier).load(
-                                  q: _searchCtrl.text.trim(),
-                                  status: statusStr,
-                                  from: _date.format(picked),
-                                  to: toStr,
-                                );
                           },
                           icon: const Icon(Icons.date_range),
                           label: Text(_fromDate == null ? 'From' : _date.format(_fromDate!)),
@@ -509,19 +718,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             );
                             if (picked == null) return;
                             setState(() => _toDate = picked);
-                            await ref.read(membersControllerProvider.notifier).load(
-                                  q: _searchCtrl.text.trim(),
-                                  status: statusStr,
-                                  from: fromStr,
-                                  to: _date.format(picked),
-                                );
                           },
                           icon: const Icon(Icons.date_range),
                           label: Text(_toDate == null ? 'To' : _date.format(_toDate!)),
                         ),
                         SizedBox(width: stacked ? double.infinity : 360, child: search),
                         Text(
-                          'Showing $total of $total',
+                          'Showing ${filteredPreview.length} of $total',
                           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                         ),
                         OutlinedButton(
@@ -531,6 +734,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                 _statusFilter = 'all';
                                 _fromDate = null;
                                 _toDate = null;
+                                _planFilter = 'all';
+                                _frozenOnly = false;
+                                _expiringOnly = false;
                               });
                               ref.read(membersControllerProvider.notifier).load(q: '');
                           },
@@ -548,75 +754,222 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         membersAsync.when(
           data: (items) {
             if (items.isEmpty) return _EmptyState(onAdd: () => _openAddMember(context));
+            final filtered = _applyMemberUiFilters(items);
+            if (filtered.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.filter_alt_off_outlined, size: 44, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(height: 10),
+                      Text('No members match filters', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Try clearing filters',
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            _planFilter = 'all';
+                            _frozenOnly = false;
+                            _expiringOnly = false;
+                          });
+                        },
+                        child: const Text('Clear Filters'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
 
             return LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 900) {
                   return Padding(
                     padding: const EdgeInsets.all(12),
-                    child: DataTable(
-                        columnSpacing: 18,
-                        horizontalMargin: 12,
-                          columns: const [
-                            DataColumn(label: Text('ID')),
-                            DataColumn(label: Text('Code')),
-                            DataColumn(label: Text('Name')),
-                            DataColumn(label: Text('Phone')),
-                            DataColumn(label: Text('Joined')),
-                            DataColumn(label: Text('Status')),
-                            DataColumn(label: Text('Action')),
-                          ],
-                          rows: [
-                            for (final m in items)
-                              DataRow(
-                                cells: [
-                                  DataCell(SizedBox(width: 46, child: Text(m.id.toString()))),
-                                  DataCell(SizedBox(width: 92, child: Text(m.memberCode, overflow: TextOverflow.ellipsis))),
-                                  DataCell(SizedBox(width: 220, child: Text(m.fullName, overflow: TextOverflow.ellipsis))),
-                                  DataCell(SizedBox(width: 150, child: Text(m.phone ?? '-', overflow: TextOverflow.ellipsis))),
-                                  DataCell(SizedBox(width: 110, child: Text(_formatDate(m.joinDate)))),
-                                  DataCell(_StatusChip(status: m.status)),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'Edit',
-                                          onPressed: () => _openEditMember(context, m),
-                                          icon: const Icon(Icons.edit_outlined),
-                                          visualDensity: VisualDensity.compact,
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                                          iconSize: 20,
+                    child: ScrollConfiguration(
+                      behavior: const MaterialScrollBehavior().copyWith(
+                        dragDevices: {
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.mouse,
+                          PointerDeviceKind.trackpad,
+                          PointerDeviceKind.stylus,
+                          PointerDeviceKind.unknown,
+                        },
+                      ),
+                      child: Scrollbar(
+                      thumbVisibility: true,
+                      interactive: true,
+                      controller: _tableHScroll,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        controller: _tableHScroll,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                          child: DataTable(
+                            columnSpacing: 18,
+                            horizontalMargin: 12,
+                            columns: const [
+                              DataColumn(label: Text('ID')),
+                              DataColumn(label: Text('Code')),
+                              DataColumn(label: Text('Name')),
+                              DataColumn(label: Text('Phone')),
+                              DataColumn(label: Text('Plan')),
+                              DataColumn(label: Text('Joined')),
+                              DataColumn(label: Text('Expiry')),
+                              DataColumn(label: Text('Status')),
+                              DataColumn(label: Text('Action')),
+                            ],
+                            rows: [
+                              for (final m in filtered)
+                                DataRow(
+                                  cells: [
+                                    DataCell(SizedBox(width: 46, child: Text(m.id.toString()))),
+                                    DataCell(SizedBox(width: 92, child: Text(m.memberCode, overflow: TextOverflow.ellipsis))),
+                                    DataCell(SizedBox(width: 220, child: Text(m.fullName, overflow: TextOverflow.ellipsis))),
+                                    DataCell(SizedBox(width: 150, child: Text(m.phone ?? '-', overflow: TextOverflow.ellipsis))),
+                                    DataCell(SizedBox(
+                                      width: 160,
+                                      child: Text(
+                                        m.membershipPlanName?.trim().isNotEmpty == true ? m.membershipPlanName! : '-',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    )),
+                                    DataCell(SizedBox(width: 110, child: Text(_formatDate(m.joinDate)))),
+                                    DataCell(
+                                      SizedBox(
+                                        width: 140,
+                                        child: Builder(
+                                          builder: (context) {
+                                            final daysLeft = _daysLeft(m.membershipEndDate);
+                                            final dateText = m.membershipEndDate?.trim().isNotEmpty == true
+                                                ? _formatDate(m.membershipEndDate!)
+                                                : '-';
+                                            if (daysLeft == null) return Text(dateText, overflow: TextOverflow.ellipsis);
+                                            final theme = Theme.of(context);
+                                            final urgent = daysLeft <= 3;
+                                            final bg = urgent ? theme.colorScheme.errorContainer : theme.colorScheme.primaryContainer;
+                                            final fg = urgent ? theme.colorScheme.onErrorContainer : theme.colorScheme.onPrimaryContainer;
+                                            return Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Expanded(child: Text(dateText, overflow: TextOverflow.ellipsis)),
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: bg,
+                                                    borderRadius: BorderRadius.circular(999),
+                                                  ),
+                                                  child: Text(
+                                                    daysLeft <= 0 ? 'Today' : '${daysLeft}d',
+                                                    style: theme.textTheme.labelSmall?.copyWith(color: fg),
+                                                  ),
+                                                ),
+                                              ],
+                                            );
+                                          },
                                         ),
-                                        const SizedBox(width: 2),
-                                        IconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openMemberDetail(context, m),
-                                          icon: const Icon(Icons.visibility),
-                                          visualDensity: VisualDensity.compact,
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                                          iconSize: 20,
-                                        ),
-                                        if (canDelete) ...[
-                                          const SizedBox(width: 2),
+                                      ),
+                                    ),
+                                    DataCell(_StatusChip(status: m.status, frozen: _isFrozenUntil(m.frozenUntil))),
+                                    DataCell(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (canManageMembership) ...[
+                                            IconButton(
+                                              tooltip: 'Renew',
+                                              onPressed: () => _openRenewMembership(context, m),
+                                              icon: const Icon(Icons.autorenew),
+                                              visualDensity: VisualDensity.compact,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                              iconSize: 20,
+                                            ),
+                                            const SizedBox(width: 2),
+                                            IconButton(
+                                              tooltip: _isFrozenUntil(m.frozenUntil) ? 'Unfreeze' : 'Freeze',
+                                              onPressed: () => _toggleFreeze(context, m),
+                                              icon: Icon(_isFrozenUntil(m.frozenUntil)
+                                                  ? Icons.play_circle_outline
+                                                  : Icons.ac_unit_outlined),
+                                              visualDensity: VisualDensity.compact,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                              iconSize: 20,
+                                            ),
+                                            const SizedBox(width: 2),
+                                            if ((m.membershipPlanName?.trim().isNotEmpty ?? false) ||
+                                                (m.membershipEndDate?.trim().isNotEmpty ?? false)) ...[
+                                              IconButton(
+                                                tooltip: 'Remove Plan',
+                                                onPressed: () => _removeMembership(context, m),
+                                                icon: const Icon(Icons.link_off),
+                                                visualDensity: VisualDensity.compact,
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                                iconSize: 20,
+                                              ),
+                                              const SizedBox(width: 2),
+                                            ],
+                                          ],
                                           IconButton(
-                                            tooltip: 'Delete',
-                                            onPressed: () => _confirmDelete(context, m),
-                                            icon: const Icon(Icons.delete_outline),
+                                            tooltip: 'Edit',
+                                            onPressed: () => _openEditMember(context, m),
+                                            icon: const Icon(Icons.edit_outlined),
                                             visualDensity: VisualDensity.compact,
                                             padding: EdgeInsets.zero,
                                             constraints: const BoxConstraints.tightFor(width: 36, height: 36),
                                             iconSize: 20,
                                           ),
+                                          const SizedBox(width: 2),
+                                          IconButton(
+                                            tooltip: 'View',
+                                            onPressed: () => _openMemberDetail(context, m),
+                                            icon: const Icon(Icons.visibility),
+                                            visualDensity: VisualDensity.compact,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                            iconSize: 20,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          IconButton(
+                                            tooltip: 'QR',
+                                            onPressed: () => _openMemberQrDialog(context, memberCode: m.memberCode, fullName: m.fullName),
+                                            icon: const Icon(Icons.qr_code_2),
+                                            visualDensity: VisualDensity.compact,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                            iconSize: 20,
+                                          ),
+                                          if (canDelete) ...[
+                                            const SizedBox(width: 2),
+                                            IconButton(
+                                              tooltip: 'Delete',
+                                              onPressed: () => _confirmDelete(context, m),
+                                              icon: const Icon(Icons.delete_outline),
+                                              visualDensity: VisualDensity.compact,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                                              iconSize: 20,
+                                            ),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                          ],
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      ),
                     ),
                   );
                 }
@@ -624,10 +977,10 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
+                  itemCount: filtered.length,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final m = items[i];
+                    final m = filtered[i];
                     return ListTile(
                       title: Text('${m.fullName} (${m.memberCode})'),
                       subtitle: Text([
@@ -648,6 +1001,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             tooltip: 'Edit',
                             onPressed: () => _openEditMember(context, m),
                             icon: const Icon(Icons.edit_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'QR',
+                            onPressed: () => _openMemberQrDialog(context, memberCode: m.memberCode, fullName: m.fullName),
+                            icon: const Icon(Icons.qr_code_2),
                           ),
                           if (canDelete)
                             IconButton(
@@ -711,6 +1069,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 final lastCheckinAt = data['lastCheckinAt']?.toString();
                 final planName = sub?['planName']?.toString();
                 final endDate = sub?['endDate']?.toString();
+                final frozenUntil = m['frozenUntil']?.toString();
 
                 final fullName = m['fullName']?.toString() ?? member.fullName;
                 final initials = fullName
@@ -745,6 +1104,15 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             ),
                           ),
                           IconButton(
+                            tooltip: 'QR',
+                            onPressed: () => _openMemberQrDialog(
+                              context,
+                              memberCode: (m['memberCode']?.toString() ?? member.memberCode),
+                              fullName: fullName,
+                            ),
+                            icon: const Icon(Icons.qr_code_2),
+                          ),
+                          IconButton(
                             tooltip: 'Close',
                             onPressed: () => Navigator.of(context).pop(),
                             icon: const Icon(Icons.close),
@@ -762,6 +1130,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               const SizedBox(height: 6),
                               Text('Plan: ${planName ?? '-'}'),
                               Text('Expiry: ${endDate ?? '-'}'),
+                              if (_isFrozenUntil(frozenUntil)) Text('Frozen until: ${_formatDate(frozenUntil ?? '')}'),
                               const SizedBox(height: 10),
                               Text('History', style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 6),
@@ -803,10 +1172,377 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     );
   }
 
+  Future<void> _openMemberQrDialog(BuildContext context, {required String memberCode, required String fullName}) async {
+    final code = memberCode.trim();
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Member code missing')));
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Member QR'),
+          content: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(fullName, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text('Code: $code', style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                Center(
+                  child: QrImageView(
+                    data: code,
+                    size: 220,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: code));
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+              },
+              child: const Text('Copy Code'),
+            ),
+            FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _openRenewMembership(BuildContext context, Member member) async {
+    final token = ref.read(authControllerProvider).token;
+    final api = ref.read(apiClientProvider);
+    final formKey = GlobalKey<FormState>();
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final currentEnd = DateTime.tryParse((member.membershipEndDate ?? '').trim());
+    final defaultStart = (currentEnd != null && !DateTime(currentEnd.year, currentEnd.month, currentEnd.day).isBefore(today))
+        ? DateTime(currentEnd.year, currentEnd.month, currentEnd.day).add(const Duration(days: 1))
+        : today;
+    DateTime startDate = defaultStart;
+    int? selectedPlanId;
+    var payNow = true;
+    var payMethod = 'cash';
+
+    Future<void> submit(List<Plan> plans) async {
+      if (!formKey.currentState!.validate()) return;
+      selectedPlanId ??= plans.first.id;
+      try {
+        final selected = plans.firstWhere((p) => p.id == selectedPlanId, orElse: () => plans.first);
+        final res = await api.postJson(
+          '/members/${member.id}/change-membership',
+          token: token,
+          body: {
+            'planId': selectedPlanId!,
+            'startDate': DateFormat('yyyy-MM-dd').format(startDate),
+            'createInvoice': true,
+          },
+        );
+        final invoiceId = (res['invoiceId'] as num?)?.toInt();
+        final invoiceNo = res['invoiceNo']?.toString();
+        if (payNow && invoiceId != null && invoiceId > 0) {
+          await api.postJson('/invoices/mark-paid', token: token, body: {'invoiceId': invoiceId, 'method': payMethod});
+        }
+        if (!context.mounted) return;
+        final endDate = res['endDate']?.toString();
+        ref.read(membersControllerProvider.notifier).applyMembershipSnapshot(
+              memberId: member.id,
+              membershipPlanName: selected.name,
+              membershipEndDate: endDate,
+            );
+        ref.read(membersControllerProvider.notifier).load(q: _searchCtrl.text.trim());
+        Future<void> openReceipt() async {
+          if (invoiceId == null || invoiceId <= 0) return;
+          final bytes = await api.getBytes('/pdf/invoice/$invoiceId.pdf', token: token);
+          final name = 'invoice_${invoiceNo ?? invoiceId}.pdf';
+          previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Renewed till ${endDate ?? '-'}'
+              '${invoiceNo != null && invoiceNo.isNotEmpty ? ' • Invoice $invoiceNo' : ''}'
+              '${payNow ? ' • Paid' : ''}',
+            ),
+            action: (payNow && invoiceId != null && invoiceId > 0)
+                ? SnackBarAction(
+                    label: 'Receipt',
+                    onPressed: () {
+                      unawaited(openReceipt());
+                    },
+                  )
+                : null,
+          ),
+        );
+        Navigator.of(context, rootNavigator: true).maybePop();
+      } on ApiException catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Renew failed')));
+      }
+    }
+
+    await showAppFormDialog<void>(
+      context: context,
+      icon: Icons.autorenew,
+      title: 'Renew Membership',
+      subtitle: member.fullName,
+      body: StatefulBuilder(
+        builder: (context, setModalState) {
+          return Consumer(
+            builder: (context, r, _) {
+              final plansAsync = r.watch(plansLookupProvider);
+              return plansAsync.when(
+                data: (plans) {
+                  if (plans.isEmpty) return const Text('No plans available');
+                  selectedPlanId ??= plans.firstWhere(
+                        (p) => (member.membershipPlanName ?? '').trim().isNotEmpty && p.name == member.membershipPlanName,
+                        orElse: () => plans.first,
+                      ).id;
+                  return Form(
+                    key: formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<int>(
+                          key: ValueKey(selectedPlanId),
+                          initialValue: selectedPlanId,
+                          decoration: const InputDecoration(labelText: 'Membership Plan'),
+                          items: [
+                            for (final p in plans)
+                              DropdownMenuItem<int>(
+                                value: p.id,
+                                child: Text('${p.name} • ${p.durationDays} days • ${p.price.toString()}'),
+                              ),
+                          ],
+                          onChanged: (v) => setModalState(() => selectedPlanId = v),
+                          validator: (v) => v == null ? 'Select plan' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: startDate,
+                              firstDate: DateTime(today.year - 1),
+                              lastDate: DateTime(today.year + 3),
+                            );
+                            if (picked == null) return;
+                            setModalState(() => startDate = picked);
+                          },
+                          icon: const Icon(Icons.calendar_month),
+                          label: Text('Start: ${DateFormat('yyyy-MM-dd').format(startDate)}'),
+                        ),
+                        const SizedBox(height: 12),
+                        CheckboxListTile(
+                          value: payNow,
+                          onChanged: (v) => setModalState(() => payNow = v ?? true),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Mark Paid Now'),
+                          subtitle: const Text('Creates payment entry and clears dues'),
+                        ),
+                        if (payNow) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            key: ValueKey(payMethod),
+                            initialValue: payMethod,
+                            decoration: const InputDecoration(labelText: 'Payment Method'),
+                            items: const [
+                              DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                              DropdownMenuItem(value: 'card', child: Text('Card')),
+                              DropdownMenuItem(value: 'bank', child: Text('Bank')),
+                              DropdownMenuItem(value: 'online', child: Text('Online')),
+                            ],
+                            onChanged: (v) => setModalState(() => payMethod = v ?? 'cash'),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: () => submit(plans),
+                          child: Text(payNow ? 'Renew & Pay' : 'Renew & Create Invoice'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                error: (e, _) => Text(e.toString()),
+                loading: () => const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator())),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _toggleFreeze(BuildContext context, Member member) async {
+    final token = ref.read(authControllerProvider).token;
+    final api = ref.read(apiClientProvider);
+    final isFrozen = _isFrozenUntil(member.frozenUntil);
+
+    if (isFrozen) {
+      try {
+        await api.postJson('/members/${member.id}/unfreeze', token: token);
+        if (!context.mounted) return;
+        ref.read(membersControllerProvider.notifier).applyFreezeSnapshot(memberId: member.id, frozenUntil: null);
+        ref.read(membersControllerProvider.notifier).load(q: _searchCtrl.text.trim());
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Member unfrozen')));
+      } on ApiException catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unfreeze failed')));
+      }
+      return;
+    }
+
+    final formKey = GlobalKey<FormState>();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    DateTime until = today.add(const Duration(days: 7));
+    final reasonCtrl = TextEditingController();
+
+    Future<void> submit() async {
+      if (!formKey.currentState!.validate()) return;
+      try {
+        await api.postJson(
+          '/members/${member.id}/freeze',
+          token: token,
+          body: {
+            'untilDate': DateFormat('yyyy-MM-dd').format(until),
+            'reason': reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim(),
+          },
+        );
+        if (!context.mounted) return;
+        final untilStr = DateFormat('yyyy-MM-dd').format(until);
+        ref.read(membersControllerProvider.notifier).applyFreezeSnapshot(memberId: member.id, frozenUntil: untilStr);
+        ref.read(membersControllerProvider.notifier).load(q: _searchCtrl.text.trim());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Member frozen till $untilStr')),
+        );
+        Navigator.of(context, rootNavigator: true).maybePop();
+      } on ApiException catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Freeze failed')));
+      }
+    }
+
+    await showAppFormDialog<void>(
+      context: context,
+      icon: Icons.ac_unit_outlined,
+      title: 'Freeze Member',
+      subtitle: member.fullName,
+      body: StatefulBuilder(
+        builder: (context, setModalState) {
+          return Form(
+            key: formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: until,
+                      firstDate: today,
+                      lastDate: DateTime(today.year + 3),
+                    );
+                    if (picked == null) return;
+                    setModalState(() => until = picked);
+                  },
+                  icon: const Icon(Icons.calendar_month),
+                  label: Text('Freeze until: ${DateFormat('yyyy-MM-dd').format(until)}'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: reasonCtrl,
+                  decoration: const InputDecoration(labelText: 'Reason (optional)'),
+                  maxLength: 191,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: submit,
+                  child: const Text('Freeze'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _removeMembership(BuildContext context, Member member) async {
+    final ok = await showAppConfirmDialog(
+      context: context,
+      title: 'Remove membership?',
+      message: 'Ye member ka current plan remove (cancel) ho jayega aur check-in block ho jayega.',
+      confirmLabel: 'Remove',
+      cancelLabel: 'Cancel',
+      danger: true,
+    );
+    if (!ok) return;
+
+    final token = ref.read(authControllerProvider).token;
+    final api = ref.read(apiClientProvider);
+    try {
+      await api.postJson('/members/${member.id}/remove-membership', token: token);
+      if (!context.mounted) return;
+      ref.read(membersControllerProvider.notifier).clearMembershipSnapshot(memberId: member.id);
+      ref.read(membersControllerProvider.notifier).load(q: _searchCtrl.text.trim());
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Membership removed')));
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Remove failed')));
+    }
+  }
+
   String _formatDate(String raw) {
     final parsed = DateTime.tryParse(raw);
     if (parsed == null) return raw;
     return _date.format(parsed);
+  }
+
+  bool _isFrozenUntil(String? raw) {
+    final v = raw?.trim();
+    if (v == null || v.isEmpty) return false;
+    final until = DateTime.tryParse(v);
+    if (until == null) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d = DateTime(until.year, until.month, until.day);
+    return !d.isBefore(today);
+  }
+
+  int? _daysLeft(String? rawEndDate) {
+    final v = rawEndDate?.trim();
+    if (v == null || v.isEmpty) return null;
+    final end = DateTime.tryParse(v);
+    if (end == null) return null;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d = DateTime(end.year, end.month, end.day);
+    return d.difference(today).inDays;
   }
 
   Future<void> _openAddMember(
@@ -836,7 +1572,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               phone: phoneCtrl.text,
               planId: selectedPlanId!,
               joinDate: _date.format(joinDate),
+              leadId: _pendingLeadId,
             );
+        _pendingLeadId = null;
         if (context.mounted) Navigator.of(context, rootNavigator: true).maybePop();
       } on ApiException catch (e) {
         if (!context.mounted) return;
@@ -879,8 +1617,12 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             field(
                               TextFormField(
                                 controller: memberCodeCtrl,
-                                decoration: const InputDecoration(labelText: 'Member Code'),
-                                validator: (v) => (v == null || v.trim().length < 2) ? 'Code required' : null,
+                                decoration: const InputDecoration(labelText: 'Member Code', hintText: 'Auto'),
+                                validator: (v) {
+                                  if (v == null) return null;
+                                  if (v.trim().isEmpty) return null;
+                                  return v.trim().length < 2 ? 'Invalid code' : null;
+                                },
                               ),
                             ),
                             field(
@@ -1264,20 +2006,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   }
 
   Future<void> _confirmDelete(BuildContext context, Member member) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppConfirmDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete member?'),
-          content: Text('Delete ${member.fullName} (${member.memberCode})?'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
-          ],
-        );
-      },
+      title: 'Delete member?',
+      message: 'Delete ${member.fullName} (${member.memberCode})?',
+      confirmLabel: 'Delete',
+      danger: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     try {
       await ref.read(membersControllerProvider.notifier).deleteMember(memberId: member.id);
       if (!context.mounted) return;
@@ -1331,13 +2067,23 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
+  const _StatusChip({required this.status, this.frozen = false});
 
   final String status;
+  final bool frozen;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (frozen) {
+      return Chip(
+        label: const Text('frozen'),
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+        labelStyle: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+    }
     final isActive = status == 'active';
     final isExpired = status == 'expired';
     final bg = isActive

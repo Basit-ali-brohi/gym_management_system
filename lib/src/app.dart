@@ -148,7 +148,6 @@ class GymSaasApp extends ConsumerWidget {
     const gold = Color(0xFFD4AF37);
     const obsidian = Color(0xFF0B0F14);
     const surface = Color(0xFF101722);
-    const glass = Color(0x24FFFFFF);
 
     const darkScheme = ColorScheme(
       brightness: Brightness.dark,
@@ -160,10 +159,10 @@ class GymSaasApp extends ConsumerWidget {
       onError: Color(0xFF0B0F14),
       surface: surface,
       onSurface: Color(0xFFEAECEF),
-      surfaceContainerHighest: Color(0xFF141D2B),
-      onSurfaceVariant: Color(0xFFB9C0CC),
-      outline: Color(0xFF2A3342),
-      outlineVariant: Color(0xFF1E2633),
+      surfaceContainerHighest: Color(0xFF121B28),
+      onSurfaceVariant: Color(0xFFCBD5E1),
+      outline: Color(0xFF3A465A),
+      outlineVariant: Color(0xFF2B3648),
       shadow: Colors.black,
       scrim: Colors.black,
       inverseSurface: Color(0xFFEAECEF),
@@ -196,12 +195,30 @@ class GymSaasApp extends ConsumerWidget {
       onTertiary: Colors.white,
     );
 
+    final lightText = ThemeData(useMaterial3: true, colorScheme: lightScheme).textTheme;
+    final darkText = ThemeData(useMaterial3: true, colorScheme: darkScheme).textTheme;
+    final tunedLightText = lightText.copyWith(
+      headlineSmall: lightText.headlineSmall?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.2),
+      titleLarge: lightText.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+      titleMedium: lightText.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+      labelLarge: lightText.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+    final tunedDarkText = darkText.copyWith(
+      headlineSmall: darkText.headlineSmall?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.2),
+      titleLarge: darkText.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+      titleMedium: darkText.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+      labelLarge: darkText.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+
+    final darkCardColor = darkScheme.surfaceContainerHighest.withAlpha(77);
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'Gym Management',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: lightScheme,
+        textTheme: tunedLightText,
         scaffoldBackgroundColor: const Color(0xFFF7F7F9),
         canvasColor: Colors.white,
         highlightColor: Colors.transparent,
@@ -250,6 +267,17 @@ class GymSaasApp extends ConsumerWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: lightScheme.inverseSurface,
+          contentTextStyle: tunedLightText.bodyMedium?.copyWith(color: lightScheme.onInverseSurface),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        dataTableTheme: const DataTableThemeData(
+          headingRowHeight: 44,
+          dataRowMinHeight: 48,
+          dataRowMaxHeight: 56,
+        ),
         iconButtonTheme: IconButtonThemeData(
           style: IconButton.styleFrom(foregroundColor: lightScheme.onSurface),
         ),
@@ -262,6 +290,7 @@ class GymSaasApp extends ConsumerWidget {
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: darkScheme,
+        textTheme: tunedDarkText,
         scaffoldBackgroundColor: const Color(0xFF0A0E14),
         canvasColor: obsidian,
         highlightColor: Colors.transparent,
@@ -269,7 +298,7 @@ class GymSaasApp extends ConsumerWidget {
         appBarTheme: const AppBarTheme(centerTitle: false),
         cardTheme: CardThemeData(
           elevation: 2,
-          color: glass,
+          color: darkCardColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: BorderSide(color: darkScheme.outlineVariant),
@@ -284,10 +313,10 @@ class GymSaasApp extends ConsumerWidget {
             side: BorderSide(color: darkScheme.outlineVariant),
           ),
         ),
-        dividerTheme: DividerThemeData(color: darkScheme.outlineVariant),
+        dividerTheme: DividerThemeData(color: darkScheme.outlineVariant, thickness: 1, space: 1),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0x22FFFFFF),
+          fillColor: const Color(0x2AFFFFFF),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: darkScheme.outlineVariant),
@@ -310,13 +339,30 @@ class GymSaasApp extends ConsumerWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: darkScheme.inverseSurface,
+          contentTextStyle: tunedDarkText.bodyMedium?.copyWith(color: darkScheme.onInverseSurface),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        dataTableTheme: DataTableThemeData(
+          headingRowHeight: 44,
+          dataRowMinHeight: 48,
+          dataRowMaxHeight: 56,
+          headingRowColor: WidgetStatePropertyAll(darkScheme.surfaceContainerHighest.withAlpha(220)),
+          dividerThickness: 0.8,
+          headingTextStyle: tunedDarkText.labelLarge?.copyWith(color: darkScheme.onSurfaceVariant),
+          dataTextStyle: tunedDarkText.bodyMedium?.copyWith(color: darkScheme.onSurface),
+        ),
         iconButtonTheme: IconButtonThemeData(
           style: IconButton.styleFrom(foregroundColor: darkScheme.onSurface),
         ),
         chipTheme: ChipThemeData(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-          backgroundColor: const Color(0x1AFFFFFF),
+          backgroundColor: darkScheme.surfaceContainerHighest.withAlpha(180),
           side: BorderSide(color: darkScheme.outlineVariant),
+          labelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
+          secondaryLabelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
         ),
       ),
       themeMode: themeMode,

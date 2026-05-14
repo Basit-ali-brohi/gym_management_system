@@ -27,12 +27,12 @@ class AttendanceController extends StateNotifier<AsyncValue<List<AttendanceLog>>
 
   final Ref ref;
 
-  Future<void> loadToday() async {
-    state = const AsyncValue.loading();
+  Future<void> loadRange({required String range}) async {
+    state = const AsyncLoading<List<AttendanceLog>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
-      final res = await api.getJson('/attendance/today', token: token);
+      final res = await api.getJson('/attendance', token: token, query: {'range': range, 'limit': '200'});
       final items = (res['items'] as List<dynamic>? ?? [])
           .whereType<Map>()
           .map((e) => AttendanceLog.fromJson(e.cast<String, dynamic>()))
@@ -43,6 +43,10 @@ class AttendanceController extends StateNotifier<AsyncValue<List<AttendanceLog>>
     } catch (e, st) {
       state = AsyncValue.error('attendance_load_failed', st);
     }
+  }
+
+  Future<void> loadToday() async {
+    await loadRange(range: 'today');
   }
 
   Future<CheckInResult> checkIn({required int memberId}) async {
@@ -72,6 +76,7 @@ class CheckInResult {
     required this.alreadyCheckedIn,
     required this.reason,
     required this.membershipEndDate,
+    required this.frozenUntil,
     required this.unpaidInvoices,
     required this.memberName,
     required this.memberCode,
@@ -81,6 +86,7 @@ class CheckInResult {
   final bool alreadyCheckedIn;
   final String? reason;
   final String? membershipEndDate;
+  final String? frozenUntil;
   final int unpaidInvoices;
   final String? memberName;
   final String? memberCode;
@@ -91,6 +97,7 @@ class CheckInResult {
       alreadyCheckedIn: json['alreadyCheckedIn'] as bool? ?? false,
       reason: json['reason']?.toString(),
       membershipEndDate: json['membershipEndDate']?.toString(),
+      frozenUntil: json['frozenUntil']?.toString(),
       unpaidInvoices: (json['unpaidInvoices'] as num?)?.toInt() ?? 0,
       memberName: json['memberName']?.toString(),
       memberCode: json['memberCode']?.toString(),
@@ -107,6 +114,7 @@ class ValidateAccessResult {
     required this.membershipEndDate,
     required this.unpaidInvoices,
     required this.planName,
+    required this.frozenUntil,
   });
 
   final bool allowed;
@@ -116,6 +124,7 @@ class ValidateAccessResult {
   final String? membershipEndDate;
   final int unpaidInvoices;
   final String? planName;
+  final String? frozenUntil;
 
   factory ValidateAccessResult.fromJson(Map<String, dynamic> json) {
     final member = json['member'] is Map ? (json['member'] as Map).cast<String, dynamic>() : null;
@@ -128,6 +137,7 @@ class ValidateAccessResult {
       membershipEndDate: plan?['endDate']?.toString(),
       unpaidInvoices: (json['unpaidInvoices'] as num?)?.toInt() ?? 0,
       planName: plan?['name']?.toString(),
+      frozenUntil: json['frozenUntil']?.toString(),
     );
   }
 }
@@ -176,6 +186,7 @@ class AttendanceScreen extends ConsumerStatefulWidget {
 class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with SingleTickerProviderStateMixin {
   final _codeCtrl = TextEditingController();
   final _searchCtrl = TextEditingController();
+  final _logSearchCtrl = TextEditingController();
   Timer? _debounce;
   Timer? _codeDebounce;
   Timer? _borderReset;
@@ -185,6 +196,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
   ValidateAccessResult? _accessPreview;
   bool _accessLoading = false;
   String _lastAccessQuery = '';
+  String _range = 'today';
+  String _sort = 'newest';
   final _dt = DateFormat('yyyy-MM-dd HH:mm');
   final _date = DateFormat('yyyy-MM-dd');
 
@@ -209,7 +222,45 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
     _shakeCtrl.dispose();
     _codeCtrl.dispose();
     _searchCtrl.dispose();
+    _logSearchCtrl.dispose();
     super.dispose();
+  }
+
+  List<AttendanceLog> _applyLogUiFilters(List<AttendanceLog> items) {
+    final q = _logSearchCtrl.text.trim().toLowerCase();
+    final filtered = items.where((a) {
+      if (q.isEmpty) return true;
+      final hay = '${a.memberCode} ${a.fullName} ${a.checkedInAt} ${a.checkedOutAt ?? ''}'.toLowerCase();
+      return hay.contains(q);
+    }).toList();
+
+    DateTime? parse(String raw) => DateTime.tryParse(raw);
+
+    if (_sort == 'oldest') {
+      filtered.sort((a, b) {
+        final ad = parse(a.checkedInAt);
+        final bd = parse(b.checkedInAt);
+        if (ad == null && bd == null) return a.id.compareTo(b.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final c = ad.compareTo(bd);
+        if (c != 0) return c;
+        return a.id.compareTo(b.id);
+      });
+    } else {
+      filtered.sort((a, b) {
+        final ad = parse(a.checkedInAt);
+        final bd = parse(b.checkedInAt);
+        if (ad == null && bd == null) return b.id.compareTo(a.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final c = bd.compareTo(ad);
+        if (c != 0) return c;
+        return b.id.compareTo(a.id);
+      });
+    }
+
+    return filtered;
   }
 
   @override
@@ -227,6 +278,26 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       if (latest == null || t.isAfter(latest)) latest = t;
     }
     final latestLabel = latest == null ? '-' : _dt.format(latest);
+    final rangeLabel = _range == 'today' ? "Today's" : (_range == '7d' ? 'Last 7 days' : 'Last 30 days');
+
+    String fmtAvgSession() {
+      final durations = <Duration>[];
+      for (final a in itemsPreview) {
+        final i = DateTime.tryParse(a.checkedInAt);
+        final o = a.checkedOutAt == null ? null : DateTime.tryParse(a.checkedOutAt!);
+        if (i == null || o == null) continue;
+        final d = o.difference(i);
+        if (d.isNegative) continue;
+        durations.add(d);
+      }
+      if (durations.isEmpty) return '-';
+      final totalMs = durations.map((d) => d.inMilliseconds).reduce((a, b) => a + b);
+      final avg = Duration(milliseconds: (totalMs / durations.length).round());
+      final h = avg.inHours;
+      final m = avg.inMinutes.remainder(60);
+      if (h <= 0) return '${m}m';
+      return '${h}h ${m}m';
+    }
 
     Widget metricCard({
       required String title,
@@ -428,7 +499,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Expanded(child: Text("Today's Attendance", style: theme.textTheme.titleMedium)),
                 IconButton(
                   tooltip: 'Refresh',
-                  onPressed: () => ref.read(attendanceControllerProvider.notifier).loadToday(),
+                  onPressed: () => ref.read(attendanceControllerProvider.notifier).loadRange(range: _range),
                   icon: const Icon(Icons.refresh),
                 ),
               ],
@@ -439,16 +510,28 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 if (items.isEmpty) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    child: Center(child: Text('No check-ins today', style: theme.textTheme.bodySmall)),
+                    child: Center(
+                      child: Text(
+                        _range == 'today' ? 'No check-ins today' : 'No logs in this range',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  );
+                }
+                final filtered = _applyLogUiFilters(items);
+                if (filtered.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
                   );
                 }
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
+                  itemCount: filtered.length,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final a = items[i];
+                    final a = filtered[i];
                     final checkedIn = DateTime.tryParse(a.checkedInAt);
                     final checkedOut = a.checkedOutAt != null ? DateTime.tryParse(a.checkedOutAt!) : null;
                     final inText = checkedIn == null ? a.checkedInAt : _dt.format(checkedIn);
@@ -491,7 +574,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
-              onPressed: () => ref.read(attendanceControllerProvider.notifier).loadToday(),
+              onPressed: () => ref.read(attendanceControllerProvider.notifier).loadRange(range: _range),
               icon: const Icon(Icons.refresh),
             ),
           ],
@@ -502,9 +585,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           runSpacing: 12,
           children: [
             metricCard(
-              title: "Today's Check-ins",
+              title: '$rangeLabel Check-ins',
               value: '$total',
-              subtitle: 'Attendance today',
+              subtitle: 'Attendance',
               icon: Icons.how_to_reg,
             ),
             metricCard(
@@ -520,9 +603,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
               icon: Icons.schedule_outlined,
             ),
             metricCard(
-              title: 'Avg Lead Time',
-              value: '0 days',
-              subtitle: 'Production estimate',
+              title: 'Avg session',
+              value: fmtAvgSession(),
+              subtitle: 'Based on check-outs',
               icon: Icons.timelapse_outlined,
             ),
           ],
@@ -539,35 +622,43 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 SizedBox(
                   width: 190,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'today',
+                    key: ValueKey(_range),
+                    initialValue: _range,
                     decoration: const InputDecoration(labelText: 'Range'),
                     items: const [
                       DropdownMenuItem(value: 'today', child: Text('Today')),
                       DropdownMenuItem(value: '7d', child: Text('Last 7 days')),
                       DropdownMenuItem(value: '30d', child: Text('Last 30 days')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) {
+                      final next = v ?? 'today';
+                      setState(() => _range = next);
+                      ref.read(attendanceControllerProvider.notifier).loadRange(range: next);
+                    },
                   ),
                 ),
                 SizedBox(
                   width: 180,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'newest',
+                    key: ValueKey(_sort),
+                    initialValue: _sort,
                     decoration: const InputDecoration(labelText: 'Sort'),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                       DropdownMenuItem(value: 'oldest', child: Text('Oldest')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => setState(() => _sort = v ?? 'newest'),
                   ),
                 ),
-                const SizedBox(
+                SizedBox(
                   width: 360,
                   child: TextField(
+                    controller: _logSearchCtrl,
                     decoration: InputDecoration(
                       hintText: 'Search member, code',
                       prefixIcon: Icon(Icons.search),
                     ),
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
               ],
@@ -668,10 +759,20 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         SystemSound.play(SystemSoundType.alert);
 
         final reason = result.reason ?? 'not_allowed';
-        final title = reason == 'membership_expired' ? 'Membership Expired' : 'Fees Pending';
+        final title = reason == 'membership_expired'
+            ? 'Membership Expired'
+            : reason == 'fees_pending'
+                ? 'Fees Pending'
+                : reason == 'membership_frozen'
+                    ? 'Membership Frozen'
+                    : 'Access Denied';
         final body = reason == 'membership_expired'
             ? 'Membership expired${result.membershipEndDate != null ? ' (Expiry: ${result.membershipEndDate})' : ''}.'
-            : 'Unpaid invoices: ${result.unpaidInvoices}.';
+            : reason == 'fees_pending'
+                ? 'Unpaid invoices: ${result.unpaidInvoices}.'
+                : reason == 'membership_frozen'
+                    ? 'Membership is frozen${result.frozenUntil != null ? ' (Until: ${result.frozenUntil})' : ''}.'
+                    : 'Not allowed.';
 
         await showDialog<void>(
           context: context,
@@ -750,6 +851,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             ? 'Membership expired${result.membershipEndDate != null ? ' (Expiry: ${result.membershipEndDate})' : ''}.'
             : reason == 'fees_pending'
                 ? 'Unpaid invoices: ${result.unpaidInvoices}.'
+                : reason == 'membership_frozen'
+                    ? 'Membership is frozen${result.frozenUntil != null ? ' (Until: ${result.frozenUntil})' : ''}.'
                 : 'Not allowed.';
 
         await showDialog<void>(
@@ -891,16 +994,19 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       await showDialog<void>(
         context: context,
         builder: (context) {
-          final plan = res['plan'] is Map ? (res['plan'] as Map).cast<String, dynamic>() : null;
+          final m = res['member'] is Map ? (res['member'] as Map).cast<String, dynamic>() : res;
+          final sub = res['subscription'] is Map ? (res['subscription'] as Map).cast<String, dynamic>() : null;
+          final frozenUntil = m['frozenUntil']?.toString();
           return AlertDialog(
-            title: Text(res['fullName']?.toString() ?? 'Member'),
+            title: Text(m['fullName']?.toString() ?? 'Member'),
             content: Text(
               [
-                'Code: ${res['memberCode']}',
-                if (res['phone'] != null) 'Phone: ${res['phone']}',
-                if (plan != null) 'Plan: ${plan['name']}',
-                if (plan != null) 'Expiry: ${plan['endDate']}',
-                'Status: ${res['status']}',
+                'Code: ${m['memberCode'] ?? '-'}',
+                if (m['phone'] != null) 'Phone: ${m['phone']}',
+                if (sub != null) 'Plan: ${sub['planName']}',
+                if (sub != null) 'Expiry: ${sub['endDate']}',
+                if (frozenUntil != null && frozenUntil.trim().isNotEmpty) 'Frozen until: $frozenUntil',
+                'Status: ${m['status'] ?? '-'}',
               ].join('\n'),
             ),
             actions: [

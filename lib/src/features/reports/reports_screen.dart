@@ -17,12 +17,21 @@ class ReportsScreen extends ConsumerStatefulWidget {
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   DateTime _monthRef = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _attendanceDate = DateTime.now();
+  String _typeFilter = 'all';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final monthLabel = DateFormat('yyyy-MM').format(_monthRef);
     final dateLabel = DateFormat('yyyy-MM-dd').format(_attendanceDate);
+    final q = _searchCtrl.text.trim().toLowerCase();
     Widget metricCard({
       required String title,
       required String value,
@@ -105,9 +114,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               icon: Icons.how_to_reg,
             ),
             metricCard(
-              title: 'Avg Lead Time',
-              value: '0 days',
-              subtitle: 'Production estimate',
+              title: 'Quick Export',
+              value: 'Ready',
+              subtitle: 'One-click PDFs',
               icon: Icons.timelapse_outlined,
             ),
           ],
@@ -124,7 +133,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 SizedBox(
                   width: 190,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'all',
+                    key: ValueKey(_typeFilter),
+                    initialValue: _typeFilter,
                     decoration: const InputDecoration(labelText: 'Report type'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Reports')),
@@ -132,99 +142,139 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       DropdownMenuItem(value: 'expired', child: Text('Expired Members')),
                       DropdownMenuItem(value: 'daily', child: Text('Daily Attendance')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => setState(() => _typeFilter = v ?? 'all'),
                   ),
                 ),
                 SizedBox(
                   width: 360,
                   child: TextField(
+                    controller: _searchCtrl,
                     decoration: const InputDecoration(
                       hintText: 'Search report',
                       prefixIcon: Icon(Icons.search),
                     ),
-                    onChanged: (_) {},
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
-                OutlinedButton(onPressed: () {}, child: const Text('Clear')),
+                OutlinedButton(
+                  onPressed: () {
+                    _searchCtrl.clear();
+                    setState(() => _typeFilter = 'all');
+                  },
+                  child: const Text('Clear'),
+                ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _ReportTile(
-              title: 'Monthly Revenue Report',
-              subtitle: 'PDF • Paid invoices summary for $monthLabel',
-              icon: Icons.trending_up,
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _pickMonth(context),
-                    icon: const Icon(Icons.date_range),
-                    label: Text(monthLabel),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: () => _openPdfActions(
-                      context,
-                      title: 'Monthly Revenue Report',
-                      path: '/reports/monthly-revenue.pdf',
-                      fileName: 'monthly_revenue_$monthLabel.pdf',
-                      query: {'month': monthLabel},
+        Builder(
+          builder: (context) {
+            final defs = <({String type, String title, String subtitle, IconData icon, Widget trailing})>[
+              (
+                type: 'monthly',
+                title: 'Monthly Revenue Report',
+                subtitle: 'PDF • Paid invoices summary for $monthLabel',
+                icon: Icons.trending_up,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _pickMonth(context),
+                      icon: const Icon(Icons.date_range),
+                      label: Text(monthLabel),
                     ),
-                    icon: const Icon(Icons.picture_as_pdf),
-                    label: const Text('PDF'),
-                  ),
-                ],
-              ),
-            ),
-            _ReportTile(
-              title: 'Expired Members List',
-              subtitle: 'PDF • All members whose latest membership is expired',
-              icon: Icons.person_off,
-              trailing: FilledButton.icon(
-                onPressed: () => _openPdfActions(
-                  context,
-                  title: 'Expired Members List',
-                  path: '/reports/expired-members.pdf',
-                  fileName: 'expired_members_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _openPdfActions(
+                        context,
+                        title: 'Monthly Revenue Report',
+                        path: '/reports/monthly-revenue.pdf',
+                        fileName: 'monthly_revenue_$monthLabel.pdf',
+                        query: {'month': monthLabel},
+                      ),
+                      icon: const Icon(Icons.picture_as_pdf),
+                      label: const Text('PDF'),
+                    ),
+                  ],
                 ),
-                icon: const Icon(Icons.picture_as_pdf),
-                label: const Text('PDF'),
               ),
-            ),
-            _ReportTile(
-              title: 'Daily Attendance Log',
-              subtitle: 'PDF • Attendance for $dateLabel',
-              icon: Icons.how_to_reg,
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _pickDate(context),
-                    icon: const Icon(Icons.event),
-                    label: Text(dateLabel),
+              (
+                type: 'expired',
+                title: 'Expired Members List',
+                subtitle: 'PDF • All members whose latest membership is expired',
+                icon: Icons.person_off,
+                trailing: FilledButton.icon(
+                  onPressed: () => _openPdfActions(
+                    context,
+                    title: 'Expired Members List',
+                    path: '/reports/expired-members.pdf',
+                    fileName: 'expired_members_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: () => _openPdfActions(
-                      context,
-                      title: 'Daily Attendance Log',
-                      path: '/reports/daily-attendance.pdf',
-                      fileName: 'attendance_$dateLabel.pdf',
-                      query: {'date': dateLabel},
+                  icon: const Icon(Icons.picture_as_pdf),
+                  label: const Text('PDF'),
+                ),
+              ),
+              (
+                type: 'daily',
+                title: 'Daily Attendance Log',
+                subtitle: 'PDF • Attendance for $dateLabel',
+                icon: Icons.how_to_reg,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _pickDate(context),
+                      icon: const Icon(Icons.event),
+                      label: Text(dateLabel),
                     ),
-                    icon: const Icon(Icons.picture_as_pdf),
-                    label: const Text('PDF'),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _openPdfActions(
+                        context,
+                        title: 'Daily Attendance Log',
+                        path: '/reports/daily-attendance.pdf',
+                        fileName: 'attendance_$dateLabel.pdf',
+                        query: {'date': dateLabel},
+                      ),
+                      icon: const Icon(Icons.picture_as_pdf),
+                      label: const Text('PDF'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ];
+
+            final visible = defs.where((d) {
+              if (_typeFilter != 'all' && d.type != _typeFilter) return false;
+              if (q.isNotEmpty) {
+                final hay = '${d.title} ${d.subtitle}'.toLowerCase();
+                if (!hay.contains(q)) return false;
+              }
+              return true;
+            }).toList();
+
+            if (visible.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
+              );
+            }
+
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final d in visible)
+                  _ReportTile(
+                    title: d.title,
+                    subtitle: d.subtitle,
+                    icon: d.icon,
+                    trailing: d.trailing,
+                  ),
+              ],
+            );
+          },
         ),
       ],
     );

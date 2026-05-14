@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers.dart';
 import '../auth/auth_controller.dart';
@@ -19,6 +21,50 @@ class ExpiringPreviewMember {
   final String memberCode;
   final String endDate;
   final int daysLeft;
+}
+
+class ExpiringMemberReminder {
+  const ExpiringMemberReminder({
+    required this.memberId,
+    required this.fullName,
+    required this.memberCode,
+    required this.phone,
+    required this.planName,
+    required this.endDate,
+    required this.daysLeft,
+    required this.frozenUntil,
+  });
+
+  final int memberId;
+  final String fullName;
+  final String memberCode;
+  final String? phone;
+  final String planName;
+  final String endDate;
+  final int daysLeft;
+  final String? frozenUntil;
+}
+
+class UnpaidInvoiceReminder {
+  const UnpaidInvoiceReminder({
+    required this.invoiceId,
+    required this.invoiceNo,
+    required this.total,
+    required this.status,
+    required this.createdAt,
+    required this.memberName,
+    required this.memberCode,
+    required this.phone,
+  });
+
+  final int invoiceId;
+  final String invoiceNo;
+  final num total;
+  final String status;
+  final String createdAt;
+  final String memberName;
+  final String memberCode;
+  final String? phone;
 }
 
 final expiringPreviewProvider = FutureProvider.autoDispose<List<ExpiringPreviewMember>>((ref) async {
@@ -42,6 +88,64 @@ final expiringPreviewProvider = FutureProvider.autoDispose<List<ExpiringPreviewM
       .toList();
 });
 
+final remindersDaysProvider = StateProvider.autoDispose<int>((ref) => 7);
+
+final expiringMembersProvider =
+    FutureProvider.autoDispose.family<List<ExpiringMemberReminder>, int>((ref, days) async {
+  final token = ref.read(authControllerProvider).token;
+  if (token == null || token.isEmpty) return const [];
+  final api = ref.read(apiClientProvider);
+  final res = await api.getJson('/members/expiring', token: token, query: {'days': days.toString()});
+  final raw = (res['items'] as List<dynamic>? ?? []).whereType<Map>().toList();
+  return raw
+      .map((e) => e.cast<String, dynamic>())
+      .map(
+        (e) => ExpiringMemberReminder(
+          memberId: (e['memberId'] as num?)?.toInt() ?? 0,
+          fullName: e['fullName']?.toString() ?? '',
+          memberCode: e['memberCode']?.toString() ?? '',
+          phone: e['phone']?.toString(),
+          planName: e['planName']?.toString() ?? '',
+          endDate: e['endDate']?.toString() ?? '',
+          daysLeft: (e['daysLeft'] as num?)?.toInt() ?? 999,
+          frozenUntil: e['frozenUntil']?.toString(),
+        ),
+      )
+      .where((m) => m.memberId > 0)
+      .toList();
+});
+
+final unpaidInvoicesProvider = FutureProvider.autoDispose<List<UnpaidInvoiceReminder>>((ref) async {
+  final token = ref.read(authControllerProvider).token;
+  if (token == null || token.isEmpty) return const [];
+  final api = ref.read(apiClientProvider);
+  final res = await api.getJson('/invoices', token: token, query: {'status': 'unpaid', 'limit': '200'});
+  final raw = (res['items'] as List<dynamic>? ?? []).whereType<Map>().toList();
+
+  num parseNum(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return num.tryParse(v.toString()) ?? 0;
+  }
+
+  return raw
+      .map((e) => e.cast<String, dynamic>())
+      .map(
+        (e) => UnpaidInvoiceReminder(
+          invoiceId: (e['id'] as num?)?.toInt() ?? 0,
+          invoiceNo: e['invoice_no']?.toString() ?? '',
+          total: parseNum(e['total']),
+          status: e['status']?.toString() ?? '',
+          createdAt: e['created_at']?.toString() ?? '',
+          memberName: e['full_name']?.toString() ?? '',
+          memberCode: e['member_code']?.toString() ?? '',
+          phone: e['phone']?.toString(),
+        ),
+      )
+      .where((i) => i.invoiceId > 0)
+      .toList();
+});
+
 class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child});
 
@@ -60,34 +164,230 @@ class AppShell extends ConsumerWidget {
     void toggleTheme() {
       ref.read(themeModeProvider.notifier).setMode(isDark ? ThemeMode.light : ThemeMode.dark);
     }
+    String normalizePhone(String? raw) {
+      if (raw == null) return '';
+      return raw.replaceAll(RegExp(r'[^0-9]'), '');
+    }
+
+    Future<void> copyToClipboard(String text) async {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+    }
+
+    Future<void> openWhatsApp({required String? phone, required String message}) async {
+      final digits = normalizePhone(phone);
+      if (digits.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Phone missing')));
+        return;
+      }
+      final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
+      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
+      }
+    }
+
     void openExpiringDialog() {
-      final items = expiringAsync.valueOrNull ?? const <ExpiringPreviewMember>[];
       showDialog<void>(
         context: context,
         builder: (context) {
+          final urgent = expiringAsync.valueOrNull ?? const <ExpiringPreviewMember>[];
+          final urgentCount = urgent.length;
           return AlertDialog(
-            title: const Text('Urgent Alerts (3 days)'),
+            title: Text(urgentCount == 0 ? 'Reminder Center' : 'Reminder Center ($urgentCount urgent)'),
             content: SizedBox(
-              width: 420,
-              child: items.isEmpty
-                  ? const Text('No urgent alerts.')
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: items.length,
-                      separatorBuilder: (context, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) {
-                        final m = items[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text('${m.fullName} (${m.memberCode})'),
-                          subtitle: Text('Expiry: ${m.endDate} • ${m.daysLeft} days left'),
-                          onTap: () {
-                            Navigator.of(context).pop();
-                            context.go('/members');
-                          },
-                        );
-                      },
+              width: 860,
+              height: 520,
+              child: DefaultTabController(
+                length: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const TabBar(
+                      tabs: [
+                        Tab(text: 'Expiring Members'),
+                        Tab(text: 'Unpaid Invoices'),
+                      ],
                     ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          Consumer(
+                            builder: (context, r, _) {
+                              final days = r.watch(remindersDaysProvider);
+                              final expiring = r.watch(expiringMembersProvider(days));
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 160,
+                                        child: DropdownButtonFormField<int>(
+                                          key: ValueKey(days),
+                                          initialValue: days,
+                                          decoration: const InputDecoration(labelText: 'Days'),
+                                          items: const [
+                                            DropdownMenuItem(value: 3, child: Text('3 days')),
+                                            DropdownMenuItem(value: 7, child: Text('7 days')),
+                                            DropdownMenuItem(value: 14, child: Text('14 days')),
+                                            DropdownMenuItem(value: 30, child: Text('30 days')),
+                                          ],
+                                          onChanged: (v) => r.read(remindersDaysProvider.notifier).state = v ?? 7,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Refresh',
+                                        onPressed: () => r.refresh(expiringMembersProvider(days)),
+                                        icon: const Icon(Icons.refresh),
+                                      ),
+                                      Text(
+                                        urgentCount == 0 ? 'Urgent: 0' : 'Urgent: $urgentCount',
+                                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Expanded(
+                                    child: expiring.when(
+                                      data: (items) {
+                                        if (items.isEmpty) return const Center(child: Text('No expiring members.'));
+                                        return ListView.separated(
+                                          itemCount: items.length,
+                                          separatorBuilder: (context, _) => const Divider(height: 1),
+                                          itemBuilder: (context, i) {
+                                            final m = items[i];
+                                            final msg =
+                                                'Assalam o Alaikum ${m.fullName}, apki membership ${m.endDate} ko expire ho rahi hai (${m.daysLeft} day left). Please renew karwa lein. $tenantLabel';
+                                            return ListTile(
+                                              dense: true,
+                                              title: Text('${m.fullName} (${m.memberCode})'),
+                                              subtitle: Text('${m.planName} • Expiry: ${m.endDate} • ${m.daysLeft} days left'),
+                                              trailing: Wrap(
+                                                spacing: 6,
+                                                children: [
+                                                  IconButton(
+                                                    tooltip: 'WhatsApp',
+                                                    onPressed: m.phone == null || m.phone!.trim().isEmpty
+                                                        ? null
+                                                        : () => openWhatsApp(phone: m.phone, message: msg),
+                                                    icon: const Icon(Icons.chat_bubble_outline),
+                                                  ),
+                                                  IconButton(
+                                                    tooltip: 'Copy message',
+                                                    onPressed: () => copyToClipboard(msg),
+                                                    icon: const Icon(Icons.content_copy_outlined),
+                                                  ),
+                                                  IconButton(
+                                                    tooltip: 'Open member',
+                                                    onPressed: () {
+                                                      Navigator.of(context).pop();
+                                                      context.go('/members?q=${Uri.encodeComponent(m.memberCode)}');
+                                                    },
+                                                    icon: const Icon(Icons.open_in_new),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      },
+                                      error: (e, _) => Center(child: Text(e.toString())),
+                                      loading: () => const Center(child: CircularProgressIndicator()),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          Consumer(
+                            builder: (context, r, _) {
+                              final unpaid = r.watch(unpaidInvoicesProvider);
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Refresh',
+                                        onPressed: () => r.refresh(unpaidInvoicesProvider),
+                                        icon: const Icon(Icons.refresh),
+                                      ),
+                                      Text(
+                                        'Tip: open invoice page to mark Paid',
+                                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Expanded(
+                                    child: unpaid.when(
+                                      data: (items) {
+                                        if (items.isEmpty) return const Center(child: Text('No unpaid invoices.'));
+                                        return ListView.separated(
+                                          itemCount: items.length,
+                                          separatorBuilder: (context, _) => const Divider(height: 1),
+                                          itemBuilder: (context, i) {
+                                            final inv = items[i];
+                                            final msg =
+                                                'Assalam o Alaikum ${inv.memberName}, apka pending bill ${inv.invoiceNo} (Rs ${inv.total}) clear kar dein. Shukriya. $tenantLabel';
+                                            return ListTile(
+                                              dense: true,
+                                              title: Text('${inv.invoiceNo} • ${inv.memberName} (${inv.memberCode})'),
+                                              subtitle: Text('Total: Rs ${inv.total} • ${inv.createdAt}'),
+                                              trailing: Wrap(
+                                                spacing: 6,
+                                                children: [
+                                                  IconButton(
+                                                    tooltip: 'WhatsApp',
+                                                    onPressed: inv.phone == null || inv.phone!.trim().isEmpty
+                                                        ? null
+                                                        : () => openWhatsApp(phone: inv.phone, message: msg),
+                                                    icon: const Icon(Icons.chat_bubble_outline),
+                                                  ),
+                                                  IconButton(
+                                                    tooltip: 'Copy message',
+                                                    onPressed: () => copyToClipboard(msg),
+                                                    icon: const Icon(Icons.content_copy_outlined),
+                                                  ),
+                                                  IconButton(
+                                                    tooltip: 'Open invoices',
+                                                    onPressed: () {
+                                                      Navigator.of(context).pop();
+                                                      context.go('/invoices');
+                                                    },
+                                                    icon: const Icon(Icons.open_in_new),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      },
+                                      error: (e, _) => Center(child: Text(e.toString())),
+                                      loading: () => const Center(child: CircularProgressIndicator()),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
             actions: [
               TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
@@ -422,72 +722,65 @@ class _DesktopFrame extends StatelessWidget {
           ],
         ),
       ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1400),
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                color: theme.colorScheme.surface,
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-                boxShadow: [
-                  BoxShadow(
-                    color: theme.brightness == Brightness.dark
-                        ? Colors.black.withAlpha(115)
-                        : Colors.black.withAlpha(30),
-                    blurRadius: 40,
-                    spreadRadius: 0,
-                    offset: const Offset(0, 18),
-                  ),
-                ],
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            color: theme.colorScheme.surface,
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            boxShadow: [
+              BoxShadow(
+                color: theme.brightness == Brightness.dark ? Colors.black.withAlpha(115) : Colors.black.withAlpha(30),
+                blurRadius: 40,
+                spreadRadius: 0,
+                offset: const Offset(0, 18),
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: Row(
-                  children: [
-                    _Sidebar(
-                      tenantLabel: tenantLabel,
-                      userName: userName,
-                      email: email,
-                      initials: initials,
-                      selectedRoute: selectedRoute,
-                      destinations: destinations,
-                      onGo: onGo,
-                      onLogout: onLogout,
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: Row(
+              children: [
+                _Sidebar(
+                  tenantLabel: tenantLabel,
+                  userName: userName,
+                  email: email,
+                  initials: initials,
+                  selectedRoute: selectedRoute,
+                  destinations: destinations,
+                  onGo: onGo,
+                  onLogout: onLogout,
+                ),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest.withAlpha(64),
                     ),
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest.withAlpha(64),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(6),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(22),
-                            child: Container(
-                              color: theme.scaffoldBackgroundColor,
-                              child: Column(
-                                children: [
-                                  _TopBar(
-                                    isDark: isDark,
-                                    onToggleTheme: onToggleTheme,
-                                    onOpenNotifications: onOpenNotifications,
-                                    onOpenSearch: onOpenSearch,
-                                    expiringCount: expiringAsync.valueOrNull?.length ?? 0,
-                                  ),
-                                  Expanded(child: child),
-                                ],
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(22),
+                        child: Container(
+                          color: theme.scaffoldBackgroundColor,
+                          child: Column(
+                            children: [
+                              _TopBar(
+                                isDark: isDark,
+                                onToggleTheme: onToggleTheme,
+                                onOpenNotifications: onOpenNotifications,
+                                onOpenSearch: onOpenSearch,
+                                expiringCount: expiringAsync.valueOrNull?.length ?? 0,
                               ),
-                            ),
+                              Expanded(child: child),
+                            ],
                           ),
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
@@ -542,7 +835,7 @@ class _Sidebar extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Gym Listing', style: theme.textTheme.titleMedium),
+                      Text('Gym Management', style: theme.textTheme.titleMedium),
                       Text(
                         tenantLabel,
                         maxLines: 1,

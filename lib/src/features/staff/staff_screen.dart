@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -20,7 +22,7 @@ class _StaffController extends StateNotifier<AsyncValue<List<StaffUser>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<StaffUser>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -79,8 +81,11 @@ class _StaffController extends StateNotifier<AsyncValue<List<StaffUser>>> {
   }
 }
 
-class StaffScreen extends ConsumerWidget {
+class StaffScreen extends ConsumerStatefulWidget {
   const StaffScreen({super.key});
+
+  @override
+  ConsumerState<StaffScreen> createState() => _StaffScreenState();
 
   Future<void> _openStaffPdfActions(BuildContext context, WidgetRef ref) async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -145,16 +150,17 @@ class StaffScreen extends ConsumerWidget {
     }
   }
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget _build(BuildContext context, WidgetRef ref, _StaffScreenState state) {
     final theme = Theme.of(context);
     final dt = DateFormat('yyyy-MM-dd');
+    final number = NumberFormat.decimalPattern();
     final staffAsync = ref.watch(staffControllerProvider);
     final itemsPreview = staffAsync.valueOrNull ?? const <StaffUser>[];
     final total = itemsPreview.length;
     final active = itemsPreview.where((u) => u.status == 'active').length;
     final disabled = itemsPreview.where((u) => u.status != 'active').length;
     final admins = itemsPreview.where((u) => u.roles.contains('admin')).length;
+    final filteredPreview = state._applyStaffUiFilters(itemsPreview);
 
     Widget metricCard({
       required String title,
@@ -275,43 +281,52 @@ class StaffScreen extends ConsumerWidget {
                 SizedBox(
                   width: 190,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'all',
-                    decoration: const InputDecoration(labelText: 'All Statuses'),
+                    key: ValueKey(state._statusFilter),
+                    initialValue: state._statusFilter,
+                    decoration: const InputDecoration(labelText: 'Status'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'active', child: Text('Active')),
                       DropdownMenuItem(value: 'disabled', child: Text('Disabled')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setStatusFilter(v ?? 'all'),
                   ),
                 ),
                 SizedBox(
                   width: 180,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'name_asc',
+                    key: ValueKey(state._sort),
+                    initialValue: state._sort,
                     decoration: const InputDecoration(labelText: 'Sort'),
                     items: const [
                       DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
                       DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setSort(v ?? 'name_asc'),
                   ),
                 ),
-                const SizedBox(
+                SizedBox(
                   width: 360,
                   child: TextField(
+                    controller: state._searchCtrl,
                     decoration: InputDecoration(
                       hintText: 'Search staff, role, status',
                       prefixIcon: Icon(Icons.search),
                     ),
+                    onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 Text(
-                  'Showing $total of $total',
+                  'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
-                OutlinedButton(onPressed: () {}, child: const Text('Clear')),
+                OutlinedButton(
+                  onPressed: () {
+                    state._clearFilters();
+                  },
+                  child: const Text('Clear'),
+                ),
               ],
             ),
           ),
@@ -324,6 +339,14 @@ class StaffScreen extends ConsumerWidget {
                 title: 'No staff users',
                 subtitle: 'Invite staff to control access and audit activity.',
                 icon: Icons.badge,
+              );
+            }
+
+            final filtered = state._applyStaffUiFilters(items);
+            if (filtered.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
               );
             }
 
@@ -342,7 +365,7 @@ class StaffScreen extends ConsumerWidget {
                         DataColumn(label: Text('Action')),
                       ],
                       rows: [
-                        for (final u in items)
+                        for (final u in filtered)
                           DataRow(
                             cells: [
                               DataCell(Text(u.fullName)),
@@ -382,10 +405,10 @@ class StaffScreen extends ConsumerWidget {
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
+                  itemCount: filtered.length,
                   separatorBuilder: (context, _) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final u = items[i];
+                    final u = filtered[i];
                     return ListTile(
                       leading: const Icon(Icons.badge),
                       title: Text(u.fullName),
@@ -417,6 +440,16 @@ class StaffScreen extends ConsumerWidget {
     final nameCtrl = TextEditingController();
     final passCtrl = TextEditingController();
     var roles = <String>{'staff'};
+    final rand = Random.secure();
+    String genPassword() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%';
+      final buf = StringBuffer();
+      for (var i = 0; i < 12; i += 1) {
+        buf.write(chars[rand.nextInt(chars.length)]);
+      }
+      return buf.toString();
+    }
+    var showPass = false;
 
     await showAppFormDialog<void>(
       context: context,
@@ -445,8 +478,25 @@ class StaffScreen extends ConsumerWidget {
                       field(
                         TextField(
                           controller: passCtrl,
-                          obscureText: true,
-                          decoration: const InputDecoration(labelText: 'Password'),
+                          obscureText: !showPass,
+                          decoration: InputDecoration(
+                            labelText: 'Password',
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Generate',
+                                  onPressed: () => setModalState(() => passCtrl.text = genPassword()),
+                                  icon: const Icon(Icons.auto_fix_high),
+                                ),
+                                IconButton(
+                                  tooltip: showPass ? 'Hide' : 'Show',
+                                  onPressed: () => setModalState(() => showPass = !showPass),
+                                  icon: Icon(showPass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -742,6 +792,67 @@ class _RoleChip extends StatelessWidget {
       visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
+  }
+}
+
+class _StaffScreenState extends ConsumerState<StaffScreen> {
+  final _searchCtrl = TextEditingController();
+  String _statusFilter = 'all';
+  String _sort = 'name_asc';
+
+  void _setStatusFilter(String v) => setState(() => _statusFilter = v);
+  void _setSort(String v) => setState(() => _sort = v);
+  void _touchFilters() => setState(() {});
+  void _clearFilters() {
+    _searchCtrl.clear();
+    setState(() {
+      _statusFilter = 'all';
+      _sort = 'name_asc';
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<StaffUser> _applyStaffUiFilters(List<StaffUser> items) {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered = items.where((u) {
+      if (_statusFilter != 'all' && u.status != _statusFilter) return false;
+      if (q.isNotEmpty) {
+        final hay = '${u.fullName} ${u.email} ${u.status} ${u.roles.join(' ')}'.toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    DateTime? parse(String raw) => DateTime.tryParse(raw);
+
+    if (_sort == 'name_desc') {
+      filtered.sort((a, b) => b.fullName.toLowerCase().compareTo(a.fullName.toLowerCase()));
+    } else if (_sort == 'newest') {
+      filtered.sort((a, b) {
+        final ad = parse(a.createdAt);
+        final bd = parse(b.createdAt);
+        if (ad == null && bd == null) return b.id.compareTo(a.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final c = bd.compareTo(ad);
+        if (c != 0) return c;
+        return b.id.compareTo(a.id);
+      });
+    } else {
+      filtered.sort((a, b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()));
+    }
+
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget._build(context, ref, this);
   }
 }
 

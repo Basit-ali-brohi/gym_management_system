@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
@@ -75,7 +76,7 @@ class _PaymentsController extends StateNotifier<AsyncValue<List<Payment>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<Payment>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -116,8 +117,11 @@ class _PaymentsController extends StateNotifier<AsyncValue<List<Payment>>> {
   }
 }
 
-class PaymentsScreen extends ConsumerWidget {
+class PaymentsScreen extends ConsumerStatefulWidget {
   const PaymentsScreen({super.key});
+
+  @override
+  ConsumerState<PaymentsScreen> createState() => _PaymentsScreenState();
 
   Future<void> _openPaymentsPdfActions(BuildContext context, WidgetRef ref) async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -181,9 +185,37 @@ class PaymentsScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PDF failed')));
     }
   }
+}
+
+class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+  Timer? _debounce;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _scheduleReload() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      ref.read(paymentsControllerProvider.notifier).load();
+    });
+  }
+
+  void _applyQuery(_PaymentsQuery query, {String? q, String? method, String? from, String? to, bool load = false}) {
+    ref.read(paymentsQueryProvider.notifier).state = query.copyWith(q: q, method: method, from: from, to: to);
+    if (load) {
+      ref.read(paymentsControllerProvider.notifier).load();
+    }
+  }
+
+  Widget _build(BuildContext context, WidgetRef ref, _PaymentsScreenState state) {
     final theme = Theme.of(context);
     final number = NumberFormat.decimalPattern();
     final dt = DateFormat('yyyy-MM-dd HH:mm');
@@ -192,6 +224,10 @@ class PaymentsScreen extends ConsumerWidget {
     final query = ref.watch(paymentsQueryProvider);
     final itemsAsync = ref.watch(paymentsControllerProvider);
     final summaryAsync = ref.watch(paymentsSummaryProvider);
+
+    if (_searchCtrl.text != query.q && !_searchFocus.hasFocus) {
+      _searchCtrl.text = query.q;
+    }
 
     String fmtDateTime(String raw) {
       final parsed = DateTime.tryParse(raw);
@@ -287,7 +323,7 @@ class PaymentsScreen extends ConsumerWidget {
       }
     }
 
-    return Column(
+    return ListView(
       children: [
         Padding(
           padding: const EdgeInsets.all(16),
@@ -306,7 +342,7 @@ class PaymentsScreen extends ConsumerWidget {
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'PDF',
-                onPressed: () => _openPaymentsPdfActions(context, ref),
+                onPressed: () => widget._openPaymentsPdfActions(context, ref),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
               ),
               const SizedBox(width: 6),
@@ -331,28 +367,36 @@ class PaymentsScreen extends ConsumerWidget {
                   SizedBox(
                     width: 320,
                     child: TextField(
+                      controller: _searchCtrl,
+                      focusNode: _searchFocus,
                       decoration: const InputDecoration(
                         labelText: 'Search (invoice / member / code / phone)',
                         prefixIcon: Icon(Icons.search),
                       ),
-                      onChanged: (v) => ref.read(paymentsQueryProvider.notifier).state = query.copyWith(q: v),
-                      onSubmitted: (_) => ref.read(paymentsControllerProvider.notifier).load(),
+                      onChanged: (v) {
+                        _applyQuery(query, q: v);
+                        _scheduleReload();
+                      },
+                      onSubmitted: (_) {
+                        _debounce?.cancel();
+                        ref.read(paymentsControllerProvider.notifier).load();
+                      },
                     ),
                   ),
                   SizedBox(
                     width: 180,
                     child: DropdownButtonFormField<String>(
                       key: ValueKey(query.method),
-                      initialValue: query.method.isEmpty ? null : query.method,
+                      initialValue: query.method,
                       decoration: const InputDecoration(labelText: 'Method'),
                       items: const [
+                        DropdownMenuItem(value: '', child: Text('All Methods')),
                         DropdownMenuItem(value: 'cash', child: Text('Cash')),
                         DropdownMenuItem(value: 'card', child: Text('Card')),
                         DropdownMenuItem(value: 'bank', child: Text('Bank')),
                         DropdownMenuItem(value: 'online', child: Text('Online')),
                       ],
-                      onChanged: (v) =>
-                          ref.read(paymentsQueryProvider.notifier).state = query.copyWith(method: v ?? ''),
+                      onChanged: (v) => _applyQuery(query, method: v ?? '', load: true),
                     ),
                   ),
                   OutlinedButton.icon(
@@ -369,7 +413,7 @@ class PaymentsScreen extends ConsumerWidget {
                       if (picked == null) return;
                       final f = DateFormat('yyyy-MM-dd').format(picked.start);
                       final t = DateFormat('yyyy-MM-dd').format(picked.end);
-                      ref.read(paymentsQueryProvider.notifier).state = query.copyWith(from: f, to: t);
+                      _applyQuery(query, from: f, to: t);
                       await ref.read(paymentsControllerProvider.notifier).load();
                     },
                     icon: const Icon(Icons.date_range),
@@ -390,6 +434,8 @@ class PaymentsScreen extends ConsumerWidget {
                         to: DateFormat('yyyy-MM-dd').format(today),
                       );
                       ref.read(paymentsQueryProvider.notifier).state = next;
+                      _debounce?.cancel();
+                      _searchCtrl.clear();
                       ref.read(paymentsControllerProvider.notifier).load();
                     },
                     child: const Text('Reset'),
@@ -421,113 +467,133 @@ class PaymentsScreen extends ConsumerWidget {
             loading: () => const LinearProgressIndicator(),
           ),
         ),
-        Expanded(
-          child: itemsAsync.when(
-            data: (items) {
-              if (items.isEmpty) {
-                return const _EmptyState(
+        itemsAsync.when(
+          data: (items) {
+            if (items.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
+                child: _EmptyState(
                   title: 'No payments found',
                   subtitle: 'Try changing date range or search.',
                   icon: Icons.payments,
-                );
-              }
+                ),
+              );
+            }
 
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth >= 900) {
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: DataTable(
-                          columns: const [
-                            DataColumn(label: Text('Invoice')),
-                            DataColumn(label: Text('Member')),
-                            DataColumn(label: Text('Amount')),
-                            DataColumn(label: Text('Method')),
-                            DataColumn(label: Text('Paid At')),
-                            DataColumn(label: Text('Action')),
-                          ],
-                          rows: [
-                            for (final p in items)
-                              DataRow(
-                                cells: [
-                                  DataCell(Text(p.invoiceNo)),
-                                  DataCell(Text('${p.memberName} (${p.memberCode})')),
-                                  DataCell(Text(number.format(p.amount))),
-                                  DataCell(_MethodChip(method: p.method)),
-                                  DataCell(Text(fmtDateTime(p.paidAt))),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 900) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: const [
+                          DataColumn(label: Text('Invoice')),
+                          DataColumn(label: Text('Member')),
+                          DataColumn(label: Text('Amount')),
+                          DataColumn(label: Text('Method')),
+                          DataColumn(label: Text('Paid At')),
+                          DataColumn(label: Text('Action')),
+                        ],
+                        rows: [
+                          for (final p in items)
+                            DataRow(
+                              cells: [
+                                DataCell(Text(p.invoiceNo)),
+                                DataCell(Text('${p.memberName} (${p.memberCode})')),
+                                DataCell(Text(number.format(p.amount))),
+                                DataCell(_MethodChip(method: p.method)),
+                                DataCell(Text(fmtDateTime(p.paidAt))),
+                                DataCell(
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'View',
+                                        onPressed: () => _openView(context, p),
+                                        icon: const Icon(Icons.visibility),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Edit',
+                                        onPressed: () => openEdit(p),
+                                        icon: const Icon(Icons.edit_outlined),
+                                      ),
+                                      if (canDelete)
                                         IconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openView(context, p),
-                                          icon: const Icon(Icons.visibility),
+                                          tooltip: 'Delete',
+                                          onPressed: () => confirmDelete(p),
+                                          icon: const Icon(Icons.delete_outline),
                                         ),
-                                        IconButton(
-                                          tooltip: 'Edit',
-                                          onPressed: () => openEdit(p),
-                                          icon: const Icon(Icons.edit_outlined),
-                                        ),
-                                        if (canDelete)
-                                          IconButton(
-                                            tooltip: 'Delete',
-                                            onPressed: () => confirmDelete(p),
-                                            icon: const Icon(Icons.delete_outline),
-                                          ),
-                                      ],
-                                    ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                          ],
-                        ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(bottom: 16),
+                  itemCount: items.length,
+                  separatorBuilder: (context, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final p = items[i];
+                    return ListTile(
+                      leading: const Icon(Icons.payments),
+                      title: Text('${p.memberName} • ${p.invoiceNo}'),
+                      subtitle: Text('Amount: ${number.format(p.amount)} • ${fmtDateTime(p.paidAt)}'),
+                      trailing: PopupMenuButton<String>(
+                        tooltip: 'Actions',
+                        onSelected: (v) {
+                          if (v == 'view') _openView(context, p);
+                          if (v == 'edit') openEdit(p);
+                          if (v == 'delete' && canDelete) confirmDelete(p);
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'view', child: Text('View')),
+                          const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                          if (canDelete) const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                        ],
+                        child: const Icon(Icons.more_vert),
                       ),
                     );
-                  }
-
-                  return ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    itemCount: items.length,
-                    separatorBuilder: (context, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final p = items[i];
-                      return ListTile(
-                        leading: const Icon(Icons.payments),
-                        title: Text('${p.memberName} • ${p.invoiceNo}'),
-                        subtitle: Text('Amount: ${number.format(p.amount)} • ${fmtDateTime(p.paidAt)}'),
-                        trailing: PopupMenuButton<String>(
-                          tooltip: 'Actions',
-                          onSelected: (v) {
-                            if (v == 'view') _openView(context, p);
-                            if (v == 'edit') openEdit(p);
-                            if (v == 'delete' && canDelete) confirmDelete(p);
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(value: 'view', child: Text('View')),
-                            const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            if (canDelete) const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                          ],
-                          child: const Icon(Icons.more_vert),
-                        ),
-                      );
-                    },
-                  );
-                },
-              );
-            },
-            error: (e, _) => Center(child: Text(e.toString())),
-            loading: () => const Center(child: CircularProgressIndicator()),
+                  },
+                );
+              },
+            );
+          },
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Center(child: Text(e.toString())),
+          ),
+          loading: () => const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Center(child: CircularProgressIndicator()),
           ),
         ),
       ],
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return _build(context, ref, this);
+  }
 }
 
 void _openView(BuildContext context, Payment p) {
+  String fmt(String raw) {
+    final d = DateTime.tryParse(raw);
+    if (d == null) return raw;
+    return DateFormat('yyyy-MM-dd HH:mm').format(d);
+  }
+
   showDialog<void>(
     context: context,
     builder: (context) {
@@ -539,7 +605,7 @@ void _openView(BuildContext context, Payment p) {
             'Member: ${p.memberName} (${p.memberCode})',
             'Amount: ${p.amount}',
             'Method: ${p.method}',
-            'Paid At: ${p.paidAt}',
+            'Paid At: ${fmt(p.paidAt)}',
           ].join('\n'),
         ),
         actions: [

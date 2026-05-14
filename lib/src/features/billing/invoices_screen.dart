@@ -36,7 +36,7 @@ class InvoicesController extends StateNotifier<AsyncValue<List<Invoice>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<Invoice>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
@@ -97,11 +97,13 @@ class _InvoiceMemberSearch extends StateNotifier<AsyncValue<List<Member>>> {
   }
 }
 
-class InvoicesScreen extends ConsumerWidget {
+class InvoicesScreen extends ConsumerStatefulWidget {
   const InvoicesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InvoicesScreen> createState() => _InvoicesScreenState();
+
+  Widget _build(BuildContext context, WidgetRef ref, _InvoicesScreenState state) {
     final invoicesAsync = ref.watch(invoicesControllerProvider);
     final theme = Theme.of(context);
     final number = NumberFormat.decimalPattern();
@@ -113,6 +115,7 @@ class InvoicesScreen extends ConsumerWidget {
     final paid = itemsPreview.where((i) => i.status == 'paid').length;
     final unpaid = itemsPreview.where((i) => i.status == 'unpaid').length;
     final voided = itemsPreview.where((i) => i.status == 'void').length;
+    final filteredPreview = state._applyInvoiceUiFilters(itemsPreview);
 
     Widget metricCard({
       required String title,
@@ -227,44 +230,51 @@ class InvoicesScreen extends ConsumerWidget {
                 SizedBox(
                   width: 190,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'all',
-                    decoration: const InputDecoration(labelText: 'All Statuses'),
+                    key: ValueKey(state._statusFilter),
+                    initialValue: state._statusFilter,
+                    decoration: const InputDecoration(labelText: 'Status'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'paid', child: Text('Paid')),
                       DropdownMenuItem(value: 'unpaid', child: Text('Unpaid')),
                       DropdownMenuItem(value: 'void', child: Text('Voided')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setStatusFilter(v ?? 'all'),
                   ),
                 ),
                 SizedBox(
                   width: 180,
                   child: DropdownButtonFormField<String>(
-                    initialValue: 'newest',
+                    key: ValueKey(state._sort),
+                    initialValue: state._sort,
                     decoration: const InputDecoration(labelText: 'Sort'),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                       DropdownMenuItem(value: 'oldest', child: Text('Oldest')),
                       DropdownMenuItem(value: 'total_desc', child: Text('Total high–low')),
                     ],
-                    onChanged: (_) {},
+                    onChanged: (v) => state._setSort(v ?? 'newest'),
                   ),
                 ),
-                const SizedBox(
+                SizedBox(
                   width: 360,
                   child: TextField(
+                    controller: state._searchCtrl,
                     decoration: InputDecoration(
                       hintText: 'Search invoice, member, code',
                       prefixIcon: Icon(Icons.search),
                     ),
+                    onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 Text(
-                  'Showing $total of $total',
+                  'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
-                OutlinedButton(onPressed: () {}, child: const Text('Clear')),
+                OutlinedButton(
+                  onPressed: state._clearFilters,
+                  child: const Text('Clear'),
+                ),
               ],
             ),
           ),
@@ -274,11 +284,19 @@ class InvoicesScreen extends ConsumerWidget {
           data: (items) {
             if (items.isEmpty) return const _EmptyState();
 
-              String formatDate(String raw) {
-                final parsed = DateTime.tryParse(raw);
-                if (parsed == null) return raw;
-                return dt.format(parsed);
-              }
+            final filtered = state._applyInvoiceUiFilters(items);
+            if (filtered.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
+              );
+            }
+
+            String formatDate(String raw) {
+              final parsed = DateTime.tryParse(raw);
+              if (parsed == null) return raw;
+              return dt.format(parsed);
+            }
 
             return LayoutBuilder(
               builder: (context, constraints) {
@@ -295,7 +313,7 @@ class InvoicesScreen extends ConsumerWidget {
                             DataColumn(label: Text('Action')),
                           ],
                           rows: [
-                            for (final inv in items)
+                            for (final inv in filtered)
                               DataRow(
                                 cells: [
                                   DataCell(Text(inv.invoiceNo)),
@@ -333,10 +351,15 @@ class InvoicesScreen extends ConsumerWidget {
                                         if (inv.status == 'unpaid') ...[
                                           const SizedBox(width: 8),
                                           FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              minimumSize: const Size(0, 36),
+                                            ),
                                             onPressed: () => ref
                                                 .read(invoicesControllerProvider.notifier)
                                                 .markPaid(inv.id),
-                                            child: const Text('Mark Paid'),
+                                            child: const Text('Paid'),
                                           ),
                                         ],
                                       ],
@@ -352,10 +375,10 @@ class InvoicesScreen extends ConsumerWidget {
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
+                  itemCount: filtered.length,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final inv = items[i];
+                    final inv = filtered[i];
                     return ListTile(
                         leading: const Icon(Icons.receipt_long),
                         title: Text('${inv.invoiceNo} • ${inv.memberName}'),
@@ -429,6 +452,13 @@ class InvoicesScreen extends ConsumerWidget {
             builder: (context, r, _) {
               final memberAsync = r.watch(invoiceMemberSearchProvider);
               final plansAsync = r.watch(billingPlansProvider);
+
+              if (plansAsync is AsyncData<List<Plan>> && selectedPlanId == null && plansAsync.value.isNotEmpty) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!context.mounted) return;
+                  setModalState(() => selectedPlanId = plansAsync.value.first.id);
+                });
+              }
 
               Plan? selectedPlan;
               if (plansAsync is AsyncData<List<Plan>> && selectedPlanId != null) {
@@ -895,6 +925,76 @@ class InvoicesScreen extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed')));
     }
+  }
+}
+
+class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
+  final _searchCtrl = TextEditingController();
+  String _statusFilter = 'all';
+  String _sort = 'newest';
+
+  void _setStatusFilter(String v) => setState(() => _statusFilter = v);
+  void _setSort(String v) => setState(() => _sort = v);
+  void _touchFilters() => setState(() {});
+  void _clearFilters() {
+    _searchCtrl.clear();
+    setState(() {
+      _statusFilter = 'all';
+      _sort = 'newest';
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Invoice> _applyInvoiceUiFilters(List<Invoice> items) {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered = items.where((inv) {
+      if (_statusFilter != 'all' && inv.status != _statusFilter) return false;
+      if (q.isNotEmpty) {
+        final hay = '${inv.invoiceNo} ${inv.memberName} ${inv.status} ${inv.total} ${inv.createdAt}'.toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
+    DateTime? parse(String raw) => DateTime.tryParse(raw);
+
+    if (_sort == 'oldest') {
+      filtered.sort((a, b) {
+        final ad = parse(a.createdAt);
+        final bd = parse(b.createdAt);
+        if (ad == null && bd == null) return a.id.compareTo(b.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final c = ad.compareTo(bd);
+        if (c != 0) return c;
+        return a.id.compareTo(b.id);
+      });
+    } else if (_sort == 'total_desc') {
+      filtered.sort((a, b) => b.total.compareTo(a.total));
+    } else {
+      filtered.sort((a, b) {
+        final ad = parse(a.createdAt);
+        final bd = parse(b.createdAt);
+        if (ad == null && bd == null) return b.id.compareTo(a.id);
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        final c = bd.compareTo(ad);
+        if (c != 0) return c;
+        return b.id.compareTo(a.id);
+      });
+    }
+
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget._build(context, ref, this);
   }
 }
 

@@ -12,6 +12,7 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - lib/src/core/web_download_web.dart
+    - lib/src/core/web_image_picker_web.dart
 
 linter:
   # The lint rules applied to this project can be customized in the

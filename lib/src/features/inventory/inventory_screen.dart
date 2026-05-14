@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -71,7 +72,7 @@ class _ProductsController extends StateNotifier<AsyncValue<List<Product>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<Product>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -180,7 +181,7 @@ class _InventorySaleMemberSearch extends StateNotifier<AsyncValue<List<Member>>>
   final Ref ref;
 
   Future<void> load(String q) async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<Member>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -226,9 +227,11 @@ class InventoryScreen extends ConsumerStatefulWidget {
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   final _searchCtrl = TextEditingController();
   final _searchFocus = FocusNode();
+  Timer? _searchDebounce;
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -342,60 +345,75 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
     return DefaultTabController(
       length: 3,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      child: NestedScrollView(
+        headerSliverBuilder: (context, _) {
+          return [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Store & Warehouse', style: theme.textTheme.headlineSmall),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Manage raw materials, components, and suppliers',
-                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Inventory', style: theme.textTheme.headlineSmall),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Manage products, supplements, and stock',
+                                style:
+                                    theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(
-                      width: 360,
-                      child: TextField(
-                        controller: _searchCtrl,
-                        focusNode: _searchFocus,
-                        decoration: const InputDecoration(
-                          hintText: 'Search materials, vendor, SKU, ...',
-                          prefixIcon: Icon(Icons.search),
                         ),
-                        onChanged: (v) => ref.read(inventoryQueryProvider.notifier).state = query.copyWith(q: v),
-                        onSubmitted: (_) => ref.read(productsControllerProvider.notifier).load(),
-                      ),
+                        SizedBox(
+                          width: 360,
+                          child: TextField(
+                            controller: _searchCtrl,
+                            focusNode: _searchFocus,
+                            decoration: const InputDecoration(
+                              hintText: 'Search product, SKU, ...',
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                            onChanged: (v) {
+                              ref.read(inventoryQueryProvider.notifier).state = query.copyWith(q: v);
+                              _searchDebounce?.cancel();
+                              _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+                                if (!mounted) return;
+                                ref.read(productsControllerProvider.notifier).load();
+                              });
+                            },
+                            onSubmitted: (_) {
+                              _searchDebounce?.cancel();
+                              ref.read(productsControllerProvider.notifier).load();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    TabBar(
+                      dividerColor: Colors.transparent,
+                      labelStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                      tabs: const [
+                        Tab(text: 'Overview'),
+                        Tab(text: 'Logs'),
+                        Tab(text: 'Suppliers'),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                TabBar(
-                  dividerColor: Colors.transparent,
-                  labelStyle: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                  tabs: const [
-                    Tab(text: 'Overview'),
-                    Tab(text: 'Logs'),
-                    Tab(text: 'Suppliers'),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
+          ];
+        },
+        body: TabBarView(
+          children: [
                 itemsAsync.when(
                   data: (rawItems) {
                     final items = [...rawItems];
@@ -472,8 +490,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                       DropdownMenuItem(value: 'active', child: Text('Active')),
                                       DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
                                     ],
-                                    onChanged: (v) => ref.read(inventoryQueryProvider.notifier).state =
-                                        query.copyWith(status: v ?? ''),
+                                    onChanged: (v) {
+                                      ref.read(inventoryQueryProvider.notifier).state = query.copyWith(status: v ?? '');
+                                      ref.read(productsControllerProvider.notifier).load();
+                                    },
                                   ),
                                 ),
                                 SizedBox(
@@ -519,6 +539,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                     if (picked == null) return;
                                     ref.read(inventoryQueryProvider.notifier).state =
                                         query.copyWith(from: DateFormat('yyyy-MM-dd').format(picked));
+                                    ref.read(productsControllerProvider.notifier).load();
                                   },
                                   icon: const Icon(Icons.date_range),
                                   label: Text(query.from.trim().isEmpty ? 'From' : query.from.trim()),
@@ -537,6 +558,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                     if (picked == null) return;
                                     ref.read(inventoryQueryProvider.notifier).state =
                                         query.copyWith(to: DateFormat('yyyy-MM-dd').format(picked));
+                                    ref.read(productsControllerProvider.notifier).load();
                                   },
                                   icon: const Icon(Icons.date_range),
                                   label: Text(query.to.trim().isEmpty ? 'To' : query.to.trim()),
@@ -545,8 +567,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                 FilterChip(
                                   label: const Text('Low stock (<5)'),
                                   selected: query.lowStock,
-                                  onSelected: (v) =>
-                                      ref.read(inventoryQueryProvider.notifier).state = query.copyWith(lowStock: v),
+                                  onSelected: (v) {
+                                    ref.read(inventoryQueryProvider.notifier).state = query.copyWith(lowStock: v);
+                                    ref.read(productsControllerProvider.notifier).load();
+                                  },
                                 ),
                                 FilledButton(
                                   onPressed: () => ref.read(productsControllerProvider.notifier).load(),
@@ -559,7 +583,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         const SizedBox(height: 16),
                         Row(
                           children: [
-                            Expanded(child: Text('Raw Materials', style: theme.textTheme.titleLarge)),
+                            Expanded(child: Text('Products', style: theme.textTheme.titleLarge)),
                             _HoverScaleButton(
                               child: OutlinedButton.icon(
                                 onPressed: items.isEmpty ? null : () => _exportProductsCsv(context, items),
@@ -578,7 +602,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                               child: FilledButton.icon(
                                 onPressed: () => _openAddProduct(context, ref),
                                 icon: const Icon(Icons.add),
-                                label: const Text('Add Material'),
+                                label: const Text('Add Product'),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -602,10 +626,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                     child: const Icon(Icons.inventory_2_outlined),
                                   ),
                                   const SizedBox(height: 16),
-                                  Text('No materials yet', style: theme.textTheme.titleMedium),
+                                  Text('No products yet', style: theme.textTheme.titleMedium),
                                   const SizedBox(height: 6),
                                   Text(
-                                    'Add your first material to start tracking stock and alerts.',
+                                    'Add your first product to start tracking stock and alerts.',
                                     style: theme.textTheme.bodyMedium
                                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                     textAlign: TextAlign.center,
@@ -614,7 +638,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                   FilledButton.icon(
                                     onPressed: () => _openAddProduct(context, ref),
                                     icon: const Icon(Icons.add),
-                                    label: const Text('Add Material'),
+                                    label: const Text('Add Product'),
                                   ),
                                 ],
                               ),
@@ -763,10 +787,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 ),
                 _InventoryLogsTab(number: number),
                 const _SuppliersTab(),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -780,8 +802,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     await showAppFormDialog<void>(
       context: context,
       icon: Icons.inventory_2_outlined,
-      title: 'Add Raw Material',
-      subtitle: 'Manage raw material details and inventory',
+      title: 'Add Product',
+      subtitle: 'Manage product details and stock',
       body: StatefulBuilder(
         builder: (context, setModalState) {
           return LayoutBuilder(
@@ -794,7 +816,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Material Details', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Product Details', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
@@ -803,7 +825,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       field(
                         TextField(
                           controller: nameCtrl,
-                          decoration: const InputDecoration(labelText: 'Material Name'),
+                          decoration: const InputDecoration(labelText: 'Product Name'),
                         ),
                       ),
                       field(
@@ -816,7 +838,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         DropdownButtonFormField<String>(
                           key: ValueKey(status),
                           initialValue: status,
-                          decoration: const InputDecoration(labelText: 'Material Status'),
+                          decoration: const InputDecoration(labelText: 'Status'),
                           items: const [
                             DropdownMenuItem(value: 'active', child: Text('Active')),
                             DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
@@ -828,7 +850,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         TextField(
                           controller: priceCtrl,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Cost / Price'),
+                          decoration: const InputDecoration(labelText: 'Price'),
                         ),
                       ),
                     ],
@@ -912,7 +934,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     await showAppFormDialog<void>(
       context: context,
       icon: Icons.edit_outlined,
-      title: 'Edit Raw Material',
+      title: 'Edit Product',
       subtitle: p.name,
       body: StatefulBuilder(
         builder: (context, setModalState) {
@@ -925,7 +947,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Material Details', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Product Details', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
@@ -934,7 +956,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       field(
                         TextField(
                           controller: nameCtrl,
-                          decoration: const InputDecoration(labelText: 'Material Name'),
+                          decoration: const InputDecoration(labelText: 'Product Name'),
                         ),
                       ),
                       field(
@@ -947,7 +969,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         DropdownButtonFormField<String>(
                           key: ValueKey(status),
                           initialValue: status,
-                          decoration: const InputDecoration(labelText: 'Material Status'),
+                          decoration: const InputDecoration(labelText: 'Status'),
                           items: const [
                             DropdownMenuItem(value: 'active', child: Text('Active')),
                             DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
@@ -959,7 +981,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         TextField(
                           controller: priceCtrl,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Cost / Price'),
+                          decoration: const InputDecoration(labelText: 'Price'),
                         ),
                       ),
                     ],

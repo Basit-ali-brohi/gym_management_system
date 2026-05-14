@@ -75,7 +75,7 @@ class _ExpensesController extends StateNotifier<AsyncValue<List<Expense>>> {
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncValue.loading();
+    state = const AsyncLoading<List<Expense>>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -145,6 +145,20 @@ class _ExpensesController extends StateNotifier<AsyncValue<List<Expense>>> {
 
 class ExpensesScreen extends ConsumerWidget {
   const ExpensesScreen({super.key});
+
+  String _fmtDateOnly(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return '-';
+    final m = RegExp(r'^\d{4}-\d{2}-\d{2}').firstMatch(s);
+    if (m != null) return m.group(0)!;
+    final d = DateTime.tryParse(s);
+    if (d == null) return s;
+    final local = d.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final mm = local.month.toString().padLeft(2, '0');
+    final dd = local.day.toString().padLeft(2, '0');
+    return '$y-$mm-$dd';
+  }
 
   Future<void> _openExpensesPdfActions(BuildContext context, WidgetRef ref) async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -219,7 +233,7 @@ class ExpensesScreen extends ConsumerWidget {
     final itemsAsync = ref.watch(expensesControllerProvider);
     final summaryAsync = ref.watch(expensesSummaryProvider);
 
-    return Column(
+    return ListView(
       children: [
         Padding(
           padding: const EdgeInsets.all(16),
@@ -341,97 +355,103 @@ class ExpensesScreen extends ConsumerWidget {
             loading: () => const LinearProgressIndicator(),
           ),
         ),
-        Expanded(
-          child: itemsAsync.when(
-            data: (items) {
-              if (items.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: _EmptyState(
-                    title: 'No expenses found',
-                    subtitle: 'Add an expense or change filters.',
-                    icon: Icons.account_balance_wallet,
-                  ),
-                );
-              }
+        itemsAsync.when(
+          data: (items) {
+            if (items.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
+                child: _EmptyState(
+                  title: 'No expenses found',
+                  subtitle: 'Add an expense or change filters.',
+                  icon: Icons.account_balance_wallet,
+                ),
+              );
+            }
 
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth >= 900) {
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: DataTable(
-                          columns: const [
-                            DataColumn(label: Text('Date')),
-                            DataColumn(label: Text('Category')),
-                            DataColumn(label: Text('Amount')),
-                            DataColumn(label: Text('Notes')),
-                            DataColumn(label: Text('Action')),
-                          ],
-                          rows: [
-                            for (final e in items)
-                              DataRow(
-                                cells: [
-                                  DataCell(Text(e.expenseDate)),
-                                  DataCell(Text(e.category)),
-                                  DataCell(Text(number.format(e.amount))),
-                                  DataCell(Text(e.notes ?? '-')),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 900) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: const [
+                          DataColumn(label: Text('Date')),
+                          DataColumn(label: Text('Category')),
+                          DataColumn(label: Text('Amount')),
+                          DataColumn(label: Text('Notes')),
+                          DataColumn(label: Text('Action')),
+                        ],
+                        rows: [
+                          for (final e in items)
+                            DataRow(
+                              cells: [
+                                DataCell(Text(_fmtDateOnly(e.expenseDate))),
+                                DataCell(Text(e.category)),
+                                DataCell(Text(number.format(e.amount))),
+                                DataCell(Text(e.notes ?? '-')),
+                                DataCell(
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'View',
+                                        onPressed: () => _openViewExpense(context, e),
+                                        icon: const Icon(Icons.visibility),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Edit',
+                                        onPressed: () => _openEditExpense(context, ref, e),
+                                        icon: const Icon(Icons.edit_outlined),
+                                      ),
+                                      if (canDelete)
                                         IconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openViewExpense(context, e),
-                                          icon: const Icon(Icons.visibility),
+                                          tooltip: 'Delete',
+                                          onPressed: () => _confirmDelete(context, ref, e.id),
+                                          icon: const Icon(Icons.delete_outline),
                                         ),
-                                        IconButton(
-                                          tooltip: 'Edit',
-                                          onPressed: () => _openEditExpense(context, ref, e),
-                                          icon: const Icon(Icons.edit_outlined),
-                                        ),
-                                        if (canDelete)
-                                          IconButton(
-                                            tooltip: 'Delete',
-                                            onPressed: () => _confirmDelete(context, ref, e.id),
-                                            icon: const Icon(Icons.delete_outline),
-                                          ),
-                                      ],
-                                    ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                          ],
-                        ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(bottom: 16),
+                  itemCount: items.length,
+                  separatorBuilder: (context, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final e = items[i];
+                    return ListTile(
+                      leading: const Icon(Icons.account_balance_wallet),
+                      title: Text('${e.category} • ${_fmtDateOnly(e.expenseDate)}'),
+                      subtitle: Text('Amount: ${number.format(e.amount)}${e.notes != null ? ' • ${e.notes}' : ''}'),
+                      trailing: IconButton(
+                        tooltip: 'Actions',
+                        onPressed: () => _openExpenseActions(context, ref, e),
+                        icon: const Icon(Icons.more_vert),
                       ),
                     );
-                  }
-
-                  return ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    itemCount: items.length,
-                    separatorBuilder: (context, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final e = items[i];
-                      return ListTile(
-                        leading: const Icon(Icons.account_balance_wallet),
-                        title: Text('${e.category} • ${e.expenseDate}'),
-                        subtitle: Text('Amount: ${number.format(e.amount)}${e.notes != null ? ' • ${e.notes}' : ''}'),
-                        trailing: IconButton(
-                          tooltip: 'Actions',
-                          onPressed: () => _openExpenseActions(context, ref, e),
-                          icon: const Icon(Icons.more_vert),
-                        ),
-                      );
-                    },
-                  );
-                },
-              );
-            },
-            error: (e, _) => Center(child: Text(e.toString())),
-            loading: () => const Center(child: CircularProgressIndicator()),
+                  },
+                );
+              },
+            );
+          },
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Center(child: Text(e.toString())),
+          ),
+          loading: () => const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Center(child: CircularProgressIndicator()),
           ),
         ),
       ],
@@ -439,7 +459,21 @@ class ExpensesScreen extends ConsumerWidget {
   }
 
   Future<void> _openAddExpense(BuildContext context, WidgetRef ref) async {
-    final categoryCtrl = TextEditingController();
+    final items = ref.read(expensesControllerProvider).valueOrNull ?? const <Expense>[];
+    final categoryOptions = <String>{
+      'Rent',
+      'Electricity',
+      'Internet',
+      'Cleaning',
+      'Supplies',
+      'Equipment Repair',
+      'Maintenance',
+      'Salaries',
+      'Other',
+      for (final e in items) e.category.trim(),
+    }.where((e) => e.isNotEmpty).toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    TextEditingController? categoryAutoCtrl;
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     final dateCtrl = TextEditingController(text: DateFormat('yyyy-MM-dd').format(DateTime.now()));
@@ -464,7 +498,24 @@ class ExpensesScreen extends ConsumerWidget {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  field(TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category'))),
+                  field(
+                    Autocomplete<String>(
+                      optionsBuilder: (value) {
+                        final q = value.text.trim().toLowerCase();
+                        if (q.isEmpty) return categoryOptions.take(8);
+                        return categoryOptions.where((o) => o.toLowerCase().contains(q)).take(8);
+                      },
+                      onSelected: (v) => categoryAutoCtrl?.text = v,
+                      fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                        categoryAutoCtrl ??= textEditingController;
+                        return TextField(
+                          controller: textEditingController,
+                          focusNode: focusNode,
+                          decoration: const InputDecoration(labelText: 'Category', hintText: 'Rent, Electricity, Supplies...'),
+                        );
+                      },
+                    ),
+                  ),
                   field(
                     TextField(
                       controller: amountCtrl,
@@ -475,7 +526,19 @@ class ExpensesScreen extends ConsumerWidget {
                   field(
                     TextField(
                       controller: dateCtrl,
-                      decoration: const InputDecoration(labelText: 'Expense Date (YYYY-MM-DD)'),
+                      readOnly: true,
+                      decoration: const InputDecoration(labelText: 'Expense Date', suffixIcon: Icon(Icons.calendar_today_outlined)),
+                      onTap: () async {
+                        final current = DateTime.tryParse(dateCtrl.text.trim());
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: current ?? DateTime.now(),
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked == null) return;
+                        dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                      },
                     ),
                   ),
                   SizedBox(
@@ -500,7 +563,7 @@ class ExpensesScreen extends ConsumerWidget {
         const SizedBox(width: 8),
         FilledButton(
           onPressed: () async {
-            final category = categoryCtrl.text.trim();
+            final category = categoryAutoCtrl?.text.trim() ?? '';
             final amount = double.tryParse(amountCtrl.text.trim());
             final date = dateCtrl.text.trim();
             if (category.isEmpty) {
@@ -534,7 +597,6 @@ class ExpensesScreen extends ConsumerWidget {
       ],
     );
 
-    categoryCtrl.dispose();
     amountCtrl.dispose();
     notesCtrl.dispose();
     dateCtrl.dispose();
@@ -548,7 +610,7 @@ class ExpensesScreen extends ConsumerWidget {
           title: const Text('Expense'),
           content: Text(
             [
-              'Date: ${e.expenseDate}',
+              'Date: ${_fmtDateOnly(e.expenseDate)}',
               'Category: ${e.category}',
               'Amount: ${e.amount}',
               if (e.notes != null) 'Notes: ${e.notes}',
@@ -563,16 +625,30 @@ class ExpensesScreen extends ConsumerWidget {
   }
 
   Future<void> _openEditExpense(BuildContext context, WidgetRef ref, Expense e) async {
-    final categoryCtrl = TextEditingController(text: e.category);
+    final items = ref.read(expensesControllerProvider).valueOrNull ?? const <Expense>[];
+    final categoryOptions = <String>{
+      'Rent',
+      'Electricity',
+      'Internet',
+      'Cleaning',
+      'Supplies',
+      'Equipment Repair',
+      'Maintenance',
+      'Salaries',
+      'Other',
+      for (final x in items) x.category.trim(),
+    }.where((x) => x.isNotEmpty).toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    TextEditingController? categoryAutoCtrl;
     final amountCtrl = TextEditingController(text: e.amount.toString());
     final notesCtrl = TextEditingController(text: e.notes ?? '');
-    final dateCtrl = TextEditingController(text: e.expenseDate);
+    final dateCtrl = TextEditingController(text: _fmtDateOnly(e.expenseDate));
 
     await showAppFormDialog<void>(
       context: context,
       icon: Icons.edit_outlined,
       title: 'Edit Expense',
-      subtitle: '${e.category} • ${e.expenseDate}',
+      subtitle: '${e.category} • ${_fmtDateOnly(e.expenseDate)}',
       body: LayoutBuilder(
         builder: (context, constraints) {
           final twoCol = constraints.maxWidth >= 680;
@@ -588,7 +664,25 @@ class ExpensesScreen extends ConsumerWidget {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  field(TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category'))),
+                  field(
+                    Autocomplete<String>(
+                      initialValue: TextEditingValue(text: e.category),
+                      optionsBuilder: (value) {
+                        final q = value.text.trim().toLowerCase();
+                        if (q.isEmpty) return categoryOptions.take(8);
+                        return categoryOptions.where((o) => o.toLowerCase().contains(q)).take(8);
+                      },
+                      onSelected: (v) => categoryAutoCtrl?.text = v,
+                      fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                        categoryAutoCtrl ??= textEditingController;
+                        return TextField(
+                          controller: textEditingController,
+                          focusNode: focusNode,
+                          decoration: const InputDecoration(labelText: 'Category'),
+                        );
+                      },
+                    ),
+                  ),
                   field(
                     TextField(
                       controller: amountCtrl,
@@ -599,7 +693,19 @@ class ExpensesScreen extends ConsumerWidget {
                   field(
                     TextField(
                       controller: dateCtrl,
-                      decoration: const InputDecoration(labelText: 'Expense Date (YYYY-MM-DD)'),
+                      readOnly: true,
+                      decoration: const InputDecoration(labelText: 'Expense Date', suffixIcon: Icon(Icons.calendar_today_outlined)),
+                      onTap: () async {
+                        final current = DateTime.tryParse(dateCtrl.text.trim());
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: current ?? DateTime.now(),
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked == null) return;
+                        dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                      },
                     ),
                   ),
                   SizedBox(
@@ -625,7 +731,8 @@ class ExpensesScreen extends ConsumerWidget {
         FilledButton(
           onPressed: () async {
             final amount = double.tryParse(amountCtrl.text.trim());
-            if (categoryCtrl.text.trim().isEmpty) {
+            final category = categoryAutoCtrl?.text.trim() ?? '';
+            if (category.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Category required')));
               return;
             }
@@ -636,7 +743,7 @@ class ExpensesScreen extends ConsumerWidget {
             try {
               await ref.read(expensesControllerProvider.notifier).updateExpense(
                     expenseId: e.id,
-                    category: categoryCtrl.text,
+                    category: category,
                     amount: amount,
                     expenseDate: dateCtrl.text.trim(),
                     notes: notesCtrl.text,
@@ -657,7 +764,6 @@ class ExpensesScreen extends ConsumerWidget {
       ],
     );
 
-    categoryCtrl.dispose();
     amountCtrl.dispose();
     notesCtrl.dispose();
     dateCtrl.dispose();

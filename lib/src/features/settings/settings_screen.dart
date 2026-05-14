@@ -80,7 +80,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
     }
 
-    return Column(
+    return ListView(
       children: [
         Padding(
           padding: const EdgeInsets.all(16),
@@ -131,9 +131,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
             children: [
               settingsAsync.when(
                 data: (_) => const SizedBox.shrink(),
@@ -198,10 +198,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               try {
                                 final dataUrl = await pickImageDataUrl(maxBytes: 250000);
                                 if (dataUrl == null) return;
-                                if (!mounted) return;
+                                if (!context.mounted) return;
                                 setState(() => _logoUrlCtrl.text = dataUrl);
                               } catch (e) {
-                                if (!mounted) return;
+                                if (!context.mounted) return;
                                 final msg = e.toString().contains('file_too_large')
                                     ? 'Logo too large (max 250KB).'
                                     : 'Logo upload failed.';
@@ -230,7 +230,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 _logoUrlCtrl.text.trim(),
                                 height: 56,
                                 width: 56,
-                                errorBuilder: (context, _, __) => const SizedBox(
+                                errorBuilder: (context, error, stackTrace) => const SizedBox(
                                   height: 56,
                                   width: 56,
                                   child: Center(child: Icon(Icons.broken_image_outlined)),

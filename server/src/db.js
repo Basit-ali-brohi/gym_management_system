@@ -34,10 +34,18 @@ export const getPool = async () => {
   if (_pool) return _pool;
   if (_initPromise) return _initPromise;
 
-  const hostEnv = process.env.DB_HOST?.trim();
-  const hostsToTry = hostEnv?.length ? [hostEnv] : ['localhost', '127.0.0.1', '::1'];
-  const portEnv = process.env.DB_PORT?.trim();
-  const portsToTry = portEnv?.length ? [Number(portEnv)] : [3306, 3307];
+  const hostEnvRaw = process.env.DB_HOST?.trim();
+  const hostEnvNormalized =
+    hostEnvRaw === 'localhost' || hostEnvRaw === '::1' || hostEnvRaw === '[::1]' ? '127.0.0.1' : hostEnvRaw;
+  const hostsToTry = hostEnvNormalized?.length ? [hostEnvNormalized] : ['127.0.0.1'];
+
+  const portEnvRaw = process.env.DB_PORT?.trim();
+  let portsToTry = [3306];
+  if (portEnvRaw?.length) {
+    const parsed = Number(portEnvRaw);
+    if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`Invalid DB_PORT: ${portEnvRaw}`);
+    portsToTry = [parsed];
+  }
 
   _initPromise = (async () => {
     let lastError = null;
@@ -48,6 +56,7 @@ export const getPool = async () => {
           _pool = pool;
           return pool;
         } catch (e) {
+          if (e?.code === 'ER_ACCESS_DENIED_ERROR') throw e;
           lastError = e;
         }
       }
