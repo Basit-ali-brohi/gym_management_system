@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
+import '../../core/whatsapp.dart';
 import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
@@ -256,6 +257,12 @@ class InvoicesScreen extends ConsumerStatefulWidget {
               onPressed: () => _openAutoInvoice(context, ref),
               icon: const Icon(Icons.auto_awesome),
               label: const Text('Generate'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _sendAllInvoiceReminders(context, ref),
+              icon: const Icon(Icons.done_all),
+              label: const Text('Send All'),
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -851,6 +858,62 @@ class InvoicesScreen extends ConsumerStatefulWidget {
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to export PDF')));
+    }
+  }
+
+  Future<void> _sendAllInvoiceReminders(BuildContext context, WidgetRef ref) async {
+    try {
+      final token = ref.read(authControllerProvider).token;
+      if (token == null || token.isEmpty) throw ApiException('unauthorized');
+      final api = ref.read(apiClientProvider);
+      final res = await api.getJson('/invoices', token: token, query: {'status': 'unpaid', 'limit': '200', 'sort': 'newest'});
+      final raw = (res['items'] as List<dynamic>? ?? []).whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      final items = raw
+          .map(
+            (e) => (
+              invoiceNo: e['invoice_no']?.toString() ?? '',
+              total: (e['total'] is num) ? (e['total'] as num) : (num.tryParse(e['total']?.toString() ?? '') ?? 0),
+              memberName: e['full_name']?.toString() ?? '',
+              memberCode: e['member_code']?.toString() ?? '',
+              phone: e['phone']?.toString(),
+            ),
+          )
+          .where((i) => normalizeWhatsAppPhone(i.phone).isNotEmpty)
+          .toList();
+
+      if (!context.mounted) return;
+      if (items.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No reminders ready to send')));
+        return;
+      }
+
+      final slug = ref.read(authControllerProvider).user?.tenantSlug ?? '';
+      final tenantLabel = slug.trim().isEmpty ? 'Gym' : 'Gym ($slug)';
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Opening WhatsApp for ${items.length} reminders…')));
+
+      var okCount = 0;
+      var failCount = 0;
+      for (final i in items) {
+        final msg =
+            'Assalam o Alaikum ${i.memberName}, apka pending bill ${i.invoiceNo} (Rs ${i.total}) clear kar dein. Shukriya. $tenantLabel';
+        final ok = await openWhatsAppMessage(phone: i.phone ?? '', message: msg);
+        if (ok) {
+          okCount += 1;
+        } else {
+          failCount += 1;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 240));
+      }
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reminders: sent $okCount, failed $failCount')));
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Send reminders failed')));
     }
   }
 

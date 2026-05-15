@@ -484,6 +484,55 @@ const drawObsidianGoldPdfHeader = (doc, profile, { title = null, subtitle = null
   doc.y = top + h + 18;
 };
 
+const maybeLogLowStock = async ({ tenantId, actorUserId, productId }) => {
+  const tId = Number(tenantId);
+  const pId = Number(productId);
+  if (!Number.isFinite(tId) || tId <= 0) return;
+  if (!Number.isFinite(pId) || pId <= 0) return;
+
+  const threshold = 5;
+  const product = await queryOne(
+    `SELECT id, name, status
+     FROM products
+     WHERE tenant_id = :tenantId AND id = :id
+     LIMIT 1`,
+    { tenantId: tId, id: pId }
+  );
+  if (!product || product.status !== 'active') return;
+
+  const stockRow = await queryOne(
+    `SELECT COALESCE(SUM(CASE WHEN movement_type = 'in' THEN qty ELSE -qty END), 0) AS on_hand
+     FROM stock_movements
+     WHERE tenant_id = :tenantId AND product_id = :productId`,
+    { tenantId: tId, productId: pId }
+  );
+  const onHand = Number(stockRow?.on_hand ?? 0);
+  if (!Number.isFinite(onHand) || onHand >= threshold) return;
+
+  const recent = await queryOne(
+    `SELECT id
+     FROM system_logs
+     WHERE tenant_id = :tenantId
+       AND action = 'stock_low'
+       AND entity_type = 'product'
+       AND entity_id = :productId
+       AND created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+     ORDER BY id DESC
+     LIMIT 1`,
+    { tenantId: tId, productId: pId }
+  );
+  if (recent?.id) return;
+
+  await appendSystemLog({
+    tenantId: tId,
+    actorUserId: actorUserId ?? null,
+    action: 'stock_low',
+    entityType: 'product',
+    entityId: pId,
+    meta: { productId: pId, productName: product.name, onHand, threshold }
+  });
+};
+
 const appendSystemLog = async (
   { tenantId, actorUserId, action, entityType = null, entityId = null, meta = null, ip = null, userAgent = null },
   conn = null
@@ -1879,61 +1928,129 @@ const productRepo = new ProductRepository();
 const stockRepo = new StockRepository();
 const staffRepo = new StaffRepository();
 
-const runMembershipExpiryJob = async () => {
-  const rows = await queryMany(
-    `SELECT tenant_id, COUNT(*) AS c
-     FROM subscriptions
-     WHERE status = 'active' AND end_date < CURDATE()
-     GROUP BY tenant_id`
-  );
-  await execute(`UPDATE subscriptions SET status = 'expired' WHERE status = 'active' AND end_date < CURDATE()`);
+const tryAcquireDbLock = async (name) => {
+  const row = await queryOne('SELECT GET_LOCK(:name, 0) AS got', { name });
+  return Number(row?.got ?? 0) === 1;
+};
+
+const releaseDbLock = async (name) => {
   try {
-    await execute(
-      `UPDATE members m
-       SET m.status = 'expired'
-       WHERE m.status = 'active'
-         AND EXISTS (
-           SELECT 1
-           FROM subscriptions s
-           WHERE s.tenant_id = m.tenant_id
-             AND s.member_id = m.id
-             AND s.status = 'expired'
-             AND s.end_date < CURDATE()
-         )
+    await queryOne('SELECT RELEASE_LOCK(:name) AS r', { name });
+  } catch {}
+};
+
+const runMembershipExpiryJob = async () => {
+  const got = await tryAcquireDbLock('gms_membership_expiry_job_v2');
+  if (!got) return;
+
+  const connPool = await getPool();
+  const conn = await connPool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const byTenant = await conn.query(
+      `SELECT tenant_id, COUNT(*) AS c
+       FROM subscriptions
+       WHERE status = 'active' AND end_date < CURDATE()
+       GROUP BY tenant_id`
+    );
+    const rows = Array.isArray(byTenant?.[0]) ? byTenant[0] : [];
+
+    const [invResult] = await conn.execute(
+      `INSERT IGNORE INTO invoices (tenant_id, member_id, subscription_id, invoice_no, subtotal, discount, tax, total, status, due_date)
+       SELECT s.tenant_id,
+              s.member_id,
+              s.id,
+              CONCAT('REN-', DATE_FORMAT(s.end_date, '%Y%m%d'), '-', LPAD(s.id, 8, '0')) AS invoice_no,
+              p.price AS subtotal,
+              0 AS discount,
+              0 AS tax,
+              p.price AS total,
+              'unpaid' AS status,
+              CURDATE() AS due_date
+       FROM subscriptions s
+       INNER JOIN members m ON m.tenant_id = s.tenant_id AND m.id = s.member_id
+       INNER JOIN membership_plans p ON p.tenant_id = s.tenant_id AND p.id = s.plan_id
+       WHERE s.end_date < CURDATE()
+         AND s.status IN ('active', 'expired')
+         AND m.status <> 'inactive'
          AND NOT EXISTS (
            SELECT 1
-           FROM subscriptions s2
-           WHERE s2.tenant_id = m.tenant_id
-             AND s2.member_id = m.id
-             AND s2.status = 'active'
-             AND s2.end_date >= CURDATE()
+           FROM invoices i
+           WHERE i.tenant_id = s.tenant_id
+             AND i.member_id = s.member_id
+             AND i.status = 'unpaid'
          )`
     );
-    await execute(
-      `UPDATE members m
-       SET m.status = 'active'
-       WHERE m.status = 'expired'
-         AND EXISTS (
-           SELECT 1
-           FROM subscriptions s
-           WHERE s.tenant_id = m.tenant_id
-             AND s.member_id = m.id
-             AND s.status = 'active'
-             AND s.end_date >= CURDATE()
-         )`
-    );
-  } catch {}
+    const invoicesCreated = Number(invResult?.affectedRows ?? 0);
 
-  if (!rows.length) return;
-  for (const r of rows) {
-    await appendSystemLog({
-      tenantId: Number(r.tenant_id),
-      actorUserId: null,
-      action: 'membership_auto_expire',
-      entityType: 'subscription',
-      entityId: null,
-      meta: { count: Number(r.c ?? 0) }
-    });
+    await conn.execute(
+      `UPDATE subscriptions
+       SET status = 'expired'
+       WHERE status = 'active' AND end_date < CURDATE()`
+    );
+
+    try {
+      await conn.execute(
+        `UPDATE members m
+         SET m.status = 'expired'
+         WHERE m.status = 'active'
+           AND EXISTS (
+             SELECT 1
+             FROM subscriptions s
+             WHERE s.tenant_id = m.tenant_id
+               AND s.member_id = m.id
+               AND s.status = 'expired'
+               AND s.end_date < CURDATE()
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM subscriptions s2
+             WHERE s2.tenant_id = m.tenant_id
+               AND s2.member_id = m.id
+               AND s2.status = 'active'
+               AND s2.end_date >= CURDATE()
+           )`
+      );
+      await conn.execute(
+        `UPDATE members m
+         SET m.status = 'active'
+         WHERE m.status = 'expired'
+           AND EXISTS (
+             SELECT 1
+             FROM subscriptions s
+             WHERE s.tenant_id = m.tenant_id
+               AND s.member_id = m.id
+               AND s.status = 'active'
+               AND s.end_date >= CURDATE()
+           )`
+      );
+    } catch {}
+
+    await conn.commit();
+
+    if (rows.length) {
+      for (const r of rows) {
+        await appendSystemLog(
+          {
+            tenantId: Number(r.tenant_id),
+            actorUserId: null,
+            action: 'membership_auto_expire',
+            entityType: 'subscription',
+            entityId: null,
+            meta: { count: Number(r.c ?? 0), invoicesCreated }
+          },
+          conn
+        );
+      }
+    }
+  } catch {
+    try {
+      await conn.rollback();
+    } catch {}
+  } finally {
+    conn.release();
+    await releaseDbLock('gms_membership_expiry_job_v2');
   }
 };
 
@@ -1946,7 +2063,7 @@ setInterval(() => {
     () => {},
     () => {}
   );
-}, 24 * 60 * 60 * 1000);
+}, 60 * 60 * 1000);
 
 const runExpirySoonAlertJob = async () => {
   const tenants = await queryMany('SELECT id FROM tenants WHERE status = \'active\'');
@@ -2591,6 +2708,10 @@ app.post('/products/sell', authMiddleware, requireRole('owner', 'admin'), async 
     );
 
     await conn.commit();
+    maybeLogLowStock({ tenantId, actorUserId: req.user.userId, productId: parsed.data.productId }).then(
+      () => {},
+      () => {}
+    );
     return res.status(201).json({
       ok: true,
       invoiceId,
@@ -2636,6 +2757,10 @@ app.post('/stock/move', authMiddleware, requireRole('owner', 'admin'), async (re
     ip: req.ip,
     userAgent: req.headers['user-agent']?.toString() ?? null
   });
+  maybeLogLowStock({ tenantId: req.user.tenantId, actorUserId: req.user.userId, productId: parsed.data.productId }).then(
+    () => {},
+    () => {}
+  );
   return res.status(201).json({ id });
 });
 
@@ -2872,6 +2997,16 @@ app.get('/dashboard/activity', authMiddleware, async (req, res) => {
       )
     : [];
 
+  const stockAlerts = await queryMany(
+    `SELECT id, created_at, entity_id, meta_json
+     FROM system_logs
+     WHERE tenant_id = :tenantId
+       AND action = 'stock_low'
+     ORDER BY id DESC
+     LIMIT :limit`,
+    { tenantId, limit }
+  );
+
   const toIso = (v) => {
     const d = new Date(v);
     if (Number.isNaN(d.getTime())) return String(v ?? '');
@@ -2901,6 +3036,31 @@ app.get('/dashboard/activity', authMiddleware, async (req, res) => {
       method: r.method ?? null,
       invoiceNo: r.invoice_no ?? null
     })),
+    ...stockAlerts.map((r) => {
+      let meta = null;
+      try {
+        meta = r.meta_json ? JSON.parse(String(r.meta_json)) : null;
+      } catch {
+        meta = null;
+      }
+      const name = meta?.productName ?? meta?.product_name ?? 'Product';
+      const onHand = meta?.onHand ?? meta?.on_hand ?? null;
+      const threshold = meta?.threshold ?? null;
+      const subtitle = onHand == null
+        ? 'Low stock • Reorder recommended'
+        : `Low stock • On hand: ${onHand}${threshold != null ? ` (Threshold: ${threshold})` : ''}`;
+      return {
+        id: `stock_low_${r.id}`,
+        type: 'alert',
+        at: toIso(r.created_at),
+        title: `Low stock: ${name}`,
+        subtitle,
+        memberId: null,
+        amount: null,
+        method: null,
+        invoiceNo: null
+      };
+    }),
   ];
 
   items.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
@@ -4006,6 +4166,13 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
     await attendanceRepo.logEvent(tenantId, { memberId: memberId ?? null, queryValue, status: 'denied', reason: 'member_not_found' });
     return res.status(404).json({ error: 'member_not_found' });
   }
+  const unpaidRow = await queryOne(
+    `SELECT COUNT(*) AS c
+     FROM invoices
+     WHERE tenant_id = :tenantId AND member_id = :memberId AND status = 'unpaid'`,
+    { tenantId, memberId: Number(member.id) }
+  );
+  const unpaidInvoices = Number(unpaidRow?.c ?? 0);
   const today = toDateOnly(new Date());
   if (member.frozen_until && String(member.frozen_until) >= today) {
     await attendanceRepo.logEvent(tenantId, { memberId: Number(member.id), queryValue, status: 'denied', reason: 'membership_frozen' });
@@ -4017,7 +4184,7 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
       memberName: member.full_name,
       memberCode: member.member_code,
       membershipEndDate: null,
-      unpaidInvoices: 0,
+      unpaidInvoices,
       frozenUntil: member.frozen_until
     });
   }
@@ -4039,7 +4206,8 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
         memberId: Number(member.id),
         memberName: member.full_name,
         memberCode: member.member_code,
-        membershipEndDate
+        membershipEndDate,
+        unpaidInvoices
       });
     }
   }
@@ -4056,7 +4224,8 @@ app.post('/attendance/checkin', authMiddleware, async (req, res) => {
     memberId: Number(member.id),
     memberName: member.full_name,
     memberCode: member.member_code,
-    membershipEndDate
+    membershipEndDate,
+    unpaidInvoices
   });
 });
 

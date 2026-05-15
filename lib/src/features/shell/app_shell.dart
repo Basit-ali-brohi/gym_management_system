@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers.dart';
+import '../../core/whatsapp.dart';
 import '../auth/auth_controller.dart';
 
 class ExpiringPreviewMember {
@@ -68,6 +68,13 @@ class UnpaidInvoiceReminder {
   final String memberName;
   final String memberCode;
   final String? phone;
+}
+
+String _dateOnly(DateTime d) {
+  final y = d.year.toString().padLeft(4, '0');
+  final m = d.month.toString().padLeft(2, '0');
+  final dd = d.day.toString().padLeft(2, '0');
+  return '$y-$m-$dd';
 }
 
 final expiringPreviewProvider = FutureProvider.autoDispose<List<ExpiringPreviewMember>>((ref) async {
@@ -149,6 +156,19 @@ final unpaidInvoicesProvider = FutureProvider.autoDispose<List<UnpaidInvoiceRemi
       .toList();
 });
 
+final invoicesGeneratedTodayProvider = FutureProvider.autoDispose<int>((ref) async {
+  final token = ref.read(authControllerProvider).token;
+  if (token == null || token.isEmpty) return 0;
+  final api = ref.read(apiClientProvider);
+  final today = _dateOnly(DateTime.now());
+  try {
+    final res = await api.getJson('/invoices', token: token, query: {'from': today, 'to': today, 'limit': '1'});
+    return (res['total'] as num?)?.toInt() ?? 0;
+  } catch (_) {
+    return 0;
+  }
+});
+
 class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child});
 
@@ -167,11 +187,6 @@ class AppShell extends ConsumerWidget {
     void toggleTheme() {
       ref.read(themeModeProvider.notifier).setMode(isDark ? ThemeMode.light : ThemeMode.dark);
     }
-    String normalizePhone(String? raw) {
-      if (raw == null) return '';
-      return raw.replaceAll(RegExp(r'[^0-9]'), '');
-    }
-
     Future<void> copyToClipboard(String text) async {
       await Clipboard.setData(ClipboardData(text: text));
       if (!context.mounted) return;
@@ -179,14 +194,13 @@ class AppShell extends ConsumerWidget {
     }
 
     Future<void> openWhatsApp({required String? phone, required String message}) async {
-      final digits = normalizePhone(phone);
+      final digits = normalizeWhatsAppPhone(phone);
       if (digits.isEmpty) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Phone missing')));
         return;
       }
-      final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
-      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      final ok = await openWhatsAppMessage(phone: digits, message: message);
       if (!ok && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
       }
@@ -198,18 +212,52 @@ class AppShell extends ConsumerWidget {
         builder: (context) {
           final urgent = expiringAsync.valueOrNull ?? const <ExpiringPreviewMember>[];
           final urgentCount = urgent.length;
+
+          Future<void> sendAllUnpaidInvoiceReminders(List<UnpaidInvoiceReminder> items) async {
+            final eligible = items.where((i) => normalizeWhatsAppPhone(i.phone).isNotEmpty).toList();
+            if (eligible.isEmpty) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No reminders ready')));
+              return;
+            }
+
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('Opening WhatsApp for ${eligible.length} reminders…')));
+
+            var okCount = 0;
+            var failCount = 0;
+            for (final inv in eligible) {
+              final msg =
+                  'Assalam o Alaikum ${inv.memberName}, apka pending bill ${inv.invoiceNo} (Rs ${inv.total}) clear kar dein. Shukriya. $tenantLabel';
+              final ok = await openWhatsAppMessage(phone: inv.phone ?? '', message: msg);
+              if (ok) {
+                okCount += 1;
+              } else {
+                failCount += 1;
+              }
+              await Future<void>.delayed(const Duration(milliseconds: 240));
+            }
+
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Reminders: sent $okCount, failed $failCount')),
+            );
+          }
+
           return AlertDialog(
             title: Text(urgentCount == 0 ? 'Reminder Center' : 'Reminder Center ($urgentCount urgent)'),
             content: SizedBox(
               width: 860,
               height: 520,
               child: DefaultTabController(
-                length: 2,
+                length: 3,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const TabBar(
                       tabs: [
+                        Tab(text: 'Daily Tasks'),
                         Tab(text: 'Expiring Members'),
                         Tab(text: 'Unpaid Invoices'),
                       ],
@@ -218,6 +266,58 @@ class AppShell extends ConsumerWidget {
                     Expanded(
                       child: TabBarView(
                         children: [
+                          Consumer(
+                            builder: (context, r, _) {
+                              final todayCount = r.watch(invoicesGeneratedTodayProvider);
+                              final unpaid = r.watch(unpaidInvoicesProvider);
+                              final unpaidList = unpaid.valueOrNull ?? const <UnpaidInvoiceReminder>[];
+                              final ready = unpaidList.where((i) => normalizeWhatsAppPhone(i.phone).isNotEmpty).length;
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Card(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(14),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [
+                                          Text('Daily Tasks', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                                          const SizedBox(height: 8),
+                                          todayCount.when(
+                                            data: (n) => Text('• $n Invoices generated today', style: theme.textTheme.bodyMedium),
+                                            error: (e, _) => Text('• Invoices generated today: —', style: theme.textTheme.bodyMedium),
+                                            loading: () => Text('• Invoices generated today: …', style: theme.textTheme.bodyMedium),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text('• $ready Reminders ready to send', style: theme.textTheme.bodyMedium),
+                                          const SizedBox(height: 12),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: FilledButton.icon(
+                                              onPressed: unpaid.valueOrNull == null ? null : () => sendAllUnpaidInvoiceReminders(unpaidList),
+                                              icon: const Icon(Icons.done_all),
+                                              label: const Text('Approve'),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'Approve pe click karo — system WhatsApp reminders open kar dega.',
+                                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'Note: Browser popup blocker multiple WhatsApp tabs block kar sakta hai.',
+                                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                           Consumer(
                             builder: (context, r, _) {
                               final days = r.watch(remindersDaysProvider);
@@ -313,6 +413,8 @@ class AppShell extends ConsumerWidget {
                           Consumer(
                             builder: (context, r, _) {
                               final unpaid = r.watch(unpaidInvoicesProvider);
+                              final list = unpaid.valueOrNull ?? const <UnpaidInvoiceReminder>[];
+                              final readyCount = list.where((i) => normalizeWhatsAppPhone(i.phone).isNotEmpty).length;
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -321,6 +423,11 @@ class AppShell extends ConsumerWidget {
                                     runSpacing: 10,
                                     crossAxisAlignment: WrapCrossAlignment.center,
                                     children: [
+                                      FilledButton.icon(
+                                        onPressed: unpaid.valueOrNull == null ? null : () => sendAllUnpaidInvoiceReminders(list),
+                                        icon: const Icon(Icons.done_all),
+                                        label: Text('Send All ($readyCount)'),
+                                      ),
                                       IconButton(
                                         tooltip: 'Refresh',
                                         onPressed: () => r.refresh(unpaidInvoicesProvider),

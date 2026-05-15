@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
+import '../../core/whatsapp.dart';
 import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../auth/auth_controller.dart';
 
@@ -70,6 +70,8 @@ final dashboardActivityProvider = FutureProvider.autoDispose<List<DashboardActiv
       .where((i) => i.id.trim().isNotEmpty)
       .toList();
 });
+
+final dashboardActivityPanelCollapsedProvider = StateProvider.autoDispose<bool>((ref) => true);
 
 class AtRiskMember {
   const AtRiskMember({
@@ -272,7 +274,6 @@ class _DashboardScaffold extends ConsumerStatefulWidget {
 
 class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
   bool _exportingPdf = false;
-  bool _activityCollapsed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -283,6 +284,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
         .where((r) => r.isNotEmpty)
         .toSet();
     final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
+    final activityCollapsed = ref.watch(dashboardActivityPanelCollapsedProvider);
 
     Widget mainList({required EdgeInsets padding, required bool includeInlineActivity}) {
       return ListView(
@@ -476,43 +478,63 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
     return Row(
       children: [
         Expanded(child: mainList(padding: const EdgeInsets.all(20), includeInlineActivity: false)),
-        AnimatedContainer(
+        AnimatedPadding(
           duration: const Duration(milliseconds: 260),
           curve: Curves.easeInOut,
-          width: _activityCollapsed ? tabW : expandedW,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(0, 20, _activityCollapsed ? 0 : 20, 20),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              switchInCurve: Curves.easeInOut,
-              switchOutCurve: Curves.easeInOut,
-              transitionBuilder: (child, animation) {
-                final curved = CurvedAnimation(parent: animation, curve: Curves.easeInOut);
-                return FadeTransition(
-                  opacity: curved,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.10, 0),
-                      end: Offset.zero,
-                    ).animate(curved),
-                    child: child,
-                  ),
-                );
-              },
-              child: _activityCollapsed
-                  ? _ActivityVerticalTab(
-                      key: const ValueKey('tab'),
-                      onTap: () => setState(() => _activityCollapsed = false),
-                      glow: gold,
-                    )
-                  : _RecentActivityFeedDocked(
-                      key: const ValueKey('panel'),
-                      headerTrailing: IconButton(
-                        tooltip: 'Hide',
-                        onPressed: () => setState(() => _activityCollapsed = true),
-                        icon: const Icon(Icons.keyboard_double_arrow_right),
+          padding: EdgeInsets.fromLTRB(0, 20, activityCollapsed ? 0 : 20, 20),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeInOut,
+            width: activityCollapsed ? tabW : expandedW,
+            child: ClipRRect(
+              clipBehavior: Clip.hardEdge,
+              borderRadius: BorderRadius.circular(18),
+              child: ClipRect(
+                child: Stack(
+                  alignment: Alignment.centerRight,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OverflowBox(
+                        alignment: Alignment.centerRight,
+                        minWidth: expandedW,
+                        maxWidth: expandedW,
+                        child: SizedBox(
+                          width: expandedW,
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeInOut,
+                            opacity: activityCollapsed ? 0 : 1,
+                            child: IgnorePointer(
+                              ignoring: activityCollapsed,
+                              child: _RecentActivityFeedDocked(
+                                active: !activityCollapsed,
+                                headerTrailing: IconButton(
+                                  tooltip: 'Hide',
+                                  onPressed: () => ref.read(dashboardActivityPanelCollapsedProvider.notifier).state = true,
+                                  icon: const Icon(Icons.keyboard_double_arrow_right),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 140),
+                      curve: Curves.easeInOut,
+                      opacity: activityCollapsed ? 1 : 0,
+                      child: IgnorePointer(
+                        ignoring: !activityCollapsed,
+                        child: _ActivityVerticalTab(
+                          onTap: () => ref.read(dashboardActivityPanelCollapsedProvider.notifier).state = false,
+                          glow: gold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -676,9 +698,10 @@ class _RecentActivityFeedFloatingState extends ConsumerState<_RecentActivityFeed
 }
 
 class _RecentActivityFeedDocked extends ConsumerStatefulWidget {
-  const _RecentActivityFeedDocked({super.key, required this.headerTrailing});
+  const _RecentActivityFeedDocked({required this.headerTrailing, required this.active});
 
   final Widget headerTrailing;
+  final bool active;
 
   @override
   ConsumerState<_RecentActivityFeedDocked> createState() => _RecentActivityFeedDockedState();
@@ -687,12 +710,25 @@ class _RecentActivityFeedDocked extends ConsumerStatefulWidget {
 class _RecentActivityFeedDockedState extends ConsumerState<_RecentActivityFeedDocked> {
   Timer? _timer;
 
-  @override
-  void initState() {
-    super.initState();
+  void _syncTimer() {
+    _timer?.cancel();
+    _timer = null;
+    if (!widget.active) return;
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       ref.invalidate(dashboardActivityProvider);
     });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecentActivityFeedDocked oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) _syncTimer();
   }
 
   @override
@@ -737,19 +773,13 @@ class _AtRiskMembersCard extends ConsumerWidget {
       return e.toString();
     }
 
-    String normalizePhone(String? raw) {
-      if (raw == null) return '';
-      return raw.replaceAll(RegExp(r'[^0-9]'), '');
-    }
-
     Future<void> openWhatsApp({required String? phone, required String message}) async {
-      final digits = normalizePhone(phone);
+      final digits = normalizeWhatsAppPhone(phone);
       if (digits.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Phone missing')));
         return;
       }
-      final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
-      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      final ok = await openWhatsAppMessage(phone: digits, message: message);
       if (!ok && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
       }
@@ -845,7 +875,7 @@ class _AtRiskMembersCard extends ConsumerWidget {
                       itemBuilder: (context, i) {
                         final m = payload.items[i];
                         final msg = buildMessage(m);
-                        final phoneOk = normalizePhone(m.phone).isNotEmpty;
+                        final phoneOk = normalizeWhatsAppPhone(m.phone).isNotEmpty;
                         return ListTile(
                           dense: true,
                           leading: const Icon(Icons.people),
@@ -984,9 +1014,22 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
             itemBuilder: (context, i) {
               final a = items[i];
               final isPayment = a.type == 'payment';
-              final icon = isPayment ? Icons.payments_outlined : Icons.how_to_reg;
-              final chipColor = isPayment ? theme.colorScheme.tertiary : theme.colorScheme.primary;
-              final route = isPayment ? '/payments' : '/attendance';
+              final isAlert = a.type == 'alert';
+              final icon = isPayment
+                  ? Icons.payments_outlined
+                  : isAlert
+                      ? Icons.warning_amber_outlined
+                      : Icons.how_to_reg;
+              final chipColor = isPayment
+                  ? theme.colorScheme.tertiary
+                  : isAlert
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.primary;
+              final route = isPayment
+                  ? '/payments'
+                  : isAlert
+                      ? '/inventory'
+                      : '/attendance';
               return ListTile(
                 dense: true,
                 leading: CircleAvatar(
@@ -1075,7 +1118,7 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
 }
 
 class _ActivityVerticalTab extends StatelessWidget {
-  const _ActivityVerticalTab({super.key, required this.onTap, required this.glow});
+  const _ActivityVerticalTab({required this.onTap, required this.glow});
 
   final VoidCallback onTap;
   final Color glow;
@@ -1972,48 +2015,54 @@ class _ActiveInactiveCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            SizedBox(
-              height: 132,
-              width: 132,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween<double>(begin: 0, end: pct),
-                duration: const Duration(milliseconds: 650),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, _) {
-                  return CustomPaint(
-                    painter: _DonutPiePainter(
-                      value: value,
-                      activeColor: theme.colorScheme.tertiary,
-                      expiredColor: theme.colorScheme.error,
-                      trackColor: theme.colorScheme.outlineVariant,
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            pctText,
-                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Active',
-                            style:
-                                theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                        ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 620;
+            final donutSize = wide ? 150.0 : 132.0;
+            final ringW = wide ? 14.0 : 12.0;
+            Widget donut() {
+              return SizedBox(
+                height: donutSize,
+                width: donutSize,
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0, end: pct),
+                  duration: const Duration(milliseconds: 650),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, _) {
+                    return CustomPaint(
+                      painter: _DonutPiePainter(
+                        value: value,
+                        activeColor: theme.colorScheme.tertiary,
+                        expiredColor: theme.colorScheme.error,
+                        trackColor: theme.colorScheme.outlineVariant,
+                        ringWidth: ringW,
                       ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              pctText,
+                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Active',
+                              style: theme.textTheme.labelMedium
+                                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            }
+
+            Widget legend({required CrossAxisAlignment crossAxisAlignment}) {
+              return Column(
+                crossAxisAlignment: crossAxisAlignment,
                 children: [
                   Text('Active vs Expired', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 8),
@@ -2036,9 +2085,35 @@ class _ActiveInactiveCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text('Total: $total', style: theme.textTheme.bodySmall),
                 ],
+              );
+            }
+
+            if (!wide) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Center(child: donut()),
+                  const SizedBox(height: 12),
+                  legend(crossAxisAlignment: CrossAxisAlignment.center),
+                ],
+              );
+            }
+
+            final legendWidthCap = (constraints.maxWidth / 2) - 110;
+            final legendWidth = min(320.0, max(220.0, legendWidthCap));
+            return SizedBox(
+              height: 168,
+              child: Stack(
+                children: [
+                  Center(child: donut()),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox(width: legendWidth, child: legend(crossAxisAlignment: CrossAxisAlignment.start)),
+                  ),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -2092,19 +2167,20 @@ class _DonutPiePainter extends CustomPainter {
     required this.activeColor,
     required this.expiredColor,
     required this.trackColor,
+    this.ringWidth = 12.0,
   });
 
   final double value;
   final Color activeColor;
   final Color expiredColor;
   final Color trackColor;
+  final double ringWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final center = rect.center;
     final radius = (size.shortestSide / 2) - 6;
-    final ringWidth = 12.0;
 
     final start = -pi / 2;
     final full = 2 * pi;

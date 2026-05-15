@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
@@ -49,6 +50,10 @@ class AuthController extends StateNotifier<AuthState> {
 
   Future<void> _bootstrap() async {
     try {
+      if (kDebugMode && defaultTargetPlatform == TargetPlatform.windows) {
+        state = state.copyWith(isLoading: false, token: null, user: null, error: null);
+        return;
+      }
       final store = ref.read(tokenStoreProvider);
       final token = await store.getToken();
       final tenantSlug = await store.getTenantSlug();

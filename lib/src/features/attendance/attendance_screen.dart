@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
@@ -877,9 +878,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           .join();
 
       final expiry = result.membershipEndDate;
-      await showDialog<void>(
+      final goBilling = await showDialog<bool>(
         context: context,
         builder: (context) {
+          final unpaid = result.unpaidInvoices;
           return AlertDialog(
             icon: Icon(Icons.verified, color: Theme.of(context).colorScheme.tertiary),
             title: Text(result.alreadyCheckedIn ? 'Already Checked-in' : 'Access Granted'),
@@ -894,14 +896,33 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Text(fullName, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(expiry == null ? 'Expiry: -' : 'Expiry: $expiry'),
+                if (unpaid > 0) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Fees pending: $unpaid unpaid invoice(s).',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.tertiary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
             actions: [
-              FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+              if (result.unpaidInvoices > 0)
+                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('No')),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(result.unpaidInvoices > 0),
+                child: Text(result.unpaidInvoices > 0 ? 'Yes' : 'OK'),
+              ),
             ],
           );
         },
       );
+      if (goBilling == true && context.mounted) {
+        context.go('/invoices?q=${Uri.encodeComponent(member.memberCode)}');
+      }
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -957,9 +978,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           .map((s) => s[0].toUpperCase())
           .join();
 
-      await showDialog<void>(
+      final goBilling = await showDialog<bool>(
         context: context,
         builder: (context) {
+          final unpaid = result.unpaidInvoices;
           return AlertDialog(
             icon: Icon(Icons.verified, color: Theme.of(context).colorScheme.tertiary),
             title: Text(result.alreadyCheckedIn ? 'Already Checked-in' : 'Access Granted'),
@@ -971,14 +993,38 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Text(fullName, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(result.membershipEndDate == null ? 'Expiry: -' : 'Expiry: ${result.membershipEndDate}'),
+                if (unpaid > 0) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Fees pending: $unpaid unpaid invoice(s).',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.tertiary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
             actions: [
-              FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+              if (result.unpaidInvoices > 0)
+                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('No')),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(result.unpaidInvoices > 0),
+                child: Text(result.unpaidInvoices > 0 ? 'Yes' : 'OK'),
+              ),
             ],
           );
         },
       );
+      if (goBilling == true && mounted) {
+        final mc = result.memberCode ?? '';
+        if (mc.trim().isNotEmpty) {
+          context.go('/invoices?q=${Uri.encodeComponent(mc)}');
+        } else {
+          context.go('/invoices');
+        }
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       _setDeniedBorder();
