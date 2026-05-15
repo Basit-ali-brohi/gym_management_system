@@ -209,6 +209,8 @@ class GymSettings {
     required this.defaultTaxPercent,
     required this.enableSounds,
     required this.enableAnimations,
+    required this.atRiskDays,
+    required this.atRiskWhatsAppTemplate,
     required this.address,
     required this.logoUrl,
     required this.websiteUrl,
@@ -222,6 +224,8 @@ class GymSettings {
   final double defaultTaxPercent;
   final bool enableSounds;
   final bool enableAnimations;
+  final int atRiskDays;
+  final String? atRiskWhatsAppTemplate;
   final String? address;
   final String? logoUrl;
   final String? websiteUrl;
@@ -236,6 +240,8 @@ class GymSettings {
       defaultTaxPercent: (json['defaultTaxPercent'] as num?)?.toDouble() ?? 5,
       enableSounds: json['enableSounds'] == true,
       enableAnimations: json['enableAnimations'] == true,
+      atRiskDays: (json['atRiskDays'] as num?)?.toInt() ?? 3,
+      atRiskWhatsAppTemplate: json['atRiskWhatsAppTemplate']?.toString(),
       address: json['address']?.toString(),
       logoUrl: json['logoUrl']?.toString(),
       websiteUrl: json['websiteUrl']?.toString(),

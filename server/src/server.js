@@ -224,6 +224,8 @@ const ensureOperationalTables = async () => {
       default_tax_percent DECIMAL(5,2) NOT NULL DEFAULT 5,
       enable_sounds TINYINT(1) NOT NULL DEFAULT 1,
       enable_animations TINYINT(1) NOT NULL DEFAULT 1,
+      at_risk_days INT UNSIGNED NOT NULL DEFAULT 3,
+      at_risk_whatsapp_template VARCHAR(600) NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -231,6 +233,14 @@ const ensureOperationalTables = async () => {
       CONSTRAINT fk_gym_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;`
   );
+  try {
+    const atRiskDaysCol = await queryOne("SHOW COLUMNS FROM gym_settings LIKE 'at_risk_days'");
+    if (!atRiskDaysCol) await execute("ALTER TABLE gym_settings ADD COLUMN at_risk_days INT UNSIGNED NOT NULL DEFAULT 3");
+  } catch {}
+  try {
+    const atRiskTplCol = await queryOne("SHOW COLUMNS FROM gym_settings LIKE 'at_risk_whatsapp_template'");
+    if (!atRiskTplCol) await execute("ALTER TABLE gym_settings ADD COLUMN at_risk_whatsapp_template VARCHAR(600) NULL");
+  } catch {}
 
   await execute(
     `CREATE TABLE IF NOT EXISTS gym_profile (
@@ -425,6 +435,53 @@ const drawGymPdfHeader = (doc, profile, { title = null, subtitle = null } = {}) 
 
   doc.y = Math.max(doc.y, startY + 64);
   doc.moveDown(0.4);
+};
+
+const drawObsidianGoldPdfHeader = (doc, profile, { title = null, subtitle = null } = {}) => {
+  const left = doc.page.margins.left ?? 40;
+  const top = doc.page.margins.top ?? 40;
+  const right = doc.page.width - (doc.page.margins.right ?? 40);
+  const width = right - left;
+  const h = 78;
+
+  const gold1 = '#D4AF37';
+  const gold2 = '#FFE9A8';
+  const obsidian = '#0B0F14';
+  const logoBuf = decodeLogoDataUrl(profile?.logoUrl);
+
+  doc.save();
+  doc.rect(left, top, width, h).fill(obsidian);
+  const grad = doc.linearGradient(left, top + h - 3, right, top + h - 3);
+  grad.stop(0, gold1).stop(1, gold2);
+  doc.rect(left, top + h - 3, width, 3).fill(grad);
+  doc.restore();
+
+  const padX = 14;
+  const padY = 12;
+  let textX = left + padX;
+  const textY = top + padY;
+
+  if (logoBuf) {
+    try {
+      doc.image(logoBuf, textX, textY + 2, { width: 40, height: 40 });
+      textX += 52;
+    } catch {}
+  }
+
+  doc.fillColor('#FFFFFF').fontSize(14).text(String(profile?.gymName ?? 'Gym'), textX, textY, { width: 330 });
+  doc.fontSize(9).fillColor('#B8B8B8');
+  if (profile?.address) doc.text(String(profile.address), textX, textY + 18, { width: 340 });
+  doc.fillColor('#FFFFFF');
+
+  if (title) {
+    doc.fontSize(18).fillColor(gold1).text(String(title), left, textY - 2, { width, align: 'right' });
+  }
+  if (subtitle) {
+    doc.fontSize(9).fillColor('#D7D7D7').text(String(subtitle), left, textY + 22, { width, align: 'right' });
+  }
+
+  doc.fillColor('#000000');
+  doc.y = top + h + 18;
 };
 
 const appendSystemLog = async (
@@ -728,27 +785,75 @@ class AttendanceRepository {
     return Number(result.insertId);
   }
 
-  async listToday(tenantId, limit = 200) {
+  async countToday(tenantId, { q = '' } = {}) {
+    const where = ['a.tenant_id = :tenantId', 'a.checked_in_at >= CURDATE()', 'a.checked_in_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)'];
+    const params = { tenantId };
+    if (q?.trim().length) {
+      where.push('(m.full_name LIKE :q OR m.member_code LIKE :q)');
+      params.q = `%${q.trim()}%`;
+    }
+    const row = await queryOne(
+      `SELECT COUNT(*) AS c
+       FROM attendance_logs a
+       INNER JOIN members m ON m.id = a.member_id
+       WHERE ${where.join(' AND ')}`,
+      params
+    );
+    return Number(row?.c ?? 0);
+  }
+
+  async listToday(tenantId, { q = '', limit = 200, offset = 0, sort = 'newest' } = {}) {
+    const where = ['a.tenant_id = :tenantId', 'a.checked_in_at >= CURDATE()', 'a.checked_in_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)'];
+    const params = { tenantId, limit, offset };
+    if (q?.trim().length) {
+      where.push('(m.full_name LIKE :q OR m.member_code LIKE :q)');
+      params.q = `%${q.trim()}%`;
+    }
+    const order = sort === 'oldest' ? 'a.checked_in_at ASC, a.id ASC' : 'a.checked_in_at DESC, a.id DESC';
     return queryMany(
       `SELECT a.id, a.member_id, a.checked_in_at, a.checked_out_at, m.full_name, m.member_code
        FROM attendance_logs a
        INNER JOIN members m ON m.id = a.member_id
-       WHERE a.tenant_id = :tenantId AND DATE(a.checked_in_at) = CURDATE()
-       ORDER BY a.id DESC
-       LIMIT :limit`,
-      { tenantId, limit }
+       WHERE ${where.join(' AND ')}
+       ORDER BY ${order}
+       LIMIT :limit OFFSET :offset`,
+      params
     );
   }
 
-  async listSince(tenantId, fromDateTime, limit = 200) {
+  async countSince(tenantId, fromDateTime, { q = '' } = {}) {
+    const where = ['a.tenant_id = :tenantId', 'a.checked_in_at >= :fromDateTime'];
+    const params = { tenantId, fromDateTime };
+    if (q?.trim().length) {
+      where.push('(m.full_name LIKE :q OR m.member_code LIKE :q)');
+      params.q = `%${q.trim()}%`;
+    }
+    const row = await queryOne(
+      `SELECT COUNT(*) AS c
+       FROM attendance_logs a
+       INNER JOIN members m ON m.id = a.member_id
+       WHERE ${where.join(' AND ')}`,
+      params
+    );
+    return Number(row?.c ?? 0);
+  }
+
+  async listSince(tenantId, fromDateTime, { q = '', limit = 200, offset = 0, sort = 'newest' } = {}) {
+    const where = ['a.tenant_id = :tenantId', 'a.checked_in_at >= :fromDateTime'];
+    const params = { tenantId, fromDateTime, limit, offset };
+    if (q?.trim().length) {
+      where.push('(m.full_name LIKE :q OR m.member_code LIKE :q)');
+      params.q = `%${q.trim()}%`;
+    }
+    const order = sort === 'oldest' ? 'a.checked_in_at ASC, a.id ASC' : 'a.checked_in_at DESC, a.id DESC';
     return queryMany(
       `SELECT a.id, a.member_id, a.checked_in_at, a.checked_out_at, m.full_name, m.member_code
        FROM attendance_logs a
        INNER JOIN members m ON m.id = a.member_id
-       WHERE a.tenant_id = :tenantId AND a.checked_in_at >= :fromDateTime
-       ORDER BY a.id DESC
-       LIMIT :limit`,
-      { tenantId, fromDateTime, limit }
+       WHERE ${where.join(' AND ')}
+       ORDER BY ${order}
+       LIMIT :limit OFFSET :offset`,
+      params
     );
   }
 
@@ -793,7 +898,7 @@ class AttendanceRepository {
 class SettingsRepository {
   async getOrCreate(tenantId) {
     const row = await queryOne(
-      `SELECT currency, default_tax_percent, enable_sounds, enable_animations
+      `SELECT currency, default_tax_percent, enable_sounds, enable_animations, at_risk_days, at_risk_whatsapp_template
        FROM gym_settings
        WHERE tenant_id = :tenantId
        LIMIT 1`,
@@ -803,7 +908,7 @@ class SettingsRepository {
 
     await execute('INSERT INTO gym_settings (tenant_id) VALUES (:tenantId)', { tenantId });
     return queryOne(
-      `SELECT currency, default_tax_percent, enable_sounds, enable_animations
+      `SELECT currency, default_tax_percent, enable_sounds, enable_animations, at_risk_days, at_risk_whatsapp_template
        FROM gym_settings
        WHERE tenant_id = :tenantId
        LIMIT 1`,
@@ -812,19 +917,30 @@ class SettingsRepository {
   }
 
   async update(tenantId, patch) {
+    const current = await this.getOrCreate(tenantId);
+    const atRiskDays =
+      patch.atRiskDays !== undefined && patch.atRiskDays !== null
+        ? patch.atRiskDays
+        : Number(current.at_risk_days ?? 3);
+    const atRiskWhatsAppTemplate =
+      patch.atRiskWhatsAppTemplate !== undefined ? patch.atRiskWhatsAppTemplate : current.at_risk_whatsapp_template ?? null;
     await execute(
       `UPDATE gym_settings
        SET currency = :currency,
            default_tax_percent = :defaultTaxPercent,
            enable_sounds = :enableSounds,
-           enable_animations = :enableAnimations
+           enable_animations = :enableAnimations,
+           at_risk_days = :atRiskDays,
+           at_risk_whatsapp_template = :atRiskWhatsAppTemplate
        WHERE tenant_id = :tenantId`,
       {
         tenantId,
         currency: patch.currency,
         defaultTaxPercent: patch.defaultTaxPercent,
         enableSounds: patch.enableSounds ? 1 : 0,
-        enableAnimations: patch.enableAnimations ? 1 : 0
+        enableAnimations: patch.enableAnimations ? 1 : 0,
+        atRiskDays,
+        atRiskWhatsAppTemplate
       }
     );
     return this.getOrCreate(tenantId);
@@ -832,9 +948,41 @@ class SettingsRepository {
 }
 
 class PaymentRepository {
-  async list(tenantId, { q = '', from = '', to = '', method = '', limit = 200 } = {}) {
+  async count(tenantId, { q = '', from = '', to = '', method = '' } = {}) {
     const where = ['p.tenant_id = :tenantId'];
-    const params = { tenantId, limit };
+    const params = { tenantId };
+
+    if (q?.length) {
+      where.push('(i.invoice_no LIKE :q OR m.full_name LIKE :q OR m.member_code LIKE :q OR m.phone LIKE :q)');
+      params.q = `%${q}%`;
+    }
+    if (method?.length) {
+      where.push('p.method = :method');
+      params.method = method;
+    }
+    if (from?.length) {
+      where.push('DATE(p.paid_at) >= :from');
+      params.from = from;
+    }
+    if (to?.length) {
+      where.push('DATE(p.paid_at) <= :to');
+      params.to = to;
+    }
+
+    const row = await queryOne(
+      `SELECT COUNT(*) AS c
+       FROM payments p
+       INNER JOIN invoices i ON i.id = p.invoice_id
+       INNER JOIN members m ON m.id = i.member_id
+       WHERE ${where.join(' AND ')}`,
+      params
+    );
+    return Number(row?.c ?? 0);
+  }
+
+  async list(tenantId, { q = '', from = '', to = '', method = '', limit = 200, offset = 0, sort = 'newest' } = {}) {
+    const where = ['p.tenant_id = :tenantId'];
+    const params = { tenantId, limit, offset };
 
     if (q?.length) {
       where.push(
@@ -855,6 +1003,7 @@ class PaymentRepository {
       params.to = to;
     }
 
+    const order = sort === 'oldest' ? 'p.paid_at ASC, p.id ASC' : 'p.paid_at DESC, p.id DESC';
     return queryMany(
       `SELECT p.id, p.invoice_id, p.amount, p.method, p.paid_at,
               i.invoice_no,
@@ -863,8 +1012,8 @@ class PaymentRepository {
        INNER JOIN invoices i ON i.id = p.invoice_id
        INNER JOIN members m ON m.id = i.member_id
        WHERE ${where.join(' AND ')}
-       ORDER BY p.paid_at DESC
-       LIMIT :limit`,
+       ORDER BY ${order}
+       LIMIT :limit OFFSET :offset`,
       params
     );
   }
@@ -1862,6 +2011,8 @@ app.get('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
     defaultTaxPercent: Number(row.default_tax_percent ?? 0),
     enableSounds: Boolean(row.enable_sounds),
     enableAnimations: Boolean(row.enable_animations),
+    atRiskDays: Number(row.at_risk_days ?? 3),
+    atRiskWhatsAppTemplate: row.at_risk_whatsapp_template ?? null,
     address: profile.address,
     logoUrl: profile.logoUrl,
     websiteUrl: profile.websiteUrl,
@@ -1878,6 +2029,8 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
     defaultTaxPercent: z.number().min(0).max(100).optional().default(5),
     enableSounds: z.boolean().optional().default(true),
     enableAnimations: z.boolean().optional().default(true),
+    atRiskDays: z.number().int().min(1).max(60).optional(),
+    atRiskWhatsAppTemplate: z.string().max(600).optional().nullable(),
     address: z.string().max(255).optional().nullable(),
     logoUrl: z.string().max(60000).optional().nullable(),
     websiteUrl: z.string().max(255).optional().nullable(),
@@ -1927,6 +2080,8 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
     defaultTaxPercent: Number(updated.default_tax_percent ?? 0),
     enableSounds: Boolean(updated.enable_sounds),
     enableAnimations: Boolean(updated.enable_animations),
+    atRiskDays: Number(updated.at_risk_days ?? 3),
+    atRiskWhatsAppTemplate: updated.at_risk_whatsapp_template ?? null,
     address: parsed.data.address ?? null,
     logoUrl: parsed.data.logoUrl ?? null,
     websiteUrl: parsed.data.websiteUrl ?? null,
@@ -1936,15 +2091,79 @@ app.put('/settings', authMiddleware, requireRole('owner', 'admin'), async (req, 
   });
 });
 
+app.get(
+  '/dashboard/at-risk-members',
+  authMiddleware,
+  requireRole('owner', 'admin', 'staff', 'receptionist'),
+  async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 10), 1), 30);
+    const settings = await settingsRepo.getOrCreate(tenantId);
+    const profile = await loadGymProfileForTenant(tenantId);
+    const configuredDays = Number(settings.at_risk_days ?? 3);
+    const days = Math.min(
+      Math.max(Number(req.query.days ?? configuredDays), 1),
+      60
+    );
+    const template =
+      settings.at_risk_whatsapp_template ??
+      'Assalam o Alaikum {name}, aap {days} din se gym nahi aaye. Please visit soon. {gym}';
+
+    const items = await queryMany(
+      `SELECT m.id AS member_id,
+              m.full_name,
+              m.member_code,
+              m.phone,
+              last.last_checkin_at
+       FROM members m
+       LEFT JOIN (
+         SELECT member_id, MAX(checked_in_at) AS last_checkin_at
+         FROM attendance_logs
+         WHERE tenant_id = :tenantId
+         GROUP BY member_id
+       ) last ON last.member_id = m.id
+       WHERE m.tenant_id = :tenantId
+         AND m.status = 'active'
+         AND (
+           last.last_checkin_at IS NULL
+           OR last.last_checkin_at < DATE_SUB(CURDATE(), INTERVAL :days DAY)
+         )
+       ORDER BY COALESCE(last.last_checkin_at, '1900-01-01') ASC, m.id ASC
+       LIMIT :limit`,
+      { tenantId, days, limit }
+    );
+
+    return res.json({
+      days,
+      template,
+      gymName: profile.gymName ?? null,
+      items: items.map((r) => ({
+        memberId: Number(r.member_id),
+        fullName: r.full_name ?? '',
+        memberCode: r.member_code ?? '',
+        phone: r.phone ?? null,
+        lastCheckinAt: r.last_checkin_at ?? null,
+      })),
+    });
+  }
+);
+
 app.get('/payments', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const from = typeof req.query.from === 'string' ? req.query.from.trim() : '';
   const to = typeof req.query.to === 'string' ? req.query.to.trim() : '';
   const method = typeof req.query.method === 'string' ? req.query.method.trim() : '';
   const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+  const offset = Math.min(Math.max(Number(req.query.offset ?? 0), 0), 100000);
+  const sort = typeof req.query.sort === 'string' ? req.query.sort.trim() : 'newest';
 
-  const rows = await paymentRepo.list(req.user.tenantId, { q, from, to, method, limit });
+  const tenantId = req.user.tenantId;
+  const total = await paymentRepo.count(tenantId, { q, from, to, method });
+  const rows = await paymentRepo.list(tenantId, { q, from, to, method, limit, offset, sort });
   return res.json({
+    total,
+    limit,
+    offset,
     items: rows.map((r) => ({
       id: Number(r.id),
       invoiceId: Number(r.invoice_id),
@@ -2621,6 +2840,147 @@ app.get('/dashboard/summary', authMiddleware, async (req, res) => {
       endDate: r.end_date,
       daysLeft: Number(r.days_left),
       frozenUntil: r.frozen_until ?? null
+    }))
+  });
+});
+
+app.get('/dashboard/activity', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const canSeeRevenue = (req.user.roles ?? []).some((r) => r === 'owner' || r === 'admin' || r === 'super_admin');
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 20), 1), 50);
+
+  const checkins = await queryMany(
+    `SELECT a.id, a.checked_in_at, m.id AS member_id, m.member_code, m.full_name
+     FROM attendance_logs a
+     INNER JOIN members m ON m.id = a.member_id
+     WHERE a.tenant_id = :tenantId
+     ORDER BY a.checked_in_at DESC
+     LIMIT :limit`,
+    { tenantId, limit }
+  );
+
+  const payments = canSeeRevenue
+    ? await queryMany(
+        `SELECT p.id, p.amount, p.method, p.paid_at, i.invoice_no, m.id AS member_id, m.member_code, m.full_name
+         FROM payments p
+         INNER JOIN invoices i ON i.id = p.invoice_id
+         INNER JOIN members m ON m.id = i.member_id
+         WHERE p.tenant_id = :tenantId
+         ORDER BY p.paid_at DESC
+         LIMIT :limit`,
+        { tenantId, limit }
+      )
+    : [];
+
+  const toIso = (v) => {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v ?? '');
+    return d.toISOString();
+  };
+
+  const items = [
+    ...checkins.map((r) => ({
+      id: `checkin_${r.id}`,
+      type: 'checkin',
+      at: toIso(r.checked_in_at),
+      title: `${r.full_name ?? ''} (${r.member_code ?? ''})`,
+      subtitle: `Checked in • ${fmtDateTimeShort(r.checked_in_at)}`,
+      memberId: Number(r.member_id),
+      amount: null,
+      method: null,
+      invoiceNo: null
+    })),
+    ...payments.map((r) => ({
+      id: `payment_${r.id}`,
+      type: 'payment',
+      at: toIso(r.paid_at),
+      title: `${r.full_name ?? ''} (${r.member_code ?? ''})`,
+      subtitle: `Payment • ${r.invoice_no ?? ''} • ${String(r.method ?? '').toUpperCase()} • ${fmtDateTimeShort(r.paid_at)}`,
+      memberId: Number(r.member_id),
+      amount: Number(r.amount ?? 0),
+      method: r.method ?? null,
+      invoiceNo: r.invoice_no ?? null
+    })),
+  ];
+
+  items.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
+  return res.json({ items: items.slice(0, limit) });
+});
+
+app.get('/search', authMiddleware, async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const rawQ = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 8), 1), 20);
+
+  if (rawQ.length < 2) {
+    return res.json({ members: [], leads: [], invoices: [] });
+  }
+
+  const q = `%${rawQ}%`;
+  const roles = (req.user.roles ?? []).map((r) => String(r));
+  const canSeeRevenue = roles.some((r) => r === 'owner' || r === 'admin' || r === 'super_admin');
+  const canSeeLeads = roles.some((r) => r === 'owner' || r === 'admin' || r === 'super_admin' || r === 'staff' || r === 'receptionist');
+
+  const members = await queryMany(
+    `SELECT id, member_code, full_name, phone
+     FROM members
+     WHERE tenant_id = :tenantId
+       AND (member_code LIKE :q OR full_name LIKE :q OR phone LIKE :q)
+     ORDER BY id DESC
+     LIMIT :limit`,
+    { tenantId, q, limit }
+  );
+
+  const leads = canSeeLeads
+    ? await queryMany(
+        `SELECT id, full_name, phone, status, source, interest
+         FROM leads
+         WHERE tenant_id = :tenantId
+           AND (full_name LIKE :q OR phone LIKE :q OR source LIKE :q OR interest LIKE :q)
+         ORDER BY updated_at DESC
+         LIMIT :limit`,
+        { tenantId, q, limit }
+      )
+    : [];
+
+  const invoices = canSeeRevenue
+    ? await queryMany(
+        `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at,
+                m.full_name, m.member_code, m.phone
+         FROM invoices i
+         INNER JOIN members m ON m.id = i.member_id
+         WHERE i.tenant_id = :tenantId
+           AND (i.invoice_no LIKE :q OR m.full_name LIKE :q OR m.member_code LIKE :q OR m.phone LIKE :q)
+         ORDER BY i.id DESC
+         LIMIT :limit`,
+        { tenantId, q, limit }
+      )
+    : [];
+
+  return res.json({
+    members: members.map((r) => ({
+      id: Number(r.id),
+      memberCode: r.member_code,
+      fullName: r.full_name,
+      phone: r.phone ?? null
+    })),
+    leads: leads.map((r) => ({
+      id: Number(r.id),
+      fullName: r.full_name,
+      phone: r.phone ?? null,
+      status: r.status,
+      source: r.source ?? null,
+      interest: r.interest ?? null
+    })),
+    invoices: invoices.map((r) => ({
+      id: Number(r.id),
+      invoiceNo: r.invoice_no,
+      total: Number(r.total ?? 0),
+      status: r.status,
+      createdAt: r.created_at,
+      memberName: r.full_name,
+      memberCode: r.member_code,
+      phone: r.phone ?? null
     }))
   });
 });
@@ -3704,10 +4064,14 @@ app.get('/attendance', authMiddleware, async (req, res) => {
   const tenantId = req.user.tenantId;
   const range = typeof req.query.range === 'string' ? req.query.range.trim() : 'today';
   const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+  const offset = Math.min(Math.max(Number(req.query.offset ?? 0), 0), 100000);
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const sort = typeof req.query.sort === 'string' ? req.query.sort.trim() : 'newest';
 
   if (range === 'today' || !range.length) {
-    const rows = await attendanceRepo.listToday(tenantId, limit);
-    return res.json({ items: rows });
+    const total = await attendanceRepo.countToday(tenantId, { q });
+    const rows = await attendanceRepo.listToday(tenantId, { q, limit, offset, sort });
+    return res.json({ total, limit, offset, items: rows });
   }
 
   let days = 0;
@@ -3717,12 +4081,14 @@ app.get('/attendance', authMiddleware, async (req, res) => {
 
   const from = addDays(new Date(), -(days - 1));
   from.setHours(0, 0, 0, 0);
-  const rows = await attendanceRepo.listSince(tenantId, toMysqlDateTime(from), limit);
-  return res.json({ items: rows });
+  const fromDateTime = toMysqlDateTime(from);
+  const total = await attendanceRepo.countSince(tenantId, fromDateTime, { q });
+  const rows = await attendanceRepo.listSince(tenantId, fromDateTime, { q, limit, offset, sort });
+  return res.json({ total, limit, offset, items: rows });
 });
 
 app.get('/attendance/today', authMiddleware, async (req, res) => {
-  const rows = await attendanceRepo.listToday(req.user.tenantId, 200);
+  const rows = await attendanceRepo.listToday(req.user.tenantId, { limit: 200, offset: 0, sort: 'newest' });
   return res.json({ items: rows });
 });
 
@@ -3733,9 +4099,11 @@ app.get('/invoices', authMiddleware, requireRole('owner', 'admin'), async (req, 
   const from = typeof req.query.from === 'string' ? req.query.from.trim() : '';
   const to = typeof req.query.to === 'string' ? req.query.to.trim() : '';
   const limit = Math.min(Math.max(Number(req.query.limit ?? 200), 1), 400);
+  const offset = Math.min(Math.max(Number(req.query.offset ?? 0), 0), 100000);
+  const sort = typeof req.query.sort === 'string' ? req.query.sort.trim() : 'newest';
 
   const where = ['i.tenant_id = :tenantId'];
-  const params = { tenantId, limit };
+  const params = { tenantId, limit, offset };
 
   if (q?.length) {
     where.push('(i.invoice_no LIKE :q OR m.full_name LIKE :q OR m.member_code LIKE :q OR m.phone LIKE :q)');
@@ -3754,16 +4122,32 @@ app.get('/invoices', authMiddleware, requireRole('owner', 'admin'), async (req, 
     params.to = to;
   }
 
+  const order =
+    sort === 'oldest'
+      ? 'i.id ASC'
+      : sort === 'total_desc'
+        ? 'i.total DESC, i.id DESC'
+        : 'i.id DESC';
+
+  const countRow = await queryOne(
+    `SELECT COUNT(*) AS c
+     FROM invoices i
+     INNER JOIN members m ON m.id = i.member_id
+     WHERE ${where.join(' AND ')}`,
+    params
+  );
+  const total = Number(countRow?.c ?? 0);
+
   const rows = await queryMany(
     `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at, m.full_name, m.member_code, m.phone
      FROM invoices i
      INNER JOIN members m ON m.id = i.member_id
      WHERE ${where.join(' AND ')}
-     ORDER BY i.id DESC
-     LIMIT :limit`,
+     ORDER BY ${order}
+     LIMIT :limit OFFSET :offset`,
     params
   );
-  return res.json({ items: rows });
+  return res.json({ total, limit, offset, items: rows });
 });
 
 app.get('/invoices/:id', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
@@ -4022,6 +4406,140 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, requireRole('owner', 'ad
   }
 
   doc.end();
+});
+
+app.get('/reports/profit-series', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+  const validMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : toDateOnly(new Date()).slice(0, 7);
+  const year = Number(validMonth.slice(0, 4));
+  const month = Number(validMonth.slice(5, 7));
+  const start = `${validMonth}-01`;
+  const endDate = new Date(year, month, 0);
+  const end = toDateOnly(endDate);
+
+  const revenueRows = await queryMany(
+    `SELECT DATE(paid_at) AS d, COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND DATE(paid_at) BETWEEN :start AND :end
+     GROUP BY DATE(paid_at)
+     ORDER BY d ASC`,
+    { tenantId, start, end }
+  );
+  const expenseRows = await queryMany(
+    `SELECT expense_date AS d, COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE tenant_id = :tenantId
+       AND expense_date BETWEEN :start AND :end
+     GROUP BY expense_date
+     ORDER BY d ASC`,
+    { tenantId, start, end }
+  );
+
+  const revenueMap = new Map(revenueRows.map((r) => [fmtDateOnlyStr(r.d), Number(r.s ?? 0)]));
+  const expenseMap = new Map(expenseRows.map((r) => [fmtDateOnlyStr(r.d), Number(r.s ?? 0)]));
+
+  const items = [];
+  const startDt = new Date(`${start}T00:00:00`);
+  const endDt = new Date(`${end}T00:00:00`);
+  for (let d = new Date(startDt); d.getTime() <= endDt.getTime(); d = addDays(d, 1)) {
+    const key = toDateOnly(d);
+    const revenue = Number(revenueMap.get(key) ?? 0);
+    const expense = Number(expenseMap.get(key) ?? 0);
+    const profit = Number((revenue - expense).toFixed(2));
+    items.push({ date: key, revenue, expense, profit });
+  }
+
+  const totalRevenue = Number(items.reduce((sum, r) => sum + Number(r.revenue ?? 0), 0).toFixed(2));
+  const totalExpense = Number(items.reduce((sum, r) => sum + Number(r.expense ?? 0), 0).toFixed(2));
+  const totalProfit = Number((totalRevenue - totalExpense).toFixed(2));
+  const marginPct = totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0;
+
+  return res.json({
+    month: validMonth,
+    start,
+    end,
+    totals: {
+      revenue: totalRevenue,
+      expense: totalExpense,
+      profit: totalProfit,
+      marginPct
+    },
+    items
+  });
+});
+
+app.get('/reports/revenue-prediction', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const months = 3;
+
+  const now = new Date();
+  const curMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+  const lastMonthStart = addMonths(curMonthStart, -1);
+  const firstMonthStart = addMonths(curMonthStart, -(months));
+  const rangeStart = toDateOnly(firstMonthStart);
+  const rangeEndExclusive = toDateOnly(curMonthStart);
+
+  const rows = await queryMany(
+    `SELECT DATE_FORMAT(paid_at, '%Y-%m') AS ym, COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND paid_at >= :start
+       AND paid_at < :endExclusive
+     GROUP BY DATE_FORMAT(paid_at, '%Y-%m')
+     ORDER BY ym ASC`,
+    { tenantId, start: rangeStart, endExclusive: rangeEndExclusive }
+  );
+  const map = new Map(rows.map((r) => [String(r.ym), Number(r.s ?? 0)]));
+
+  const history = [];
+  for (let i = months; i >= 1; i -= 1) {
+    const m = addMonths(curMonthStart, -i);
+    const key = ym(m);
+    history.push({ month: key, revenue: Number(map.get(key) ?? 0) });
+  }
+
+  const x = [1, 2, 3];
+  const y = history.map((h) => Number(h.revenue ?? 0));
+  const meanX = x.reduce((a, b) => a + b, 0) / x.length;
+  const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+  let cov = 0;
+  let varX = 0;
+  for (let i = 0; i < x.length; i += 1) {
+    cov += (x[i] - meanX) * (y[i] - meanY);
+    varX += (x[i] - meanX) * (x[i] - meanX);
+  }
+  const slope = varX === 0 ? 0 : cov / varX;
+  const intercept = meanY - slope * meanX;
+  const predictedRaw = intercept + slope * 4;
+  const predictedRevenue = Number(Math.max(0, predictedRaw).toFixed(2));
+
+  const lastRevenue = Number(history[history.length - 1]?.revenue ?? 0);
+  const delta = Number((predictedRevenue - lastRevenue).toFixed(2));
+  const deltaPct = lastRevenue > 0 ? Number(((delta / lastRevenue) * 100).toFixed(2)) : (predictedRevenue > 0 ? 100 : 0);
+
+  const predictedMonth = ym(curMonthStart);
+  return res.json({
+    basis: {
+      months: history.length,
+      method: 'linear_regression',
+      rangeStart,
+      rangeEndExclusive
+    },
+    history,
+    prediction: {
+      month: predictedMonth,
+      revenue: predictedRevenue,
+      delta,
+      deltaPct
+    }
+  });
 });
 
 app.get('/reports/expired-members.pdf', authMiddleware, async (req, res) => {
@@ -4814,6 +5332,320 @@ app.get('/pdf/payments.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
         { text: fmtDateTimeShort(r.paid_at), x: startX + 325, width: 190, align: 'right' }
       ],
       { onNewPage: redrawPaymentsHeader }
+    );
+  }
+
+  doc.end();
+});
+
+app.get('/pdf/reports.pdf', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const monthRaw = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+  const validMonth = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : toDateOnly(new Date()).slice(0, 7);
+  const year = Number(validMonth.slice(0, 4));
+  const month = Number(validMonth.slice(5, 7));
+  const monthStart = new Date(year, month - 1, 1);
+  const nextMonthStart = new Date(year, month, 1);
+  const rangeStart = toDateOnly(monthStart);
+  const rangeEnd = toDateOnly(new Date(year, month, 0));
+  const rangeEndExclusive = toDateOnly(nextMonthStart);
+
+  const profile = await loadGymProfileForTenant(tenantId);
+
+  const money = (v) => Number(v ?? 0).toFixed(2);
+
+  const paidInvoicesAgg = await queryOne(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(total), 0) AS s
+     FROM invoices
+     WHERE tenant_id = :tenantId
+       AND status = 'paid'
+       AND created_at >= :start
+       AND created_at < :endExclusive`,
+    { tenantId, start: rangeStart, endExclusive: rangeEndExclusive }
+  );
+  const unpaidInvoicesAgg = await queryOne(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(total), 0) AS s
+     FROM invoices
+     WHERE tenant_id = :tenantId
+       AND status = 'unpaid'`,
+    { tenantId }
+  );
+  const collectedAgg = await queryOne(
+    `SELECT COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND paid_at >= :start
+       AND paid_at < :endExclusive`,
+    { tenantId, start: rangeStart, endExclusive: rangeEndExclusive }
+  );
+  const expensesAgg = await queryOne(
+    `SELECT COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE tenant_id = :tenantId
+       AND expense_date BETWEEN :start AND :end`,
+    { tenantId, start: rangeStart, end: rangeEnd }
+  );
+
+  const paidInvoicesCount = Number(paidInvoicesAgg?.c ?? 0);
+  const paidInvoicesTotal = Number(paidInvoicesAgg?.s ?? 0);
+  const unpaidInvoicesCount = Number(unpaidInvoicesAgg?.c ?? 0);
+  const unpaidInvoicesTotal = Number(unpaidInvoicesAgg?.s ?? 0);
+  const collected = Number(collectedAgg?.s ?? 0);
+  const expenses = Number(expensesAgg?.s ?? 0);
+  const netProfit = Number((collected - expenses).toFixed(2));
+  const marginPct = collected > 0 ? Number(((netProfit / collected) * 100).toFixed(2)) : 0;
+
+  const revRows = await queryMany(
+    `SELECT DATE(paid_at) AS d, COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND paid_at >= :start
+       AND paid_at < :endExclusive
+     GROUP BY DATE(paid_at)
+     ORDER BY d ASC`,
+    { tenantId, start: rangeStart, endExclusive: rangeEndExclusive }
+  );
+  const expRows = await queryMany(
+    `SELECT expense_date AS d, COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE tenant_id = :tenantId
+       AND expense_date BETWEEN :start AND :end
+     GROUP BY expense_date
+     ORDER BY d ASC`,
+    { tenantId, start: rangeStart, end: rangeEnd }
+  );
+  const revenueMap = new Map(revRows.map((r) => [toDateOnly(new Date(r.d)), Number(r.s ?? 0)]));
+  const expenseMap = new Map(expRows.map((r) => [fmtDateOnlyStr(r.d), Number(r.s ?? 0)]));
+
+  const daily = [];
+  for (let d = new Date(monthStart); d <= new Date(year, month, 0); d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const key = toDateOnly(d);
+    const revenue = Number(revenueMap.get(key) ?? 0);
+    const expense = Number(expenseMap.get(key) ?? 0);
+    const profit = Number((revenue - expense).toFixed(2));
+    daily.push({ date: key, revenue, expense, profit });
+  }
+
+  const topExpenseCats = await queryMany(
+    `SELECT category, COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE tenant_id = :tenantId
+       AND expense_date BETWEEN :start AND :end
+     GROUP BY category
+     ORDER BY s DESC
+     LIMIT 10`,
+    { tenantId, start: rangeStart, end: rangeEnd }
+  );
+
+  const months = 3;
+  const now = new Date();
+  const curMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+  const firstMonthStart = addMonths(curMonthStart, -months);
+  const histStart = toDateOnly(firstMonthStart);
+  const histEndExclusive = toDateOnly(curMonthStart);
+
+  const histRows = await queryMany(
+    `SELECT DATE_FORMAT(paid_at, '%Y-%m') AS ym, COALESCE(SUM(amount), 0) AS s
+     FROM payments
+     WHERE tenant_id = :tenantId
+       AND paid_at >= :start
+       AND paid_at < :endExclusive
+     GROUP BY DATE_FORMAT(paid_at, '%Y-%m')
+     ORDER BY ym ASC`,
+    { tenantId, start: histStart, endExclusive: histEndExclusive }
+  );
+  const histMap = new Map(histRows.map((r) => [String(r.ym), Number(r.s ?? 0)]));
+  const history = [];
+  for (let i = months; i >= 1; i -= 1) {
+    const m = addMonths(curMonthStart, -i);
+    const key = ym(m);
+    history.push({ month: key, revenue: Number(histMap.get(key) ?? 0) });
+  }
+  const x = [1, 2, 3];
+  const y = history.map((h) => Number(h.revenue ?? 0));
+  const meanX = x.reduce((a, b) => a + b, 0) / x.length;
+  const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+  let cov = 0;
+  let varX = 0;
+  for (let i = 0; i < x.length; i += 1) {
+    cov += (x[i] - meanX) * (y[i] - meanY);
+    varX += (x[i] - meanX) * (x[i] - meanX);
+  }
+  const slope = varX === 0 ? 0 : cov / varX;
+  const intercept = meanY - slope * meanX;
+  const predictedRaw = intercept + slope * 4;
+  const predictedRevenue = Number(Math.max(0, predictedRaw).toFixed(2));
+  const lastRevenue = Number(history[history.length - 1]?.revenue ?? 0);
+  const delta = Number((predictedRevenue - lastRevenue).toFixed(2));
+  const deltaPct = lastRevenue > 0 ? Number(((delta / lastRevenue) * 100).toFixed(2)) : (predictedRevenue > 0 ? 100 : 0);
+  const predictedMonth = ym(curMonthStart);
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="reports_${validMonth}.pdf"`);
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  doc.pipe(res);
+
+  const subtitle = `Month: ${validMonth}  •  Range: ${rangeStart} → ${rangeEnd}`;
+  drawObsidianGoldPdfHeader(doc, profile, { title: 'REPORTS', subtitle });
+
+  const startX = 40;
+  const rightX = 555;
+  const gold = '#D4AF37';
+
+  doc.fontSize(12).fillColor(gold).text('Executive Summary');
+  doc.moveDown(0.3);
+  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+  doc.moveDown(0.6);
+
+  const summaryRows = [
+    ['Payments Collected (month)', money(collected)],
+    ['Paid Invoices (month)', `${paidInvoicesCount}  •  ${money(paidInvoicesTotal)}`],
+    ['Total Expenses (month)', money(expenses)],
+    ['Net Profit (month)', `${money(netProfit)}  •  Margin: ${marginPct.toFixed(2)}%`],
+    ['Unpaid Invoices (all)', `${unpaidInvoicesCount}  •  ${money(unpaidInvoicesTotal)}`]
+  ];
+  for (const r of summaryRows) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r[0], x: startX, width: 330 },
+        { text: r[1], x: startX + 335, width: 180, align: 'right' }
+      ],
+      { rowHeight: 16, fontSize: 10 }
+    );
+  }
+
+  doc.moveDown(0.9);
+  doc.fontSize(12).fillColor(gold).text('Revenue Prediction (Next Month)');
+  doc.moveDown(0.3);
+  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+  doc.moveDown(0.6);
+  doc.fillColor('#000000').fontSize(10);
+  doc.text(`Method: linear_regression  •  Basis: last 3 months (${histStart} → ${histEndExclusive})`);
+  doc.text(`Prediction: ${predictedMonth}  •  ${money(predictedRevenue)}  •  Change: ${delta >= 0 ? '+' : ''}${money(delta)} (${delta >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%)`);
+  doc.moveDown(0.6);
+
+  const drawHistHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Month', x: startX, width: 120 },
+        { text: 'Revenue', x: startX + 125, width: 140, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(startX + 265, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawHist = () => {
+    drawObsidianGoldPdfHeader(doc, profile, { title: 'REPORTS', subtitle });
+    doc.fontSize(12).fillColor(gold).text('Revenue Prediction (Next Month)');
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+    doc.moveDown(0.6);
+    drawHistHeader();
+  };
+  drawHistHeader();
+  for (const h of history) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: h.month ?? '', x: startX, width: 120 },
+        { text: money(h.revenue), x: startX + 125, width: 140, align: 'right' }
+      ],
+      { onNewPage: redrawHist }
+    );
+  }
+
+  doc.moveDown(0.9);
+  doc.fontSize(12).fillColor(gold).text('Top Expense Categories (Month)');
+  doc.moveDown(0.3);
+  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+  doc.moveDown(0.6);
+
+  const drawCatHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Category', x: startX, width: 360 },
+        { text: 'Amount', x: startX + 365, width: 150, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawCats = () => {
+    drawObsidianGoldPdfHeader(doc, profile, { title: 'REPORTS', subtitle });
+    doc.moveDown(0.2);
+    doc.fontSize(12).fillColor(gold).text('Top Expense Categories (Month)');
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+    doc.moveDown(0.6);
+    drawCatHeader();
+  };
+  drawCatHeader();
+  if (!topExpenseCats.length) {
+    doc.fillColor('#444444').fontSize(10).text('No expenses found in selected month.');
+  } else {
+    for (const r of topExpenseCats) {
+      pdfDrawRow(
+        doc,
+        [
+          { text: r.category ?? '', x: startX, width: 360 },
+          { text: money(r.s), x: startX + 365, width: 150, align: 'right' }
+        ],
+        { onNewPage: redrawCats }
+      );
+    }
+  }
+
+  doc.moveDown(0.9);
+  doc.fontSize(12).fillColor(gold).text('Daily Profit (Payments vs Expenses)');
+  doc.moveDown(0.3);
+  doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+  doc.moveDown(0.6);
+
+  const drawDailyHeader = () => {
+    pdfDrawRow(
+      doc,
+      [
+        { text: 'Date', x: startX, width: 110 },
+        { text: 'Revenue', x: startX + 115, width: 110, align: 'right' },
+        { text: 'Expense', x: startX + 230, width: 110, align: 'right' },
+        { text: 'Profit', x: startX + 345, width: 110, align: 'right' }
+      ],
+      { color: '#555555' }
+    );
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#DDDDDD').stroke();
+    doc.moveDown(0.5);
+  };
+  const redrawDaily = () => {
+    drawObsidianGoldPdfHeader(doc, profile, { title: 'REPORTS', subtitle });
+    doc.moveDown(0.2);
+    doc.fontSize(12).fillColor(gold).text('Daily Profit (Payments vs Expenses)');
+    doc.moveDown(0.3);
+    doc.moveTo(startX, doc.y).lineTo(rightX, doc.y).strokeColor('#E6E6E6').stroke();
+    doc.moveDown(0.6);
+    drawDailyHeader();
+  };
+  drawDailyHeader();
+  for (const r of daily) {
+    pdfDrawRow(
+      doc,
+      [
+        { text: r.date ?? '', x: startX, width: 110 },
+        { text: money(r.revenue), x: startX + 115, width: 110, align: 'right' },
+        { text: money(r.expense), x: startX + 230, width: 110, align: 'right' },
+        { text: money(r.profit), x: startX + 345, width: 110, align: 'right' }
+      ],
+      { onNewPage: redrawDaily }
     );
   }
 

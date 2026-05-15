@@ -666,7 +666,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                           DataRow(
                                             color: p.onHand < 5
                                                 ? WidgetStateProperty.resolveWith<Color?>(
-                                                    (_) => const Color(0xFFD4AF37).withValues(alpha: 0.12),
+                                                    (_) => theme.colorScheme.error.withValues(alpha: 0.08),
                                                   )
                                                 : null,
                                             cells: [
@@ -728,7 +728,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                   itemBuilder: (context, i) {
                                     final p = items[i];
                                     final low = p.onHand < 5;
-                                    final glow = const Color(0xFFD4AF37);
+                                    final glow = theme.colorScheme.error;
                                     return DecoratedBox(
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(14),
@@ -736,7 +736,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                         boxShadow: low
                                             ? [
                                                 BoxShadow(
-                                                  color: glow.withValues(alpha: 0.28),
+                                                  color: glow.withValues(alpha: 0.24),
                                                   blurRadius: 18,
                                                   spreadRadius: 1,
                                                 ),

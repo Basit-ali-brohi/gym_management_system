@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -398,41 +401,11 @@ class AppShell extends ConsumerWidget {
     }
 
     void openGlobalSearch() {
-      final ctrl = TextEditingController();
+      final rootContext = context;
       showDialog<void>(
         context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: const Text('Search'),
-            content: TextField(
-              controller: ctrl,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Search member (name / code / phone)',
-                prefixIcon: Icon(Icons.search),
-              ),
-              onSubmitted: (v) {
-                Navigator.of(context).pop();
-                final q = v.trim();
-                if (q.isEmpty) return;
-                context.go('/members?q=$q');
-              },
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  final q = ctrl.text.trim();
-                  if (q.isEmpty) return;
-                  context.go('/members?q=$q');
-                },
-                child: const Text('Search'),
-              ),
-            ],
-          );
-        },
-      ).whenComplete(ctrl.dispose);
+        builder: (_) => _MasterSearchDialog(rootContext: rootContext),
+      );
     }
 
     final roleList = auth.user?.roles ?? const <String>[];
@@ -494,96 +467,533 @@ class AppShell extends ConsumerWidget {
             .map((s) => s.isNotEmpty ? s[0].toUpperCase() : '')
             .join();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final useRail = constraints.maxWidth >= 900;
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyK, control: true): _OpenMasterSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyK, meta: true): _OpenMasterSearchIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _OpenMasterSearchIntent: CallbackAction<_OpenMasterSearchIntent>(
+            onInvoke: (_) {
+              openGlobalSearch();
+              return null;
+            },
+          ),
+        },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final useRail = constraints.maxWidth >= 900;
 
-        if (!useRail) {
-          return Scaffold(
-            appBar: AppBar(
-              title: Text('$tenantLabel — $pageTitle'),
-              actions: [
-                _IconBadgeButton(
-                  tooltip: 'Notifications',
-                  icon: const Icon(Icons.notifications_none),
-                  badgeCount: expiringAsync.valueOrNull?.length ?? 0,
-                  onPressed: openExpiringDialog,
-                ),
-                IconButton(
-                  tooltip: isDark ? 'Light theme' : 'Dark theme',
-                  onPressed: toggleTheme,
-                  icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
-                ),
-                IconButton(
-                  tooltip: 'Search',
-                  onPressed: openGlobalSearch,
-                  icon: const Icon(Icons.search),
-                ),
-                PopupMenuButton<String>(
-                  tooltip: 'Account',
-                  onSelected: (v) {
-                    if (v == 'logout') ref.read(authControllerProvider.notifier).logout();
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      enabled: false,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(userName, style: theme.textTheme.titleMedium),
-                          const SizedBox(height: 2),
-                          Text(auth.user?.email ?? '', style: theme.textTheme.bodySmall),
-                        ],
+            if (!useRail) {
+              return Scaffold(
+                appBar: AppBar(
+                  title: Text('$tenantLabel — $pageTitle'),
+                  actions: [
+                    _IconBadgeButton(
+                      tooltip: 'Notifications',
+                      icon: const Icon(Icons.notifications_none),
+                      badgeCount: expiringAsync.valueOrNull?.length ?? 0,
+                      onPressed: openExpiringDialog,
+                    ),
+                    IconButton(
+                      tooltip: isDark ? 'Light theme' : 'Dark theme',
+                      onPressed: toggleTheme,
+                      icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
+                    ),
+                    IconButton(
+                      tooltip: 'Search',
+                      onPressed: openGlobalSearch,
+                      icon: const Icon(Icons.search),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Account',
+                      onSelected: (v) {
+                        if (v == 'logout') ref.read(authControllerProvider.notifier).logout();
+                      },
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          enabled: false,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(userName, style: theme.textTheme.titleMedium),
+                              const SizedBox(height: 2),
+                              Text(auth.user?.email ?? '', style: theme.textTheme.bodySmall),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(value: 'logout', child: Text('Logout')),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: theme.colorScheme.primaryContainer,
+                          foregroundColor: theme.colorScheme.onPrimaryContainer,
+                          child: Text(initials),
+                        ),
                       ),
                     ),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(value: 'logout', child: Text('Logout')),
                   ],
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: theme.colorScheme.primaryContainer,
-                      foregroundColor: theme.colorScheme.onPrimaryContainer,
-                      child: Text(initials),
-                    ),
-                  ),
+                ),
+                drawer: _AppDrawer(
+                  tenantLabel: tenantLabel,
+                  userName: userName,
+                  email: auth.user?.email ?? '',
+                  roles: (auth.user?.roles ?? const []).join(', '),
+                  selectedRoute: location,
+                  destinations: destinations,
+                  onGo: (route) => context.go(route),
+                ),
+                body: child,
+              );
+            }
+
+            return Scaffold(
+              body: _DesktopFrame(
+                tenantLabel: tenantLabel,
+                userName: userName,
+                email: auth.user?.email ?? '',
+                initials: initials,
+                pageTitle: pageTitle,
+                selectedRoute: location,
+                destinations: destinations,
+                onGo: (route) => context.go(route),
+                onLogout: () => ref.read(authControllerProvider.notifier).logout(),
+                isDark: isDark,
+                onToggleTheme: toggleTheme,
+                expiringAsync: expiringAsync,
+                onOpenNotifications: openExpiringDialog,
+                onOpenSearch: openGlobalSearch,
+                child: child,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _OpenMasterSearchIntent extends Intent {
+  const _OpenMasterSearchIntent();
+}
+
+class _MasterSearchDialog extends ConsumerStatefulWidget {
+  const _MasterSearchDialog({required this.rootContext});
+
+  final BuildContext rootContext;
+
+  @override
+  ConsumerState<_MasterSearchDialog> createState() => _MasterSearchDialogState();
+}
+
+class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  Timer? _debounce;
+  int _requestId = 0;
+
+  bool _loading = false;
+  String? _error;
+  String _q = '';
+  _MasterSearchResponse _res = const _MasterSearchResponse.empty();
+  final Map<String, _MasterSearchResponse> _cache = <String, _MasterSearchResponse>{};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _setQuery(String raw) {
+    final q = raw.trim();
+    setState(() {
+      _q = q;
+      _error = null;
+    });
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 320), () => _runSearch(q));
+  }
+
+  Future<void> _runSearch(String q) async {
+    if (!mounted) return;
+    if (q.length < 2) {
+      setState(() {
+        _loading = false;
+        _res = const _MasterSearchResponse.empty();
+      });
+      return;
+    }
+
+    final cached = _cache[q.toLowerCase()];
+    if (cached != null) {
+      setState(() {
+        _loading = false;
+        _res = cached;
+      });
+      return;
+    }
+
+    final token = ref.read(authControllerProvider).token;
+    if (token == null || token.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = 'unauthorized';
+        _res = const _MasterSearchResponse.empty();
+      });
+      return;
+    }
+
+    final api = ref.read(apiClientProvider);
+    final rid = ++_requestId;
+    setState(() => _loading = true);
+    try {
+      final json = await api.getJson('/search', token: token, query: {'q': q, 'limit': '8'});
+      if (!mounted || rid != _requestId) return;
+
+      final res = _MasterSearchResponse.fromJson(json);
+      _cache[q.toLowerCase()] = res;
+      setState(() {
+        _loading = false;
+        _res = res;
+      });
+    } catch (e) {
+      if (!mounted || rid != _requestId) return;
+      setState(() {
+        _loading = false;
+        _error = 'search_failed';
+        _res = const _MasterSearchResponse.empty();
+      });
+    }
+  }
+
+  void _go(String route) {
+    Navigator.of(context).pop();
+    widget.rootContext.go(route);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final surface = theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 72 : 120);
+    final border = theme.colorScheme.outlineVariant.withAlpha(theme.brightness == Brightness.dark ? 130 : 160);
+
+    final hasResults = _res.members.isNotEmpty || _res.leads.isNotEmpty || _res.invoices.isNotEmpty;
+
+    Widget glass({required Widget child, BorderRadius? radius}) {
+      final r = radius ?? BorderRadius.circular(18);
+      return ClipRRect(
+        borderRadius: r,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: r,
+              border: Border.all(color: border),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  surface,
+                  theme.colorScheme.surfaceContainerHighest.withAlpha(theme.brightness == Brightness.dark ? 40 : 70),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 110 : 28),
+                  blurRadius: 32,
+                  offset: const Offset(0, 18),
                 ),
               ],
             ),
-            drawer: _AppDrawer(
-              tenantLabel: tenantLabel,
-              userName: userName,
-              email: auth.user?.email ?? '',
-              roles: (auth.user?.roles ?? const []).join(', '),
-              selectedRoute: location,
-              destinations: destinations,
-              onGo: (route) => context.go(route),
-            ),
-            body: child,
-          );
-        }
-
-        return Scaffold(
-          body: _DesktopFrame(
-            tenantLabel: tenantLabel,
-            userName: userName,
-            email: auth.user?.email ?? '',
-            initials: initials,
-            pageTitle: pageTitle,
-            selectedRoute: location,
-            destinations: destinations,
-            onGo: (route) => context.go(route),
-            onLogout: () => ref.read(authControllerProvider.notifier).logout(),
-            isDark: isDark,
-            onToggleTheme: toggleTheme,
-            expiringAsync: expiringAsync,
-            onOpenNotifications: openExpiringDialog,
-            onOpenSearch: openGlobalSearch,
             child: child,
           ),
-        );
-      },
+        ),
+      );
+    }
+
+    Widget section(String title, List<_MasterSearchTileData> items) {
+      if (items.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Text(
+              title.toUpperCase(),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                letterSpacing: 0.9,
+              ),
+            ),
+          ),
+          for (final t in items)
+            ListTile(
+              dense: true,
+              leading: Icon(t.icon, color: theme.colorScheme.tertiary),
+              title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: t.subtitle == null ? null : Text(t.subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () => _go(t.route),
+            ),
+        ],
+      );
+    }
+
+    final memberTiles = _res.members.map((m) {
+      final target = (m.memberCode ?? '').trim().isNotEmpty ? m.memberCode!.trim() : m.fullName.trim();
+      final q = Uri.encodeComponent(target);
+      final subtitle = [m.phone, m.memberCode].whereType<String>().map((s) => s.trim()).where((s) => s.isNotEmpty).join(' • ');
+      return _MasterSearchTileData(
+        icon: Icons.people,
+        title: m.fullName.trim().isEmpty ? target : '${m.fullName} (${m.memberCode ?? ''})'.replaceAll(' ()', ''),
+        subtitle: subtitle.isEmpty ? null : subtitle,
+        route: '/members?q=$q',
+      );
+    }).toList();
+
+    final leadTiles = _res.leads.map((l) {
+      final target = (l.phone ?? '').trim().isNotEmpty ? l.phone!.trim() : l.fullName.trim();
+      final q = Uri.encodeComponent(target);
+      final subtitle =
+          [l.phone, l.status, l.source, l.interest].whereType<String>().map((s) => s.trim()).where((s) => s.isNotEmpty).join(' • ');
+      return _MasterSearchTileData(
+        icon: Icons.person_search,
+        title: l.fullName,
+        subtitle: subtitle.isEmpty ? null : subtitle,
+        route: '/leads?q=$q',
+      );
+    }).toList();
+
+    final invoiceTiles = _res.invoices.map((i) {
+      final q = Uri.encodeComponent(i.invoiceNo);
+      final subtitleParts = <String>[
+        i.memberName,
+        i.status,
+        'Rs ${i.total}',
+      ].where((s) => s.trim().isNotEmpty).toList();
+      return _MasterSearchTileData(
+        icon: Icons.receipt_long,
+        title: i.invoiceNo,
+        subtitle: subtitleParts.join(' • '),
+        route: '/invoices?q=$q',
+      );
+    }).toList();
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: glass(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _ctrl,
+                        focusNode: _focus,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          hintText: 'Search Members, Leads, Invoices…',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _q.isEmpty
+                              ? IconButton(
+                                  tooltip: 'Close',
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  icon: const Icon(Icons.close),
+                                )
+                              : IconButton(
+                                  tooltip: 'Clear',
+                                  onPressed: () {
+                                    _ctrl.clear();
+                                    _setQuery('');
+                                  },
+                                  icon: const Icon(Icons.clear),
+                                ),
+                        ),
+                        onChanged: _setQuery,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (_loading) const LinearProgressIndicator(minHeight: 2),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+                  ),
+                if (!_loading && _error == null)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 360),
+                    child: glass(
+                      radius: BorderRadius.circular(16),
+                      child: hasResults
+                          ? SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  section('Members', memberTiles),
+                                  section('Leads', leadTiles),
+                                  section('Invoices', invoiceTiles),
+                                ],
+                              ),
+                            )
+                          : Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Text(
+                                _q.length < 2 ? 'Type at least 2 characters…' : 'No results',
+                                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MasterSearchTileData {
+  const _MasterSearchTileData({
+    required this.icon,
+    required this.title,
+    required this.route,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final String route;
+}
+
+class _MasterSearchResponse {
+  const _MasterSearchResponse({
+    required this.members,
+    required this.leads,
+    required this.invoices,
+  });
+
+  const _MasterSearchResponse.empty() : this(members: const [], leads: const [], invoices: const []);
+
+  final List<_MasterSearchMember> members;
+  final List<_MasterSearchLead> leads;
+  final List<_MasterSearchInvoice> invoices;
+
+  factory _MasterSearchResponse.fromJson(Map<String, dynamic> json) {
+    List<Map<String, dynamic>> maps(dynamic v) =>
+        (v as List<dynamic>? ?? const []).whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+
+    return _MasterSearchResponse(
+      members: maps(json['members']).map(_MasterSearchMember.fromJson).toList(),
+      leads: maps(json['leads']).map(_MasterSearchLead.fromJson).toList(),
+      invoices: maps(json['invoices']).map(_MasterSearchInvoice.fromJson).toList(),
+    );
+  }
+}
+
+class _MasterSearchMember {
+  const _MasterSearchMember({
+    required this.id,
+    required this.fullName,
+    this.memberCode,
+    this.phone,
+  });
+
+  final int id;
+  final String fullName;
+  final String? memberCode;
+  final String? phone;
+
+  factory _MasterSearchMember.fromJson(Map<String, dynamic> json) {
+    return _MasterSearchMember(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      fullName: json['fullName']?.toString() ?? '',
+      memberCode: json['memberCode']?.toString(),
+      phone: json['phone']?.toString(),
+    );
+  }
+}
+
+class _MasterSearchLead {
+  const _MasterSearchLead({
+    required this.id,
+    required this.fullName,
+    this.phone,
+    this.status,
+    this.source,
+    this.interest,
+  });
+
+  final int id;
+  final String fullName;
+  final String? phone;
+  final String? status;
+  final String? source;
+  final String? interest;
+
+  factory _MasterSearchLead.fromJson(Map<String, dynamic> json) {
+    return _MasterSearchLead(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      fullName: json['fullName']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      status: json['status']?.toString(),
+      source: json['source']?.toString(),
+      interest: json['interest']?.toString(),
+    );
+  }
+}
+
+class _MasterSearchInvoice {
+  const _MasterSearchInvoice({
+    required this.id,
+    required this.invoiceNo,
+    required this.total,
+    required this.status,
+    required this.memberName,
+  });
+
+  final int id;
+  final String invoiceNo;
+  final num total;
+  final String status;
+  final String memberName;
+
+  factory _MasterSearchInvoice.fromJson(Map<String, dynamic> json) {
+    num parseNum(dynamic v) {
+      if (v == null) return 0;
+      if (v is num) return v;
+      return num.tryParse(v.toString()) ?? 0;
+    }
+
+    return _MasterSearchInvoice(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      invoiceNo: json['invoiceNo']?.toString() ?? '',
+      total: parseNum(json['total']),
+      status: json['status']?.toString() ?? '',
+      memberName: json['memberName']?.toString() ?? '',
     );
   }
 }

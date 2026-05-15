@@ -505,6 +505,34 @@ class ExpensesScreen extends ConsumerWidget {
                         if (q.isEmpty) return categoryOptions.take(8);
                         return categoryOptions.where((o) => o.toLowerCase().contains(q)).take(8);
                       },
+                      optionsViewBuilder: (context, onSelected, options) {
+                        final theme = Theme.of(context);
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Material(
+                            elevation: 10,
+                            borderRadius: BorderRadius.circular(14),
+                            color: theme.colorScheme.surface,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 260, maxWidth: 460),
+                              child: ListView.builder(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                shrinkWrap: true,
+                                itemCount: options.length,
+                                itemBuilder: (context, index) {
+                                  final option = options.elementAt(index);
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Icon(_expenseCategoryIcon(option), size: 18),
+                                    title: Text(option, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    onTap: () => onSelected(option),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                       onSelected: (v) => categoryAutoCtrl?.text = v,
                       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
                         categoryAutoCtrl ??= textEditingController;
@@ -517,10 +545,20 @@ class ExpensesScreen extends ConsumerWidget {
                     ),
                   ),
                   field(
-                    TextField(
-                      controller: amountCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Amount'),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: amountCtrl,
+                      builder: (context, value, _) {
+                        final active = value.text.trim().isNotEmpty;
+                        return TextField(
+                          controller: amountCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'Amount',
+                            prefixIcon: _CurrencyBadge(active: active),
+                            prefixIconConstraints: const BoxConstraints(minWidth: 54),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   field(
@@ -672,6 +710,34 @@ class ExpensesScreen extends ConsumerWidget {
                         if (q.isEmpty) return categoryOptions.take(8);
                         return categoryOptions.where((o) => o.toLowerCase().contains(q)).take(8);
                       },
+                      optionsViewBuilder: (context, onSelected, options) {
+                        final theme = Theme.of(context);
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Material(
+                            elevation: 10,
+                            borderRadius: BorderRadius.circular(14),
+                            color: theme.colorScheme.surface,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 260, maxWidth: 460),
+                              child: ListView.builder(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                shrinkWrap: true,
+                                itemCount: options.length,
+                                itemBuilder: (context, index) {
+                                  final option = options.elementAt(index);
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Icon(_expenseCategoryIcon(option), size: 18),
+                                    title: Text(option, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    onTap: () => onSelected(option),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                       onSelected: (v) => categoryAutoCtrl?.text = v,
                       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
                         categoryAutoCtrl ??= textEditingController;
@@ -684,10 +750,20 @@ class ExpensesScreen extends ConsumerWidget {
                     ),
                   ),
                   field(
-                    TextField(
-                      controller: amountCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Amount'),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: amountCtrl,
+                      builder: (context, value, _) {
+                        final active = value.text.trim().isNotEmpty;
+                        return TextField(
+                          controller: amountCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'Amount',
+                            prefixIcon: _CurrencyBadge(active: active),
+                            prefixIconConstraints: const BoxConstraints(minWidth: 54),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   field(
@@ -833,6 +909,67 @@ class ExpensesScreen extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed')));
     }
+  }
+}
+
+IconData _expenseCategoryIcon(String raw) {
+  final v = raw.trim().toLowerCase();
+  if (v.contains('rent')) return Icons.apartment;
+  if (v.contains('electric')) return Icons.bolt;
+  if (v.contains('internet') || v.contains('wifi')) return Icons.wifi;
+  if (v.contains('clean')) return Icons.cleaning_services;
+  if (v.contains('supply')) return Icons.inventory_2;
+  if (v.contains('equip') || v.contains('repair')) return Icons.build_circle_outlined;
+  if (v.contains('maint')) return Icons.handyman_outlined;
+  if (v.contains('salary') || v.contains('staff')) return Icons.badge_outlined;
+  if (v.contains('water')) return Icons.water_drop_outlined;
+  if (v.contains('marketing') || v.contains('ads')) return Icons.campaign_outlined;
+  if (v.contains('other') || v.contains('misc')) return Icons.more_horiz;
+  return Icons.category_outlined;
+}
+
+class _CurrencyBadge extends StatelessWidget {
+  const _CurrencyBadge({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final gold = const Color(0xFFD4AF37);
+    final base = theme.colorScheme.onSurfaceVariant;
+    final fg = active ? gold : base;
+    return Center(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 28 : 60),
+          border: Border.all(
+            color: active ? gold.withAlpha(150) : theme.colorScheme.outlineVariant,
+          ),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: gold.withAlpha(48),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
+                ]
+              : const [],
+        ),
+        child: Text(
+          'Rs.',
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: fg,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -13,7 +13,7 @@ import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
 final attendanceControllerProvider =
-    StateNotifierProvider.autoDispose<AttendanceController, AsyncValue<List<AttendanceLog>>>((ref) {
+    StateNotifierProvider.autoDispose<AttendanceController, AsyncValue<_AttendancePage>>((ref) {
   return AttendanceController(ref)..loadToday();
 });
 
@@ -22,22 +22,106 @@ final memberSearchProvider =
   return MemberSearchController(ref);
 });
 
-class AttendanceController extends StateNotifier<AsyncValue<List<AttendanceLog>>> {
+class _AttendancePage {
+  const _AttendancePage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+    required this.range,
+    required this.q,
+    required this.sort,
+  });
+
+  const _AttendancePage.empty()
+      : items = const [],
+        total = 0,
+        limit = 50,
+        offset = 0,
+        range = 'today',
+        q = '',
+        sort = 'newest';
+
+  final List<AttendanceLog> items;
+  final int total;
+  final int limit;
+  final int offset;
+  final String range;
+  final String q;
+  final String sort;
+}
+
+class AttendanceController extends StateNotifier<AsyncValue<_AttendancePage>> {
   AttendanceController(this.ref) : super(const AsyncValue.loading());
 
   final Ref ref;
+  String _range = 'today';
+  String _q = '';
+  String _sort = 'newest';
+  final int _limit = 50;
+  int _offset = 0;
 
   Future<void> loadRange({required String range}) async {
-    state = const AsyncLoading<List<AttendanceLog>>().copyWithPrevious(state);
+    _range = range;
+    _offset = 0;
+    await load();
+  }
+
+  Future<void> setSort(String sort) async {
+    _sort = sort;
+    _offset = 0;
+    await load();
+  }
+
+  Future<void> setQuery(String q) async {
+    _q = q.trim();
+    _offset = 0;
+    await load();
+  }
+
+  Future<void> nextPage() async {
+    final page = state.valueOrNull;
+    final total = page?.total ?? 0;
+    final next = _offset + _limit;
+    if (next >= total) return;
+    _offset = next;
+    await load();
+  }
+
+  Future<void> prevPage() async {
+    _offset = max(0, _offset - _limit);
+    await load();
+  }
+
+  Future<void> load() async {
+    state = const AsyncLoading<_AttendancePage>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
-      final res = await api.getJson('/attendance', token: token, query: {'range': range, 'limit': '200'});
+      final query = <String, String>{
+        'range': _range,
+        'limit': _limit.toString(),
+        'offset': _offset.toString(),
+        'sort': _sort,
+      };
+      if (_q.isNotEmpty) query['q'] = _q;
+      final res = await api.getJson('/attendance', token: token, query: query);
       final items = (res['items'] as List<dynamic>? ?? [])
           .whereType<Map>()
           .map((e) => AttendanceLog.fromJson(e.cast<String, dynamic>()))
           .toList();
-      state = AsyncValue.data(items);
+      final total = (res['total'] as num?)?.toInt() ?? items.length;
+      state = AsyncValue.data(
+        _AttendancePage(
+          items: items,
+          total: total,
+          limit: _limit,
+          offset: _offset,
+          range: _range,
+          q: _q,
+          sort: _sort,
+        ),
+      );
     } on ApiException catch (e, st) {
       state = AsyncValue.error(e.message, st);
     } catch (e, st) {
@@ -54,7 +138,7 @@ class AttendanceController extends StateNotifier<AsyncValue<List<AttendanceLog>>
     final api = ref.read(apiClientProvider);
     final res = await api.postJson('/attendance/checkin', token: token, body: {'memberId': memberId});
     if ((res['allowed'] as bool?) == true) {
-      await loadToday();
+      await load();
     }
     return CheckInResult.fromJson(res);
   }
@@ -64,7 +148,7 @@ class AttendanceController extends StateNotifier<AsyncValue<List<AttendanceLog>>
     final api = ref.read(apiClientProvider);
     final res = await api.postJson('/attendance/checkin', token: token, body: {'query': query.trim()});
     if ((res['allowed'] as bool?) == true) {
-      await loadToday();
+      await load();
     }
     return CheckInResult.fromJson(res);
   }
@@ -226,50 +310,14 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
     super.dispose();
   }
 
-  List<AttendanceLog> _applyLogUiFilters(List<AttendanceLog> items) {
-    final q = _logSearchCtrl.text.trim().toLowerCase();
-    final filtered = items.where((a) {
-      if (q.isEmpty) return true;
-      final hay = '${a.memberCode} ${a.fullName} ${a.checkedInAt} ${a.checkedOutAt ?? ''}'.toLowerCase();
-      return hay.contains(q);
-    }).toList();
-
-    DateTime? parse(String raw) => DateTime.tryParse(raw);
-
-    if (_sort == 'oldest') {
-      filtered.sort((a, b) {
-        final ad = parse(a.checkedInAt);
-        final bd = parse(b.checkedInAt);
-        if (ad == null && bd == null) return a.id.compareTo(b.id);
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        final c = ad.compareTo(bd);
-        if (c != 0) return c;
-        return a.id.compareTo(b.id);
-      });
-    } else {
-      filtered.sort((a, b) {
-        final ad = parse(a.checkedInAt);
-        final bd = parse(b.checkedInAt);
-        if (ad == null && bd == null) return b.id.compareTo(a.id);
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        final c = bd.compareTo(ad);
-        if (c != 0) return c;
-        return b.id.compareTo(a.id);
-      });
-    }
-
-    return filtered;
-  }
-
   @override
   Widget build(BuildContext context) {
     final attendanceAsync = ref.watch(attendanceControllerProvider);
     final theme = Theme.of(context);
     final searchAsync = ref.watch(memberSearchProvider);
-    final itemsPreview = attendanceAsync.valueOrNull ?? const <AttendanceLog>[];
-    final total = itemsPreview.length;
+    final pagePreview = attendanceAsync.valueOrNull ?? const _AttendancePage.empty();
+    final itemsPreview = pagePreview.items;
+    final total = pagePreview.total;
     final unique = itemsPreview.map((e) => e.memberId).toSet().length;
     DateTime? latest;
     for (final a in itemsPreview) {
@@ -499,39 +547,58 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Expanded(child: Text("Today's Attendance", style: theme.textTheme.titleMedium)),
                 IconButton(
                   tooltip: 'Refresh',
-                  onPressed: () => ref.read(attendanceControllerProvider.notifier).loadRange(range: _range),
+                  onPressed: () => ref.read(attendanceControllerProvider.notifier).load(),
                   icon: const Icon(Icons.refresh),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             attendanceAsync.when(
-              data: (items) {
+              data: (page) {
+                final items = page.items;
                 if (items.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    child: Center(
-                      child: Text(
-                        _range == 'today' ? 'No check-ins today' : 'No logs in this range',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
+                  return _EmptyState(
+                    icon: Icons.how_to_reg,
+                    title: 'No data found',
+                    subtitle: _range == 'today' ? 'No check-ins today' : 'No logs in this range',
                   );
                 }
-                final filtered = _applyLogUiFilters(items);
-                if (filtered.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
-                  );
-                }
+                final fromN = page.total == 0 ? 0 : page.offset + 1;
+                final toN = min(page.offset + items.length, page.total);
+                final canPrev = page.offset > 0;
+                final canNext = page.offset + items.length < page.total;
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filtered.length,
+                  itemCount: items.length + 1,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final a = filtered[i];
+                    if (i == 0) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                        child: Row(
+                          children: [
+                            Text(
+                              page.total == 0 ? '—' : 'Showing $fromN–$toN of ${page.total}',
+                              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              tooltip: 'Previous',
+                              onPressed: canPrev ? () => ref.read(attendanceControllerProvider.notifier).prevPage() : null,
+                              icon: const Icon(Icons.chevron_left),
+                            ),
+                            IconButton(
+                              tooltip: 'Next',
+                              onPressed: canNext ? () => ref.read(attendanceControllerProvider.notifier).nextPage() : null,
+                              icon: const Icon(Icons.chevron_right),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    final a = items[i - 1];
                     final checkedIn = DateTime.tryParse(a.checkedInAt);
                     final checkedOut = a.checkedOutAt != null ? DateTime.tryParse(a.checkedOutAt!) : null;
                     final inText = checkedIn == null ? a.checkedInAt : _dt.format(checkedIn);
@@ -574,7 +641,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
-              onPressed: () => ref.read(attendanceControllerProvider.notifier).loadRange(range: _range),
+              onPressed: () => ref.read(attendanceControllerProvider.notifier).load(),
               icon: const Icon(Icons.refresh),
             ),
           ],
@@ -647,7 +714,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                       DropdownMenuItem(value: 'oldest', child: Text('Oldest')),
                     ],
-                    onChanged: (v) => setState(() => _sort = v ?? 'newest'),
+                    onChanged: (v) {
+                      final next = v ?? 'newest';
+                      setState(() => _sort = next);
+                      ref.read(attendanceControllerProvider.notifier).setSort(next);
+                    },
                   ),
                 ),
                 SizedBox(
@@ -658,7 +729,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                       hintText: 'Search member, code',
                       prefixIcon: Icon(Icons.search),
                     ),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) {
+                      _debounce?.cancel();
+                      _debounce = Timer(const Duration(milliseconds: 320), () {
+                        ref.read(attendanceControllerProvider.notifier).setQuery(_logSearchCtrl.text);
+                      });
+                    },
                   ),
                 ),
               ],
@@ -1194,5 +1270,50 @@ class _DashedRRectPainter extends CustomPainter {
         oldDelegate.radius != radius ||
         oldDelegate.dash != dash ||
         oldDelegate.gap != gap;
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.icon, required this.title, required this.subtitle});
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: theme.colorScheme.primaryContainer,
+                    foregroundColor: theme.colorScheme.onPrimaryContainer,
+                    child: Icon(icon, size: 28),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(title, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

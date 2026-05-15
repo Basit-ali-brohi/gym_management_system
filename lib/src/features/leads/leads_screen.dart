@@ -137,6 +137,19 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
   String _sourceFilter = 'all';
   String _interestFilter = 'all';
   String _nextContactFilter = 'all';
+  bool _hydratedFromRoute = false;
+
+  ({int level, int currentXp, int nextXp, int totalXp}) _computeManagerLevel(int totalConverted) {
+    var level = 1;
+    var remaining = totalConverted;
+    var next = 5;
+    while (remaining >= next) {
+      remaining -= next;
+      level += 1;
+      next = 5 + ((level - 1) * 3);
+    }
+    return (level: level, currentXp: remaining, nextXp: next, totalXp: totalConverted);
+  }
 
   @override
   void dispose() {
@@ -412,7 +425,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
         },
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).maybePop(), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.of(context, rootNavigator: true).maybePop(), child: const Text('Cancel')),
         FilledButton(
           onPressed: () async {
             if (!(formKey.currentState?.validate() ?? false)) return;
@@ -441,7 +454,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 notes: notesCtrl.text,
               );
             }
-            if (context.mounted) Navigator.of(context).maybePop();
+            if (context.mounted) Navigator.of(context, rootNavigator: true).maybePop();
           },
           child: Text(isEdit ? 'Save' : 'Add'),
         ),
@@ -706,6 +719,15 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     final theme = Theme.of(context);
     final q = ref.watch(leadsQueryProvider);
     final async = ref.watch(leadsControllerProvider);
+    final qpQ = GoRouterState.of(context).uri.queryParameters['q']?.trim();
+    if (!_hydratedFromRoute && qpQ != null && qpQ.isNotEmpty) {
+      _hydratedFromRoute = true;
+      _searchCtrl.text = qpQ;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _applyQuery(q: qpQ, status: 'all');
+      });
+    }
     final itemsPreview = async.valueOrNull ?? const <Lead>[];
     final sources = <String>{
       for (final l in itemsPreview)
@@ -866,6 +888,74 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                   onSelected: (_) => setState(() => _nextContactFilter = 'next7'),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Builder(
+              builder: (context) {
+                final total = itemsPreview.length;
+                final converted = itemsPreview.where((l) => l.status == 'converted').length;
+                final level = _computeManagerLevel(converted);
+                final progress = level.nextXp <= 0 ? 0.0 : (level.currentXp / level.nextXp).clamp(0.0, 1.0);
+                final nextIn = (level.nextXp - level.currentXp).clamp(0, 999999);
+                final accent = theme.colorScheme.primary;
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: accent.withValues(alpha: 0.12),
+                              child: Icon(Icons.auto_graph, color: accent),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Manager Level ${level.level}',
+                                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                                  ),
+                                  Text(
+                                    'Converted $converted of $total leads • Next level in $nextIn conversions',
+                                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(999),
+                                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+                                border: Border.all(color: theme.colorScheme.outlineVariant),
+                              ),
+                              child: Text(
+                                'XP ${level.currentXp}/${level.nextXp}',
+                                style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 10,
+                            backgroundColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                            valueColor: AlwaysStoppedAnimation<Color>(accent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 14),
             async.when(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'dart:math';
 
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
@@ -18,11 +19,14 @@ final paymentsQueryProvider = StateProvider.autoDispose<_PaymentsQuery>((ref) {
     method: '',
     from: DateFormat('yyyy-MM-dd').format(from),
     to: DateFormat('yyyy-MM-dd').format(today),
+    limit: 50,
+    offset: 0,
+    sort: 'newest',
   );
 });
 
 final paymentsControllerProvider =
-    StateNotifierProvider.autoDispose<_PaymentsController, AsyncValue<List<Payment>>>((ref) {
+    StateNotifierProvider.autoDispose<_PaymentsController, AsyncValue<_PaymentsPage>>((ref) {
   return _PaymentsController(ref)..load();
 });
 
@@ -39,15 +43,25 @@ class _PaymentsQuery {
     required this.method,
     required this.from,
     required this.to,
+    required this.limit,
+    required this.offset,
+    required this.sort,
   });
 
   final String q;
   final String method;
   final String from;
   final String to;
+  final int limit;
+  final int offset;
+  final String sort;
 
   Map<String, String> toQuery() {
-    final map = <String, String>{'limit': '200'};
+    final map = <String, String>{
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+      'sort': sort,
+    };
     if (q.trim().isNotEmpty) map['q'] = q.trim();
     if (method.trim().isNotEmpty) map['method'] = method.trim();
     if (from.trim().isNotEmpty) map['from'] = from.trim();
@@ -60,23 +74,44 @@ class _PaymentsQuery {
     String? method,
     String? from,
     String? to,
+    int? limit,
+    int? offset,
+    String? sort,
   }) {
     return _PaymentsQuery(
       q: q ?? this.q,
       method: method ?? this.method,
       from: from ?? this.from,
       to: to ?? this.to,
+      limit: limit ?? this.limit,
+      offset: offset ?? this.offset,
+      sort: sort ?? this.sort,
     );
   }
 }
 
-class _PaymentsController extends StateNotifier<AsyncValue<List<Payment>>> {
+class _PaymentsPage {
+  const _PaymentsPage({required this.items, required this.total, required this.limit, required this.offset});
+
+  const _PaymentsPage.empty()
+      : items = const [],
+        total = 0,
+        limit = 50,
+        offset = 0;
+
+  final List<Payment> items;
+  final int total;
+  final int limit;
+  final int offset;
+}
+
+class _PaymentsController extends StateNotifier<AsyncValue<_PaymentsPage>> {
   _PaymentsController(this.ref) : super(const AsyncValue.loading());
 
   final Ref ref;
 
   Future<void> load() async {
-    state = const AsyncLoading<List<Payment>>().copyWithPrevious(state);
+    state = const AsyncLoading<_PaymentsPage>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -87,12 +122,30 @@ class _PaymentsController extends StateNotifier<AsyncValue<List<Payment>>> {
           .whereType<Map>()
           .map((e) => Payment.fromJson(e.cast<String, dynamic>()))
           .toList();
-      state = AsyncValue.data(items);
+      final total = (res['total'] as num?)?.toInt() ?? items.length;
+      state = AsyncValue.data(_PaymentsPage(items: items, total: total, limit: q.limit, offset: q.offset));
     } on ApiException catch (e, st) {
       state = AsyncValue.error(e.message, st);
     } catch (e, st) {
       state = AsyncValue.error('payments_load_failed', st);
     }
+  }
+
+  Future<void> nextPage() async {
+    final page = state.valueOrNull;
+    if (page == null) return;
+    final next = page.offset + page.limit;
+    if (next >= page.total) return;
+    final q = ref.read(paymentsQueryProvider);
+    ref.read(paymentsQueryProvider.notifier).state = q.copyWith(offset: next);
+    await load();
+  }
+
+  Future<void> prevPage() async {
+    final q = ref.read(paymentsQueryProvider);
+    final prev = max(0, q.offset - q.limit);
+    ref.read(paymentsQueryProvider.notifier).state = q.copyWith(offset: prev);
+    await load();
   }
 
   Future<void> updatePayment({
@@ -209,7 +262,13 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
   }
 
   void _applyQuery(_PaymentsQuery query, {String? q, String? method, String? from, String? to, bool load = false}) {
-    ref.read(paymentsQueryProvider.notifier).state = query.copyWith(q: q, method: method, from: from, to: to);
+    ref.read(paymentsQueryProvider.notifier).state = query.copyWith(
+      q: q,
+      method: method,
+      from: from,
+      to: to,
+      offset: 0,
+    );
     if (load) {
       ref.read(paymentsControllerProvider.notifier).load();
     }
@@ -223,6 +282,13 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
     final canDelete = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
     final query = ref.watch(paymentsQueryProvider);
     final itemsAsync = ref.watch(paymentsControllerProvider);
+    final pagePreview = itemsAsync.valueOrNull ?? const _PaymentsPage.empty();
+    final total = pagePreview.total;
+    final loaded = pagePreview.items.length;
+    final fromN = total == 0 ? 0 : pagePreview.offset + 1;
+    final toN = total == 0 ? 0 : min(pagePreview.offset + loaded, total);
+    final canPrev = pagePreview.offset > 0;
+    final canNext = pagePreview.offset + loaded < total;
     final summaryAsync = ref.watch(paymentsSummaryProvider);
 
     if (_searchCtrl.text != query.q && !_searchFocus.hasFocus) {
@@ -423,6 +489,20 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                     onPressed: () => ref.read(paymentsControllerProvider.notifier).load(),
                     child: const Text('Apply'),
                   ),
+                  Text(
+                    total == 0 ? '—' : 'Showing ${number.format(fromN)}–${number.format(toN)} of ${number.format(total)}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  IconButton(
+                    tooltip: 'Previous',
+                    onPressed: canPrev ? () => ref.read(paymentsControllerProvider.notifier).prevPage() : null,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  IconButton(
+                    tooltip: 'Next',
+                    onPressed: canNext ? () => ref.read(paymentsControllerProvider.notifier).nextPage() : null,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
                   TextButton(
                     onPressed: () {
                       final today = DateTime.now();
@@ -432,6 +512,9 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         method: '',
                         from: DateFormat('yyyy-MM-dd').format(from),
                         to: DateFormat('yyyy-MM-dd').format(today),
+                        limit: 50,
+                        offset: 0,
+                        sort: 'newest',
                       );
                       ref.read(paymentsQueryProvider.notifier).state = next;
                       _debounce?.cancel();
@@ -468,7 +551,8 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
           ),
         ),
         itemsAsync.when(
-          data: (items) {
+          data: (page) {
+            final items = page.items;
             if (items.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 24),

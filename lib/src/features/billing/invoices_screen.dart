@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
@@ -10,7 +15,7 @@ import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
 final invoicesControllerProvider =
-    StateNotifierProvider.autoDispose<InvoicesController, AsyncValue<List<Invoice>>>((ref) {
+    StateNotifierProvider.autoDispose<InvoicesController, AsyncValue<_InvoicesPage>>((ref) {
   return InvoicesController(ref)..load();
 });
 
@@ -30,22 +35,96 @@ final invoiceMemberSearchProvider =
   return _InvoiceMemberSearch(ref);
 });
 
-class InvoicesController extends StateNotifier<AsyncValue<List<Invoice>>> {
+class _InvoicesPage {
+  const _InvoicesPage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+    required this.q,
+    required this.status,
+    required this.sort,
+  });
+
+  const _InvoicesPage.empty()
+      : items = const [],
+        total = 0,
+        limit = 50,
+        offset = 0,
+        q = '',
+        status = 'all',
+        sort = 'newest';
+
+  final List<Invoice> items;
+  final int total;
+  final int limit;
+  final int offset;
+  final String q;
+  final String status;
+  final String sort;
+}
+
+class InvoicesController extends StateNotifier<AsyncValue<_InvoicesPage>> {
   InvoicesController(this.ref) : super(const AsyncValue.loading());
 
   final Ref ref;
+  String _q = '';
+  String _status = 'all';
+  String _sort = 'newest';
+  final int _limit = 50;
+  int _offset = 0;
+
+  Future<void> setFilters({String? q, String? status, String? sort, bool resetOffset = true}) async {
+    if (q != null) _q = q.trim();
+    if (status != null) _status = status.trim();
+    if (sort != null) _sort = sort.trim();
+    if (resetOffset) _offset = 0;
+    await load();
+  }
+
+  Future<void> nextPage() async {
+    final page = state.valueOrNull;
+    final total = page?.total ?? 0;
+    final next = _offset + _limit;
+    if (next >= total) return;
+    _offset = next;
+    await load();
+  }
+
+  Future<void> prevPage() async {
+    _offset = max(0, _offset - _limit);
+    await load();
+  }
 
   Future<void> load() async {
-    state = const AsyncLoading<List<Invoice>>().copyWithPrevious(state);
+    state = const AsyncLoading<_InvoicesPage>().copyWithPrevious(state);
     try {
       final token = ref.read(authControllerProvider).token;
       final api = ref.read(apiClientProvider);
-      final res = await api.getJson('/invoices', token: token);
+      final query = <String, String>{
+        'limit': _limit.toString(),
+        'offset': _offset.toString(),
+        'sort': _sort,
+      };
+      if (_q.isNotEmpty) query['q'] = _q;
+      if (_status.isNotEmpty) query['status'] = _status;
+      final res = await api.getJson('/invoices', token: token, query: query);
       final items = (res['items'] as List<dynamic>? ?? [])
           .whereType<Map>()
           .map((e) => Invoice.fromJson(e.cast<String, dynamic>()))
           .toList();
-      state = AsyncValue.data(items);
+      final total = (res['total'] as num?)?.toInt() ?? items.length;
+      state = AsyncValue.data(
+        _InvoicesPage(
+          items: items,
+          total: total,
+          limit: _limit,
+          offset: _offset,
+          q: _q,
+          status: _status,
+          sort: _sort,
+        ),
+      );
     } on ApiException catch (e, st) {
       state = AsyncValue.error(e.message, st);
     } catch (e, st) {
@@ -110,12 +189,17 @@ class InvoicesScreen extends ConsumerStatefulWidget {
     final dt = DateFormat('yyyy-MM-dd HH:mm');
     final roles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
     final canDelete = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
-    final itemsPreview = invoicesAsync.valueOrNull ?? const <Invoice>[];
-    final total = itemsPreview.length;
+    final pagePreview = invoicesAsync.valueOrNull ?? const _InvoicesPage.empty();
+    final itemsPreview = pagePreview.items;
+    final total = pagePreview.total;
+    final loaded = itemsPreview.length;
     final paid = itemsPreview.where((i) => i.status == 'paid').length;
     final unpaid = itemsPreview.where((i) => i.status == 'unpaid').length;
     final voided = itemsPreview.where((i) => i.status == 'void').length;
-    final filteredPreview = state._applyInvoiceUiFilters(itemsPreview);
+    final fromN = total == 0 ? 0 : pagePreview.offset + 1;
+    final toN = total == 0 ? 0 : min(pagePreview.offset + loaded, total);
+    final canPrev = pagePreview.offset > 0;
+    final canNext = pagePreview.offset + loaded < total;
 
     Widget metricCard({
       required String title,
@@ -195,25 +279,25 @@ class InvoicesScreen extends ConsumerStatefulWidget {
             metricCard(
               title: 'Total invoices',
               value: '$total',
-              subtitle: 'All-time',
+              subtitle: 'Filtered total',
               icon: Icons.receipt_long,
             ),
             metricCard(
               title: 'Paid',
               value: '$paid',
-              subtitle: 'Completed',
+              subtitle: 'This page',
               icon: Icons.verified_outlined,
             ),
             metricCard(
               title: 'Unpaid',
               value: '$unpaid',
-              subtitle: 'Pending',
+              subtitle: 'This page',
               icon: Icons.pending_actions_outlined,
             ),
             metricCard(
               title: 'Voided',
               value: '$voided',
-              subtitle: 'Cancelled',
+              subtitle: 'This page',
               icon: Icons.block_outlined,
             ),
           ],
@@ -264,12 +348,24 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                       hintText: 'Search invoice, member, code',
                       prefixIcon: Icon(Icons.search),
                     ),
-                    onChanged: (_) => state._touchFilters(),
+                    onChanged: (_) => state._scheduleApplyFilters(),
                   ),
                 ),
                 Text(
-                  'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
+                  total == 0
+                      ? '—'
+                      : 'Showing ${number.format(fromN)}–${number.format(toN)} of ${number.format(total)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                IconButton(
+                  tooltip: 'Previous',
+                  onPressed: canPrev ? () => ref.read(invoicesControllerProvider.notifier).prevPage() : null,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                IconButton(
+                  tooltip: 'Next',
+                  onPressed: canNext ? () => ref.read(invoicesControllerProvider.notifier).nextPage() : null,
+                  icon: const Icon(Icons.chevron_right),
                 ),
                 OutlinedButton(
                   onPressed: state._clearFilters,
@@ -281,11 +377,10 @@ class InvoicesScreen extends ConsumerStatefulWidget {
         ),
         const SizedBox(height: 12),
         invoicesAsync.when(
-          data: (items) {
-            if (items.isEmpty) return const _EmptyState();
-
-            final filtered = state._applyInvoiceUiFilters(items);
-            if (filtered.isEmpty) {
+          data: (page) {
+            if (page.total == 0) return const _EmptyState();
+            final items = page.items;
+            if (items.isEmpty) {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
@@ -313,7 +408,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                             DataColumn(label: Text('Action')),
                           ],
                           rows: [
-                            for (final inv in filtered)
+                            for (final inv in items)
                               DataRow(
                                 cells: [
                                   DataCell(Text(inv.invoiceNo)),
@@ -325,36 +420,36 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        IconButton(
+                                        _CompactIconButton(
                                           tooltip: 'View',
                                           onPressed: () => _openInvoiceView(context, ref, inv.id),
-                                          icon: const Icon(Icons.visibility),
+                                          icon: Icons.visibility,
                                         ),
-                                        IconButton(
+                                        _CompactIconButton(
                                           tooltip: 'Edit',
                                           onPressed: inv.status == 'paid'
                                               ? null
                                               : () => _openInvoiceEdit(context, ref, inv.id),
-                                          icon: const Icon(Icons.edit_outlined),
+                                          icon: Icons.edit_outlined,
                                         ),
-                                        IconButton(
+                                        _CompactIconButton(
                                           tooltip: 'PDF',
                                           onPressed: () => _openInvoicePdfActions(context, ref, inv),
-                                          icon: const Icon(Icons.picture_as_pdf_outlined),
+                                          icon: Icons.picture_as_pdf_outlined,
                                         ),
                                         if (canDelete)
-                                          IconButton(
+                                          _CompactIconButton(
                                             tooltip: 'Void',
                                             onPressed: inv.status == 'paid' ? null : () => _confirmVoid(context, ref, inv),
-                                            icon: const Icon(Icons.delete_outline),
+                                            icon: Icons.delete_outline,
                                           ),
                                         if (inv.status == 'unpaid') ...[
-                                          const SizedBox(width: 8),
+                                          const SizedBox(width: 6),
                                           FilledButton(
                                             style: FilledButton.styleFrom(
                                               visualDensity: VisualDensity.compact,
-                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                              minimumSize: const Size(0, 36),
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              minimumSize: const Size(0, 32),
                                             ),
                                             onPressed: () => ref
                                                 .read(invoicesControllerProvider.notifier)
@@ -375,10 +470,10 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filtered.length,
+                  itemCount: items.length,
                   separatorBuilder: (context, index) => const Divider(height: 1),
                   itemBuilder: (context, i) {
-                    final inv = filtered[i];
+                    final inv = items[i];
                     return ListTile(
                         leading: const Icon(Icons.receipt_long),
                         title: Text('${inv.invoiceNo} • ${inv.memberName}'),
@@ -388,30 +483,35 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                           children: [
                             _StatusChip(status: inv.status),
                             const SizedBox(width: 6),
-                            IconButton(
+                            _CompactIconButton(
                               tooltip: 'View',
                               onPressed: () => _openInvoiceView(context, ref, inv.id),
-                              icon: const Icon(Icons.visibility),
+                              icon: Icons.visibility,
                             ),
-                            IconButton(
+                            _CompactIconButton(
                               tooltip: 'Edit',
                               onPressed: inv.status == 'paid' ? null : () => _openInvoiceEdit(context, ref, inv.id),
-                              icon: const Icon(Icons.edit_outlined),
+                              icon: Icons.edit_outlined,
                             ),
-                            IconButton(
+                            _CompactIconButton(
                               tooltip: 'PDF',
                               onPressed: () => _openInvoicePdfActions(context, ref, inv),
-                              icon: const Icon(Icons.picture_as_pdf_outlined),
+                              icon: Icons.picture_as_pdf_outlined,
                             ),
                             if (canDelete)
-                              IconButton(
+                              _CompactIconButton(
                                 tooltip: 'Void',
                                 onPressed: inv.status == 'paid' ? null : () => _confirmVoid(context, ref, inv),
-                                icon: const Icon(Icons.delete_outline),
+                                icon: Icons.delete_outline,
                               ),
                             if (inv.status == 'unpaid') ...[
                               const SizedBox(width: 6),
                               FilledButton(
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  minimumSize: const Size(0, 32),
+                                ),
                                 onPressed: () => ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
                                 child: const Text('Paid'),
                               ),
@@ -930,70 +1030,62 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 
 class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+  bool _hydratedFromRoute = false;
   String _statusFilter = 'all';
   String _sort = 'newest';
 
-  void _setStatusFilter(String v) => setState(() => _statusFilter = v);
-  void _setSort(String v) => setState(() => _sort = v);
-  void _touchFilters() => setState(() {});
+  void _setStatusFilter(String v) {
+    setState(() => _statusFilter = v);
+    ref.read(invoicesControllerProvider.notifier).setFilters(status: _statusFilter);
+  }
+
+  void _setSort(String v) {
+    setState(() => _sort = v);
+    ref.read(invoicesControllerProvider.notifier).setFilters(sort: _sort);
+  }
+
+  void _scheduleApplyFilters() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 320), () {
+      ref.read(invoicesControllerProvider.notifier).setFilters(q: _searchCtrl.text, resetOffset: true);
+    });
+  }
+
   void _clearFilters() {
     _searchCtrl.clear();
     setState(() {
       _statusFilter = 'all';
       _sort = 'newest';
     });
+    _debounce?.cancel();
+    ref.read(invoicesControllerProvider.notifier).setFilters(q: '', status: 'all', sort: 'newest', resetOffset: true);
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  List<Invoice> _applyInvoiceUiFilters(List<Invoice> items) {
-    final q = _searchCtrl.text.trim().toLowerCase();
-    final filtered = items.where((inv) {
-      if (_statusFilter != 'all' && inv.status != _statusFilter) return false;
-      if (q.isNotEmpty) {
-        final hay = '${inv.invoiceNo} ${inv.memberName} ${inv.status} ${inv.total} ${inv.createdAt}'.toLowerCase();
-        if (!hay.contains(q)) return false;
-      }
-      return true;
-    }).toList();
-
-    DateTime? parse(String raw) => DateTime.tryParse(raw);
-
-    if (_sort == 'oldest') {
-      filtered.sort((a, b) {
-        final ad = parse(a.createdAt);
-        final bd = parse(b.createdAt);
-        if (ad == null && bd == null) return a.id.compareTo(b.id);
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        final c = ad.compareTo(bd);
-        if (c != 0) return c;
-        return a.id.compareTo(b.id);
-      });
-    } else if (_sort == 'total_desc') {
-      filtered.sort((a, b) => b.total.compareTo(a.total));
-    } else {
-      filtered.sort((a, b) {
-        final ad = parse(a.createdAt);
-        final bd = parse(b.createdAt);
-        if (ad == null && bd == null) return b.id.compareTo(a.id);
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        final c = bd.compareTo(ad);
-        if (c != 0) return c;
-        return b.id.compareTo(a.id);
-      });
-    }
-
-    return filtered;
-  }
-
   @override
   Widget build(BuildContext context) {
+    if (!_hydratedFromRoute) {
+      _hydratedFromRoute = true;
+      final q = GoRouterState.of(context).uri.queryParameters['q']?.trim();
+      if (q != null && q.isNotEmpty) {
+        _searchCtrl.text = q;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ref.read(invoicesControllerProvider.notifier).setFilters(
+                q: _searchCtrl.text,
+                status: _statusFilter,
+                sort: _sort,
+                resetOffset: true,
+              );
+        });
+      }
+    }
     return widget._build(context, ref, this);
   }
 }
@@ -1042,22 +1134,79 @@ class _StatusChip extends StatelessWidget {
     final theme = Theme.of(context);
     final isPaid = status == 'paid';
     final isUnpaid = status == 'unpaid';
-    final bg = isPaid
-        ? theme.colorScheme.primaryContainer
+    final accent = isPaid
+        ? const Color(0xFF36D27E)
         : isUnpaid
-            ? theme.colorScheme.tertiaryContainer
-            : theme.colorScheme.surfaceContainerHighest;
-    final fg = isPaid
-        ? theme.colorScheme.onPrimaryContainer
-        : isUnpaid
-            ? theme.colorScheme.onTertiaryContainer
-            : theme.colorScheme.onSurfaceVariant;
-    return Chip(
-      label: Text(status),
-      backgroundColor: bg,
-      labelStyle: theme.textTheme.labelMedium?.copyWith(color: fg),
+            ? const Color(0xFFFFC857)
+            : theme.colorScheme.primary;
+    final label = (status.isEmpty ? '—' : status).toUpperCase();
+
+    final bgA = theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 72 : 140);
+    final bgB = theme.colorScheme.surfaceContainerHighest.withAlpha(theme.brightness == Brightness.dark ? 52 : 120);
+    final border = accent.withAlpha(theme.brightness == Brightness.dark ? 150 : 130);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                bgA,
+                bgB,
+              ],
+            ),
+            border: Border.all(color: border),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withAlpha(isPaid ? 46 : isUnpaid ? 44 : 24),
+                blurRadius: 16,
+                spreadRadius: 0,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactIconButton extends StatelessWidget {
+  const _CompactIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+      color: theme.colorScheme.onSurfaceVariant,
     );
   }
 }

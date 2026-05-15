@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../core/providers.dart';
@@ -16,6 +19,118 @@ final dashboardSummaryProvider = FutureProvider.autoDispose<DashboardSummary>((r
   final api = ref.read(apiClientProvider);
   final res = await api.getJson('/dashboard/summary', token: token);
   return DashboardSummary.fromJson(res);
+});
+
+class DashboardActivityItem {
+  const DashboardActivityItem({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.subtitle,
+    required this.at,
+    required this.amount,
+    required this.invoiceNo,
+  });
+
+  final String id;
+  final String type;
+  final String title;
+  final String subtitle;
+  final String at;
+  final num? amount;
+  final String? invoiceNo;
+
+  factory DashboardActivityItem.fromJson(Map<String, dynamic> json) {
+    num? parseNum(dynamic v) {
+      if (v == null) return null;
+      if (v is num) return v;
+      return num.tryParse(v.toString());
+    }
+
+    return DashboardActivityItem(
+      id: json['id']?.toString() ?? '',
+      type: json['type']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      subtitle: json['subtitle']?.toString() ?? '',
+      at: json['at']?.toString() ?? '',
+      amount: parseNum(json['amount']),
+      invoiceNo: json['invoiceNo']?.toString(),
+    );
+  }
+}
+
+final dashboardActivityProvider = FutureProvider.autoDispose<List<DashboardActivityItem>>((ref) async {
+  final token = ref.read(authControllerProvider).token;
+  if (token == null || token.isEmpty) throw ApiException('unauthorized');
+  final api = ref.read(apiClientProvider);
+  final res = await api.getJson('/dashboard/activity', token: token, query: const {'limit': '20'});
+  return (res['items'] as List<dynamic>? ?? [])
+      .whereType<Map>()
+      .map((e) => DashboardActivityItem.fromJson(e.cast<String, dynamic>()))
+      .where((i) => i.id.trim().isNotEmpty)
+      .toList();
+});
+
+class AtRiskMember {
+  const AtRiskMember({
+    required this.memberId,
+    required this.fullName,
+    required this.memberCode,
+    required this.phone,
+    required this.lastCheckinAt,
+  });
+
+  final int memberId;
+  final String fullName;
+  final String memberCode;
+  final String? phone;
+  final String? lastCheckinAt;
+
+  factory AtRiskMember.fromJson(Map<String, dynamic> json) {
+    return AtRiskMember(
+      memberId: (json['memberId'] as num?)?.toInt() ?? 0,
+      fullName: json['fullName']?.toString() ?? '',
+      memberCode: json['memberCode']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      lastCheckinAt: json['lastCheckinAt']?.toString(),
+    );
+  }
+}
+
+class AtRiskMembersPayload {
+  const AtRiskMembersPayload({
+    required this.days,
+    required this.template,
+    required this.gymName,
+    required this.items,
+  });
+
+  final int days;
+  final String template;
+  final String? gymName;
+  final List<AtRiskMember> items;
+
+  factory AtRiskMembersPayload.fromJson(Map<String, dynamic> json) {
+    return AtRiskMembersPayload(
+      days: (json['days'] as num?)?.toInt() ?? 3,
+      template: json['template']?.toString() ??
+          'Assalam o Alaikum {name}, aap {days} din se gym nahi aaye. Please visit soon. {gym}',
+      gymName: json['gymName']?.toString(),
+      items: (json['items'] as List<dynamic>? ?? [])
+          .whereType<Map>()
+          .map((e) => AtRiskMember.fromJson(e.cast<String, dynamic>()))
+          .where((m) => m.memberId > 0)
+          .toList(),
+    );
+  }
+}
+
+final atRiskMembersProvider = FutureProvider.autoDispose<AtRiskMembersPayload>((ref) async {
+  final token = ref.read(authControllerProvider).token;
+  if (token == null || token.isEmpty) throw ApiException('unauthorized');
+  final api = ref.read(apiClientProvider);
+  final res = await api.getJson('/dashboard/at-risk-members', token: token, query: const {'limit': '10'});
+  return AtRiskMembersPayload.fromJson(res);
 });
 
 class DashboardSummary {
@@ -157,9 +272,11 @@ class _DashboardScaffold extends ConsumerStatefulWidget {
 
 class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
   bool _exportingPdf = false;
+  bool _activityCollapsed = false;
 
   @override
   Widget build(BuildContext context) {
+    final showFloatingFeed = MediaQuery.sizeOf(context).width >= 1150;
     final rawRoles = ref.watch(authControllerProvider).user?.roles ?? const <String>[];
     final roles = rawRoles
         .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
@@ -167,179 +284,236 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
         .toSet();
     final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              _HeroBanner(
-                tenantSlug: widget.tenantSlug,
-                onRefresh: widget.onRefresh,
-                onExportPdf: () => _openDashboardPdfActions(context),
-                canSeeRevenue: canSeeRevenue,
-              ),
-              const SizedBox(height: 16),
-              widget.summaryAsync.when(
-                data: (s) {
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final cardWidth = constraints.maxWidth >= 1200 ? 280.0 : 320.0;
-                      final frozen = s.frozenMembers;
-                      return Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          if (canSeeRevenue)
-                            _MetricCard(
-                              width: cardWidth,
-                              title: 'Total Revenue',
-                              value: widget.number.format(s.revenueTotal),
-                              subtitle: 'All-time paid',
-                              icon: Icons.payments,
-                              onTap: () => context.go('/invoices'),
-                            ),
-                          if (canSeeRevenue)
-                            _MetricCard(
-                              width: cardWidth,
-                              title: 'Revenue (30d)',
-                              value: widget.number.format(s.revenueLast30Days),
-                              subtitle: 'Last 30 days',
-                              icon: Icons.show_chart,
-                              onTap: () => context.go('/invoices'),
-                            ),
-                          _MetricCard(
-                            width: cardWidth,
-                            title: 'Active Members',
-                            value: widget.number.format(s.membershipActiveMembers),
-                            subtitle: 'Membership active',
-                            icon: Icons.people,
-                            onTap: () => context.go('/members'),
-                          ),
-                          _MetricCard(
-                            width: cardWidth,
-                            title: 'Frozen Members',
-                            value: frozen == null ? '—' : widget.number.format(frozen),
-                            subtitle: frozen == null ? 'Restart backend to enable' : 'Access blocked',
-                            icon: Icons.ac_unit_outlined,
-                            onTap: () => context.go('/members'),
-                          ),
-                          if (canSeeRevenue)
-                            _MetricCard(
-                              width: cardWidth,
-                              title: 'Unpaid Dues',
-                              value: widget.number.format(s.unpaidAmount),
-                              subtitle: '${widget.number.format(s.unpaidInvoices)} invoices',
-                              icon: Icons.receipt_long,
-                              onTap: () => context.go('/invoices'),
-                            ),
-                          _MetricCard(
-                            width: cardWidth,
-                            title: "Today's Check-ins",
-                            value: widget.number.format(s.todayCheckins),
-                            subtitle: 'Attendance today',
-                            icon: Icons.how_to_reg,
-                            onTap: () => context.go('/attendance'),
-                          ),
-                          _MetricCard(
-                            width: cardWidth,
-                            title: 'Plans',
-                            value: widget.number.format(s.plansTotal),
-                            subtitle: 'Membership plans',
-                            icon: Icons.card_membership,
-                            onTap: () => context.go('/plans'),
-                          ),
-                        ],
-                      );
-                    },
+    Widget mainList({required EdgeInsets padding, required bool includeInlineActivity}) {
+      return ListView(
+        padding: padding,
+        children: [
+          _HeroBanner(
+            tenantSlug: widget.tenantSlug,
+            onRefresh: widget.onRefresh,
+            onExportPdf: () => _openDashboardPdfActions(context),
+            canSeeRevenue: canSeeRevenue,
+          ),
+          const SizedBox(height: 16),
+          widget.summaryAsync.when(
+            data: (s) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final cardWidth = constraints.maxWidth >= 1200 ? 280.0 : 320.0;
+                  final frozen = s.frozenMembers;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      if (canSeeRevenue)
+                        _MetricCard(
+                          width: cardWidth,
+                          title: 'Total Revenue',
+                          value: widget.number.format(s.revenueTotal),
+                          subtitle: 'All-time paid',
+                          icon: Icons.payments,
+                          onTap: () => context.go('/invoices'),
+                        ),
+                      if (canSeeRevenue)
+                        _MetricCard(
+                          width: cardWidth,
+                          title: 'Revenue (30d)',
+                          value: widget.number.format(s.revenueLast30Days),
+                          subtitle: 'Last 30 days',
+                          icon: Icons.show_chart,
+                          onTap: () => context.go('/invoices'),
+                        ),
+                      _MetricCard(
+                        width: cardWidth,
+                        title: 'Active Members',
+                        value: widget.number.format(s.membershipActiveMembers),
+                        subtitle: 'Membership active',
+                        icon: Icons.people,
+                        onTap: () => context.go('/members'),
+                      ),
+                      _MetricCard(
+                        width: cardWidth,
+                        title: 'Frozen Members',
+                        value: frozen == null ? '—' : widget.number.format(frozen),
+                        subtitle: frozen == null ? 'Restart backend to enable' : 'Access blocked',
+                        icon: Icons.ac_unit_outlined,
+                        onTap: () => context.go('/members'),
+                      ),
+                      if (canSeeRevenue)
+                        _MetricCard(
+                          width: cardWidth,
+                          title: 'Unpaid Dues',
+                          value: widget.number.format(s.unpaidAmount),
+                          subtitle: '${widget.number.format(s.unpaidInvoices)} invoices',
+                          icon: Icons.receipt_long,
+                          onTap: () => context.go('/invoices'),
+                        ),
+                      _MetricCard(
+                        width: cardWidth,
+                        title: "Today's Check-ins",
+                        value: widget.number.format(s.todayCheckins),
+                        subtitle: 'Attendance today',
+                        icon: Icons.how_to_reg,
+                        onTap: () => context.go('/attendance'),
+                      ),
+                      _MetricCard(
+                        width: cardWidth,
+                        title: 'Plans',
+                        value: widget.number.format(s.plansTotal),
+                        subtitle: 'Membership plans',
+                        icon: Icons.card_membership,
+                        onTap: () => context.go('/plans'),
+                      ),
+                    ],
                   );
                 },
-                error: (e, stackTrace) {
-                  String message = e.toString();
-                  if (e is ApiException) {
-                    if (e.statusCode == 404) {
-                      message = 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
-                    } else if (e.statusCode == 401) {
-                      message = 'Session expired. Dobara login karo.';
-                    } else {
-                      message = e.message;
-                    }
+              );
+            },
+            error: (e, stackTrace) {
+              String message = e.toString();
+              if (e is ApiException) {
+                if (e.statusCode == 404) {
+                  message = 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+                } else if (e.statusCode == 401) {
+                  message = 'Session expired. Dobara login karo.';
+                } else {
+                  message = e.message;
+                }
+              }
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(message)),
+                      const SizedBox(width: 10),
+                      FilledButton(
+                        onPressed: () => ref.invalidate(dashboardSummaryProvider),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ),
+          const SizedBox(height: 18),
+          _QuickActionsSection(canSeeRevenue: canSeeRevenue),
+          const SizedBox(height: 18),
+          const _AtRiskMembersCard(),
+          if (includeInlineActivity) ...[
+            const SizedBox(height: 18),
+            const _RecentActivityFeedCard(),
+          ],
+          const SizedBox(height: 18),
+          widget.summaryAsync.when(
+            data: (s) {
+              final active = s.membershipActiveMembers;
+              final expired = s.membershipExpiredMembers;
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 1100;
+                  if (!canSeeRevenue) {
+                    return _ActiveInactiveCard(active: active, expired: expired);
                   }
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.warning_amber),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(message)),
-                          const SizedBox(width: 10),
-                          FilledButton(
-                            onPressed: () => ref.invalidate(dashboardSummaryProvider),
-                            child: const Text('Retry'),
-                          ),
-                        ],
+                  if (wide) {
+                    final half = (constraints.maxWidth - 12) / 2;
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: half, child: _Revenue7dCard(points: s.revenue7d)),
+                        const SizedBox(width: 12),
+                        SizedBox(width: half, child: _ActiveInactiveCard(active: active, expired: expired)),
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      _Revenue7dCard(points: s.revenue7d),
+                      const SizedBox(height: 12),
+                      _ActiveInactiveCard(active: active, expired: expired),
+                    ],
+                  );
+                },
+              );
+            },
+            error: (e, stackTrace) => const SizedBox.shrink(),
+            loading: () => const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 18),
+          widget.summaryAsync.when(
+            data: (s) => _InsightsCard(summary: s, canSeeRevenue: canSeeRevenue, number: widget.number),
+            error: (e, _) => const SizedBox.shrink(),
+            loading: () => const SizedBox.shrink(),
+          ),
+          widget.summaryAsync.when(
+            data: (s) => _ExpiringMembersCard(
+              members: s.expiringMembers,
+              onOpenMembers: () => context.go('/members'),
+            ),
+            error: (e, _) => const SizedBox.shrink(),
+            loading: () => const SizedBox.shrink(),
+          ),
+        ],
+      );
+    }
+
+    if (!showFloatingFeed) {
+      return mainList(padding: const EdgeInsets.all(20), includeInlineActivity: true);
+    }
+
+    final theme = Theme.of(context);
+    final gold = theme.colorScheme.primary;
+    final expandedW = 390.0;
+    final tabW = 44.0;
+
+    return Row(
+      children: [
+        Expanded(child: mainList(padding: const EdgeInsets.all(20), includeInlineActivity: false)),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeInOut,
+          width: _activityCollapsed ? tabW : expandedW,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(0, 20, _activityCollapsed ? 0 : 20, 20),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeInOut,
+              switchOutCurve: Curves.easeInOut,
+              transitionBuilder: (child, animation) {
+                final curved = CurvedAnimation(parent: animation, curve: Curves.easeInOut);
+                return FadeTransition(
+                  opacity: curved,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.10, 0),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: child,
+                  ),
+                );
+              },
+              child: _activityCollapsed
+                  ? _ActivityVerticalTab(
+                      key: const ValueKey('tab'),
+                      onTap: () => setState(() => _activityCollapsed = false),
+                      glow: gold,
+                    )
+                  : _RecentActivityFeedDocked(
+                      key: const ValueKey('panel'),
+                      headerTrailing: IconButton(
+                        tooltip: 'Hide',
+                        onPressed: () => setState(() => _activityCollapsed = true),
+                        icon: const Icon(Icons.keyboard_double_arrow_right),
                       ),
                     ),
-                  );
-                },
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              ),
-              const SizedBox(height: 18),
-              _QuickActionsSection(canSeeRevenue: canSeeRevenue),
-              const SizedBox(height: 18),
-              widget.summaryAsync.when(
-                data: (s) {
-                  final active = s.membershipActiveMembers;
-                  final expired = s.membershipExpiredMembers;
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final wide = constraints.maxWidth >= 1100;
-                      if (!canSeeRevenue) {
-                        return _ActiveInactiveCard(active: active, expired: expired);
-                      }
-                      if (wide) {
-                        final half = (constraints.maxWidth - 12) / 2;
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(width: half, child: _Revenue7dCard(points: s.revenue7d)),
-                            const SizedBox(width: 12),
-                            SizedBox(width: half, child: _ActiveInactiveCard(active: active, expired: expired)),
-                          ],
-                        );
-                      }
-                      return Column(
-                        children: [
-                          _Revenue7dCard(points: s.revenue7d),
-                          const SizedBox(height: 12),
-                          _ActiveInactiveCard(active: active, expired: expired),
-                        ],
-                      );
-                    },
-                  );
-                },
-                error: (e, stackTrace) => const SizedBox.shrink(),
-                loading: () => const SizedBox.shrink(),
-              ),
-              const SizedBox(height: 18),
-              widget.summaryAsync.when(
-                data: (s) => _InsightsCard(summary: s, canSeeRevenue: canSeeRevenue, number: widget.number),
-                error: (e, _) => const SizedBox.shrink(),
-                loading: () => const SizedBox.shrink(),
-              ),
-              widget.summaryAsync.when(
-                data: (s) => _ExpiringMembersCard(
-                  members: s.expiringMembers,
-                  onOpenMembers: () => context.go('/members'),
-                ),
-                error: (e, _) => const SizedBox.shrink(),
-                loading: () => const SizedBox.shrink(),
-              ),
-            ],
+            ),
           ),
         ),
       ],
@@ -467,6 +641,495 @@ class _QuickActionsSection extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _RecentActivityFeedFloating extends ConsumerStatefulWidget {
+  const _RecentActivityFeedFloating();
+
+  @override
+  ConsumerState<_RecentActivityFeedFloating> createState() => _RecentActivityFeedFloatingState();
+}
+
+class _RecentActivityFeedFloatingState extends ConsumerState<_RecentActivityFeedFloating> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
+      ref.invalidate(dashboardActivityProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const _RecentActivityFeedCardBase(floating: true);
+  }
+}
+
+class _RecentActivityFeedDocked extends ConsumerStatefulWidget {
+  const _RecentActivityFeedDocked({super.key, required this.headerTrailing});
+
+  final Widget headerTrailing;
+
+  @override
+  ConsumerState<_RecentActivityFeedDocked> createState() => _RecentActivityFeedDockedState();
+}
+
+class _RecentActivityFeedDockedState extends ConsumerState<_RecentActivityFeedDocked> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
+      ref.invalidate(dashboardActivityProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _RecentActivityFeedCardBase(
+      floating: true,
+      headerTrailing: widget.headerTrailing,
+    );
+  }
+}
+
+class _RecentActivityFeedCard extends StatelessWidget {
+  const _RecentActivityFeedCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _RecentActivityFeedCardBase(floating: false);
+  }
+}
+
+class _AtRiskMembersCard extends ConsumerWidget {
+  const _AtRiskMembersCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final async = ref.watch(atRiskMembersProvider);
+    String formatError(Object e) {
+      if (e is ApiException) {
+        if (e.statusCode == 404) {
+          return 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+        }
+        if (e.statusCode == 401) return 'Session expired. Dobara login karo.';
+        return e.message;
+      }
+      return e.toString();
+    }
+
+    String normalizePhone(String? raw) {
+      if (raw == null) return '';
+      return raw.replaceAll(RegExp(r'[^0-9]'), '');
+    }
+
+    Future<void> openWhatsApp({required String? phone, required String message}) async {
+      final digits = normalizePhone(phone);
+      if (digits.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Phone missing')));
+        return;
+      }
+      final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
+      final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
+      }
+    }
+
+    String fmtDate(String? raw) {
+      if (raw == null) return 'Never';
+      final d = DateTime.tryParse(raw);
+      if (d == null) return raw;
+      return DateFormat('yyyy-MM-dd').format(d);
+    }
+
+    Widget header({required int days, required int count}) {
+      final primary = theme.colorScheme.primary;
+      return Row(
+        children: [
+          Container(
+            height: 40,
+            width: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: primary.withValues(alpha: 0.12),
+              border: Border.all(color: primary.withValues(alpha: 0.28)),
+            ),
+            child: Icon(Icons.warning_amber_outlined, color: primary, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('At-Risk Members', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                Text(
+                  'No check-in for $days+ days • $count',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => ref.invalidate(atRiskMembersProvider),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: async.when(
+          data: (payload) {
+            if (payload.items.isEmpty) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  header(days: payload.days, count: 0),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Center(
+                      child: Text(
+                        'No at-risk members right now.',
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            String buildMessage(AtRiskMember m) {
+              final gym = (payload.gymName ?? 'Gym').trim().isEmpty ? 'Gym' : (payload.gymName ?? 'Gym').trim();
+              return payload.template
+                  .replaceAll('{name}', m.fullName)
+                  .replaceAll('{days}', payload.days.toString())
+                  .replaceAll('{gym}', gym)
+                  .replaceAll('{code}', m.memberCode);
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                header(days: payload.days, count: payload.items.length),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 320,
+                  child: Scrollbar(
+                    child: ListView.separated(
+                      itemCount: payload.items.length,
+                      separatorBuilder: (context, _) => Divider(height: 1, color: theme.colorScheme.outlineVariant),
+                      itemBuilder: (context, i) {
+                        final m = payload.items[i];
+                        final msg = buildMessage(m);
+                        final phoneOk = normalizePhone(m.phone).isNotEmpty;
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.people),
+                          title: Text('${m.fullName} (${m.memberCode})', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Text('Last: ${fmtDate(m.lastCheckinAt)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          trailing: IconButton(
+                            tooltip: phoneOk ? 'WhatsApp' : 'Phone missing',
+                            onPressed: phoneOk ? () => openWhatsApp(phone: m.phone, message: msg) : null,
+                            icon: const Icon(Icons.chat_bubble_outline),
+                          ),
+                          onTap: () => context.go('/members?q=${Uri.encodeComponent(m.memberCode)}'),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+          error: (e, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header(days: 3, count: 0),
+              const SizedBox(height: 10),
+              Text(formatError(e), style: theme.textTheme.bodySmall),
+            ],
+          ),
+          loading: () => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header(days: 3, count: 0),
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 10),
+              const SizedBox(height: 320),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecentActivityFeedCardBase extends ConsumerWidget {
+  const _RecentActivityFeedCardBase({required this.floating, this.headerTrailing});
+
+  final bool floating;
+  final Widget? headerTrailing;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final async = ref.watch(dashboardActivityProvider);
+    final primary = theme.colorScheme.primary;
+    String formatError(Object e) {
+      if (e is ApiException) {
+        if (e.statusCode == 404) {
+          return 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+        }
+        if (e.statusCode == 401) return 'Session expired. Dobara login karo.';
+        return e.message;
+      }
+      return e.toString();
+    }
+
+    String fmtTime(String raw) {
+      final d = DateTime.tryParse(raw);
+      if (d == null) return '';
+      return DateFormat('HH:mm').format(d);
+    }
+
+    Widget header({required bool dense}) {
+      return Row(
+        children: [
+          Container(
+            height: dense ? 34 : 40,
+            width: dense ? 34 : 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: primary.withValues(alpha: 0.12),
+              border: Border.all(color: primary.withValues(alpha: 0.28)),
+            ),
+            child: Icon(Icons.bolt, color: primary, size: dense ? 18 : 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Recent Activity', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                Text(
+                  'Auto refresh • check-ins & payments',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => ref.invalidate(dashboardActivityProvider),
+            icon: const Icon(Icons.refresh),
+          ),
+          ...(headerTrailing == null ? const <Widget>[] : <Widget>[headerTrailing!]),
+        ],
+      );
+    }
+
+    Widget body(List<DashboardActivityItem> items) {
+      if (items.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.history_toggle_off, size: 42, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(height: 10),
+                Text('No activity yet', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'New check-ins and payments will show here.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      return SizedBox(
+        height: floating ? 340 : 320,
+        child: Scrollbar(
+          child: ListView.separated(
+            itemCount: items.length,
+            separatorBuilder: (context, _) => Divider(height: 1, color: theme.colorScheme.outlineVariant),
+            itemBuilder: (context, i) {
+              final a = items[i];
+              final isPayment = a.type == 'payment';
+              final icon = isPayment ? Icons.payments_outlined : Icons.how_to_reg;
+              final chipColor = isPayment ? theme.colorScheme.tertiary : theme.colorScheme.primary;
+              final route = isPayment ? '/payments' : '/attendance';
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: chipColor.withValues(alpha: 0.14),
+                  foregroundColor: chipColor,
+                  child: Icon(icon, size: 18),
+                ),
+                title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                trailing: Text(fmtTime(a.at), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                onTap: () => context.go(route),
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    final card = Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: async.when(
+          data: (items) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header(dense: floating),
+              const SizedBox(height: 10),
+              body(items),
+            ],
+          ),
+          error: (e, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header(dense: floating),
+              const SizedBox(height: 10),
+              Text(formatError(e), style: theme.textTheme.bodySmall),
+            ],
+          ),
+          loading: () => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              header(dense: floating),
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 10),
+              SizedBox(height: floating ? 340 : 320),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!floating) return card;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withValues(alpha: 0.18),
+            blurRadius: 28,
+            offset: const Offset(0, 16),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: primary.withValues(alpha: 0.28)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.82),
+                theme.colorScheme.surface.withValues(alpha: 0.86),
+              ],
+            ),
+          ),
+          child: card,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActivityVerticalTab extends StatelessWidget {
+  const _ActivityVerticalTab({super.key, required this.onTap, required this.glow});
+
+  final VoidCallback onTap;
+  final Color glow;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: 44,
+            height: 170,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.72),
+              border: Border.all(color: glow.withValues(alpha: 0.40)),
+              boxShadow: [
+                BoxShadow(
+                  color: glow.withValues(alpha: 0.22),
+                  blurRadius: 22,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Center(
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.notifications_active_outlined, size: 18, color: glow),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Activity',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: glow,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.keyboard_double_arrow_left, size: 18, color: glow),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -704,6 +1367,10 @@ class _MetricCardState extends State<_MetricCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hover = _hover;
+    final radius = BorderRadius.circular(16);
+    final goldA = const Color(0xFFD4AF37);
+    final goldB = const Color(0xFFFFE08A);
+    final blurSigma = hover ? 22.0 : 18.0;
     return SizedBox(
       width: widget.width,
       child: MouseRegion(
@@ -713,70 +1380,141 @@ class _MetricCardState extends State<_MetricCard> {
           duration: const Duration(milliseconds: 140),
           curve: Curves.easeOut,
           scale: hover ? 1.015 : 1,
-          child: InkWell(
-            onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                theme.colorScheme.surfaceContainerHighest.withAlpha(70),
-                theme.colorScheme.surface.withAlpha(70),
-              ],
-            ),
-            boxShadow: hover
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFFD4AF37).withAlpha(34),
-                      blurRadius: 26,
-                      offset: const Offset(0, 14),
-                    ),
-                  ]
-                : const [],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  height: 44,
-                  width: 44,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: theme.colorScheme.primary.withAlpha(38),
-                    border: Border.all(color: theme.colorScheme.primary.withAlpha(90)),
-                  ),
-                  child: Icon(widget.icon, color: theme.colorScheme.primary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.title, style: theme.textTheme.labelLarge),
-                      const SizedBox(height: 6),
-                      Text(
-                        widget.value,
-                        style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            transform: Matrix4.translationValues(0, hover ? -5 : 0, 0),
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              boxShadow: hover
+                  ? [
+                      BoxShadow(
+                        color: goldA.withAlpha(52),
+                        blurRadius: 34,
+                        offset: const Offset(0, 18),
                       ),
-                      const SizedBox(height: 2),
-                      Text(widget.subtitle, style: theme.textTheme.bodySmall),
+                      BoxShadow(
+                        color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 90 : 30),
+                        blurRadius: 26,
+                        offset: const Offset(0, 14),
+                      ),
+                    ]
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 60 : 20),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
                     ],
+            ),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: widget.onTap,
+                    borderRadius: radius,
+                    child: CustomPaint(
+                      foregroundPainter: _GradientStrokePainter(
+                        radius: radius,
+                        width: 1,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            goldA.withAlpha(hover ? 220 : 160),
+                            goldB.withAlpha(hover ? 170 : 110),
+                            goldA.withAlpha(hover ? 220 : 160),
+                          ],
+                        ),
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: radius,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              theme.colorScheme.surfaceContainerHighest.withAlpha(theme.brightness == Brightness.dark ? 70 : 120),
+                              theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 58 : 110),
+                            ],
+                          ),
+                          border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(hover ? 170 : 120)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Container(
+                                height: 44,
+                                width: 44,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: theme.colorScheme.primary.withAlpha(hover ? 52 : 38),
+                                  border: Border.all(color: theme.colorScheme.primary.withAlpha(hover ? 130 : 90)),
+                                ),
+                                child: Icon(widget.icon, color: theme.colorScheme.primary),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(widget.title, style: theme.textTheme.labelLarge),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      widget.value,
+                                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(widget.subtitle, style: theme.textTheme.bodySmall),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                const Icon(Icons.chevron_right),
-              ],
+              ),
             ),
-          ),
-        ),
           ),
         ),
       ),
     );
+  }
+}
+
+class _GradientStrokePainter extends CustomPainter {
+  const _GradientStrokePainter({
+    required this.radius,
+    required this.width,
+    required this.gradient,
+  });
+
+  final BorderRadius radius;
+  final double width;
+  final Gradient gradient;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = radius.toRRect(rect).deflate(width / 2);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..shader = gradient.createShader(rect);
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GradientStrokePainter oldDelegate) {
+    return oldDelegate.radius != radius || oldDelegate.width != width || oldDelegate.gradient != gradient;
   }
 }
 
@@ -1129,7 +1867,9 @@ class _RevenueChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final p = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
       ..color = lineColor;
 
     final grid = Paint()
@@ -1151,23 +1891,62 @@ class _RevenueChartPainter extends CustomPainter {
     final maxY = points.map((e) => e.amount.toDouble()).fold<double>(0, (m, v) => v > m ? v : m);
     final denom = maxY <= 0 ? 1 : maxY;
 
-    final path = Path();
+    final pts = <Offset>[];
     for (int i = 0; i < points.length; i++) {
       final x = origin.dx + (w * (points.length == 1 ? 0 : i / (points.length - 1)));
       final y = origin.dy + h - (h * (points[i].amount.toDouble() / denom));
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
+      pts.add(Offset(x, y));
+    }
+
+    final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+    if (pts.length == 2) {
+      path.lineTo(pts.last.dx, pts.last.dy);
+    } else {
+      for (int i = 0; i < pts.length - 1; i++) {
+        final p0 = i == 0 ? pts[i] : pts[i - 1];
+        final p1 = pts[i];
+        final p2 = pts[i + 1];
+        final p3 = i + 2 < pts.length ? pts[i + 2] : p2;
+
+        final c1 = Offset(
+          p1.dx + (p2.dx - p0.dx) / 6,
+          p1.dy + (p2.dy - p0.dy) / 6,
+        );
+        final c2 = Offset(
+          p2.dx - (p3.dx - p1.dx) / 6,
+          p2.dy - (p3.dy - p1.dy) / 6,
+        );
+        path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, p2.dx, p2.dy);
       }
     }
+
+    final bottomY = origin.dy + h;
+    final fill = Path()
+      ..addPath(path, Offset.zero)
+      ..lineTo(pts.last.dx, bottomY)
+      ..lineTo(pts.first.dx, bottomY)
+      ..close();
+
+    final gold = const Color(0xFFD4AF37);
+    final fillPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          gold.withAlpha(68),
+          gold.withAlpha(18),
+          Colors.transparent,
+        ],
+        stops: const [0.0, 0.55, 1.0],
+      ).createShader(Rect.fromLTWH(origin.dx, origin.dy, w, h));
+
+    canvas.drawPath(fill, fillPaint);
     canvas.drawPath(path, p);
 
     final dot = Paint()..color = lineColor;
-    for (int i = 0; i < points.length; i++) {
-      final x = origin.dx + (w * (points.length == 1 ? 0 : i / (points.length - 1)));
-      final y = origin.dy + h - (h * (points[i].amount.toDouble() / denom));
-      canvas.drawCircle(Offset(x, y), 3, dot);
+    for (final pt in pts) {
+      canvas.drawCircle(pt, 2.6, dot);
     }
   }
 
@@ -1387,7 +2166,7 @@ class _DonutPiePainter extends CustomPainter {
   }
 }
 
-class _ActionCard extends StatelessWidget {
+class _ActionCard extends StatefulWidget {
   const _ActionCard({
     required this.title,
     required this.subtitle,
@@ -1401,32 +2180,77 @@ class _ActionCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_ActionCard> createState() => _ActionCardState();
+}
+
+class _ActionCardState extends State<_ActionCard> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hover = _hover;
+    final gold = theme.colorScheme.primary;
     return SizedBox(
       width: 320,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(icon, size: 34, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          scale: hover ? 1.012 : 1,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+                boxShadow: hover
+                    ? [
+                        BoxShadow(
+                          color: gold.withValues(alpha: 0.16),
+                          blurRadius: 22,
+                          offset: const Offset(0, 12),
+                        ),
+                      ]
+                    : const [],
+              ),
+              child: Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
                     children: [
-                      Text(title, style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
+                      Container(
+                        height: 44,
+                        width: 44,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: gold.withValues(alpha: 0.12),
+                          border: Border.all(color: gold.withValues(alpha: 0.28)),
+                        ),
+                        child: Icon(widget.icon, size: 22, color: gold),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(widget.title, style: theme.textTheme.titleMedium),
+                            const SizedBox(height: 4),
+                            Text(widget.subtitle, style: theme.textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right),
-              ],
+              ),
             ),
           ),
         ),

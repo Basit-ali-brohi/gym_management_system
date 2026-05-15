@@ -33,6 +33,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _facebookCtrl = TextEditingController();
   final _instagramCtrl = TextEditingController();
   final _whatsappCtrl = TextEditingController();
+  final _atRiskDaysCtrl = TextEditingController(text: '3');
+  final _atRiskTemplateCtrl = TextEditingController();
 
   bool _enableSound = true;
   bool _enableAnimations = true;
@@ -49,6 +51,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _facebookCtrl.dispose();
     _instagramCtrl.dispose();
     _whatsappCtrl.dispose();
+    _atRiskDaysCtrl.dispose();
+    _atRiskTemplateCtrl.dispose();
     super.dispose();
   }
 
@@ -76,6 +80,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _facebookCtrl.text = s.facebookUrl ?? '';
           _instagramCtrl.text = s.instagramUrl ?? '';
           _whatsappCtrl.text = s.whatsapp ?? '';
+          _atRiskDaysCtrl.text = s.atRiskDays.toString();
+          _atRiskTemplateCtrl.text = s.atRiskWhatsAppTemplate ?? '';
         });
       });
     }
@@ -301,6 +307,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               const SizedBox(height: 12),
               Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Smart Reminders', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          SizedBox(
+                            width: 260,
+                            child: TextField(
+                              controller: _atRiskDaysCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'At-Risk Days',
+                                prefixIcon: Icon(Icons.warning_amber_outlined),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 720,
+                            child: TextField(
+                              controller: _atRiskTemplateCtrl,
+                              minLines: 2,
+                              maxLines: 4,
+                              decoration: const InputDecoration(
+                                labelText: 'WhatsApp Template',
+                                helperText: 'Use {name}, {days}, {gym}, {code}',
+                                prefixIcon: Icon(Icons.text_snippet_outlined),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
                 child: Column(
                   children: [
                     SwitchListTile(
@@ -409,12 +458,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
       final api = ref.read(apiClientProvider);
       final tax = double.tryParse(_taxCtrl.text.trim()) ?? 0;
+      final atRiskDays = int.tryParse(_atRiskDaysCtrl.text.trim());
       final res = await api.putJson('/settings', token: token, body: {
         'gymName': _gymNameCtrl.text.trim().isEmpty ? null : _gymNameCtrl.text.trim(),
         'currency': _currencyCtrl.text.trim().isEmpty ? 'PKR' : _currencyCtrl.text.trim(),
         'defaultTaxPercent': tax,
         'enableSounds': _enableSound,
         'enableAnimations': _enableAnimations,
+        'atRiskDays': atRiskDays ?? 3,
+        'atRiskWhatsAppTemplate': _atRiskTemplateCtrl.text.trim().isEmpty ? null : _atRiskTemplateCtrl.text.trim(),
         'address': _addressCtrl.text.trim().isEmpty ? null : _addressCtrl.text.trim(),
         'logoUrl': _logoUrlCtrl.text.trim().isEmpty ? null : _logoUrlCtrl.text.trim(),
         'websiteUrl': _websiteCtrl.text.trim().isEmpty ? null : _websiteCtrl.text.trim(),
