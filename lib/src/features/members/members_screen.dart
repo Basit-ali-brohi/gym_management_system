@@ -1493,7 +1493,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final ok = await showAppConfirmDialog(
       context: context,
       title: 'Remove membership?',
-      message: 'Ye member ka current plan remove (cancel) ho jayega aur check-in block ho jayega.',
+      message: "This will remove the member's current plan and block check-ins.",
       confirmLabel: 'Remove',
       cancelLabel: 'Cancel',
       danger: true,
@@ -2089,7 +2089,7 @@ class _StatusChip extends StatelessWidget {
     final bg = isActive
         ? theme.colorScheme.primaryContainer
         : isExpired
-            ? const Color(0xFFD4AF37).withValues(alpha: 0.18)
+            ? theme.colorScheme.primary.withValues(alpha: 0.18)
             : theme.colorScheme.surfaceContainerHighest;
     final fg = isActive
         ? theme.colorScheme.onPrimaryContainer

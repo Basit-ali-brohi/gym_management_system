@@ -607,46 +607,75 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 190,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey(_typeFilter),
-                    initialValue: _typeFilter,
-                    decoration: const InputDecoration(labelText: 'Report type'),
-                    items: const [
-                      DropdownMenuItem(value: 'all', child: Text('All Reports')),
-                      DropdownMenuItem(value: 'export', child: Text('Full Export')),
-                      DropdownMenuItem(value: 'monthly', child: Text('Monthly Revenue')),
-                      DropdownMenuItem(value: 'expired', child: Text('Expired Members')),
-                      DropdownMenuItem(value: 'daily', child: Text('Daily Attendance')),
-                    ],
-                    onChanged: (v) => setState(() => _typeFilter = v ?? 'all'),
-                  ),
-                ),
-                SizedBox(
-                  width: 360,
-                  child: TextField(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 720;
+
+                Widget typeField({required bool fillWidth}) {
+                  final w = fillWidth ? double.infinity : 240.0;
+                  return SizedBox(
+                    width: w,
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey(_typeFilter),
+                      initialValue: _typeFilter,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Report type'),
+                      items: const [
+                        DropdownMenuItem(value: 'all', child: Text('All Reports')),
+                        DropdownMenuItem(value: 'export', child: Text('Full Export')),
+                        DropdownMenuItem(value: 'monthly', child: Text('Monthly Revenue')),
+                        DropdownMenuItem(value: 'expired', child: Text('Expired Members')),
+                        DropdownMenuItem(value: 'daily', child: Text('Daily Attendance')),
+                      ],
+                      onChanged: (v) => setState(() => _typeFilter = v ?? 'all'),
+                    ),
+                  );
+                }
+
+                Widget searchField() {
+                  return TextField(
                     controller: _searchCtrl,
                     decoration: const InputDecoration(
                       hintText: 'Search report',
                       prefixIcon: Icon(Icons.search),
                     ),
                     onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                OutlinedButton(
-                  onPressed: () {
-                    _searchCtrl.clear();
-                    setState(() => _typeFilter = 'all');
-                  },
-                  child: const Text('Clear'),
-                ),
-              ],
+                  );
+                }
+
+                Widget clearBtn() {
+                  return OutlinedButton(
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() => _typeFilter = 'all');
+                    },
+                    child: const Text('Clear'),
+                  );
+                }
+
+                if (narrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      typeField(fillWidth: true),
+                      const SizedBox(height: 10),
+                      searchField(),
+                      const SizedBox(height: 10),
+                      Align(alignment: Alignment.centerRight, child: clearBtn()),
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    typeField(fillWidth: false),
+                    const SizedBox(width: 10),
+                    Expanded(child: searchField()),
+                    const SizedBox(width: 10),
+                    clearBtn(),
+                  ],
+                );
+              },
             ),
           ),
         ),

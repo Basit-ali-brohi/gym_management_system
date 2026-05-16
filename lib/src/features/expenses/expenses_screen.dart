@@ -936,7 +936,7 @@ class _CurrencyBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final gold = const Color(0xFFD4AF37);
+    final gold = theme.colorScheme.primary;
     final base = theme.colorScheme.onSurfaceVariant;
     final fg = active ? gold : base;
     return Center(
@@ -1011,7 +1011,7 @@ class _MetricCardState extends State<_MetricCard> {
                 boxShadow: _hover
                     ? [
                         BoxShadow(
-                          color: const Color(0xFFD4AF37).withAlpha(28),
+                          color: theme.colorScheme.primary.withAlpha(28),
                           blurRadius: 22,
                           offset: const Offset(0, 12),
                         )

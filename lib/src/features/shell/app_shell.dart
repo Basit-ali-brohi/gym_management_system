@@ -229,7 +229,7 @@ class AppShell extends ConsumerWidget {
             var failCount = 0;
             for (final inv in eligible) {
               final msg =
-                  'Assalam o Alaikum ${inv.memberName}, apka pending bill ${inv.invoiceNo} (Rs ${inv.total}) clear kar dein. Shukriya. $tenantLabel';
+                  'Hello ${inv.memberName}, your pending bill ${inv.invoiceNo} (Rs ${inv.total}) is due. Please clear it. Thank you. $tenantLabel';
               final ok = await openWhatsAppMessage(phone: inv.phone ?? '', message: msg);
               if (ok) {
                 okCount += 1;
@@ -302,7 +302,7 @@ class AppShell extends ConsumerWidget {
                                           ),
                                           const SizedBox(height: 6),
                                           Text(
-                                            'Approve pe click karo — system WhatsApp reminders open kar dega.',
+                                            'Click Approve — the system will open WhatsApp reminders.',
                                             style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                           ),
                                         ],
@@ -311,7 +311,7 @@ class AppShell extends ConsumerWidget {
                                   ),
                                   const SizedBox(height: 10),
                                   Text(
-                                    'Note: Browser popup blocker multiple WhatsApp tabs block kar sakta hai.',
+                                    'Note: Your browser popup blocker may block multiple WhatsApp tabs.',
                                     style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                   ),
                                 ],
@@ -368,7 +368,7 @@ class AppShell extends ConsumerWidget {
                                           itemBuilder: (context, i) {
                                             final m = items[i];
                                             final msg =
-                                                'Assalam o Alaikum ${m.fullName}, apki membership ${m.endDate} ko expire ho rahi hai (${m.daysLeft} day left). Please renew karwa lein. $tenantLabel';
+                                                'Hello ${m.fullName}, your membership expires on ${m.endDate} (${m.daysLeft} days left). Please renew it. $tenantLabel';
                                             return ListTile(
                                               dense: true,
                                               title: Text('${m.fullName} (${m.memberCode})'),
@@ -450,7 +450,7 @@ class AppShell extends ConsumerWidget {
                                           itemBuilder: (context, i) {
                                             final inv = items[i];
                                             final msg =
-                                                'Assalam o Alaikum ${inv.memberName}, apka pending bill ${inv.invoiceNo} (Rs ${inv.total}) clear kar dein. Shukriya. $tenantLabel';
+                                                'Hello ${inv.memberName}, your pending bill ${inv.invoiceNo} (Rs ${inv.total}) is due. Please clear it. Thank you. $tenantLabel';
                                             return ListTile(
                                               dense: true,
                                               title: Text('${inv.invoiceNo} • ${inv.memberName} (${inv.memberCode})'),
@@ -1498,6 +1498,7 @@ class _HoverScaleState extends State<_HoverScale> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final hover = _hover && !widget.selected;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -1513,7 +1514,7 @@ class _HoverScaleState extends State<_HoverScale> {
             boxShadow: hover
                 ? [
                     BoxShadow(
-                      color: const Color(0xFFD4AF37).withAlpha(38),
+                      color: theme.colorScheme.primary.withAlpha(38),
                       blurRadius: 22,
                       offset: const Offset(0, 12),
                     ),

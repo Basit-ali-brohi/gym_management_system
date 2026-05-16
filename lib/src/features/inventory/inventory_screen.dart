@@ -1490,7 +1490,7 @@ class _MetricCardState extends State<_MetricCard> {
                 boxShadow: _hover
                     ? [
                         BoxShadow(
-                          color: const Color(0xFFD4AF37).withAlpha(28),
+                          color: theme.colorScheme.primary.withAlpha(28),
                           blurRadius: 22,
                           offset: const Offset(0, 12),
                         )
@@ -1550,7 +1550,7 @@ class _StatusChip extends StatelessWidget {
     final theme = Theme.of(context);
     final low = onHand < 5;
     final isActive = status == 'active';
-    final glow = const Color(0xFFD4AF37);
+    final glow = theme.colorScheme.primary;
     final bg = low
         ? glow.withValues(alpha: 0.18)
         : isActive

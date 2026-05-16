@@ -4,6 +4,7 @@ class TokenStore {
   static const _kToken = 'auth_token';
   static const _kTenantSlug = 'tenant_slug';
   static const _kThemeMode = 'theme_mode';
+  static const _kAccent = 'accent_color';
 
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -50,6 +51,20 @@ class TokenStore {
       await prefs.remove(_kThemeMode);
     } else {
       await prefs.setString(_kThemeMode, mode);
+    }
+  }
+
+  Future<String?> getAccent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kAccent);
+  }
+
+  Future<void> setAccent(String? accent) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (accent == null || accent.isEmpty) {
+      await prefs.remove(_kAccent);
+    } else {
+      await prefs.setString(_kAccent, accent);
     }
   }
 }

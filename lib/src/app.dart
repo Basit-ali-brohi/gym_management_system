@@ -145,16 +145,19 @@ class GymSaasApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
-    const gold = Color(0xFFD4AF37);
+    final accent = ref.watch(accentProvider).color;
+    final isAccentDark = ThemeData.estimateBrightnessForColor(accent) == Brightness.dark;
+    final onAccentDark = isAccentDark ? Colors.white : const Color(0xFF0B0F14);
+    final onAccentLight = isAccentDark ? Colors.white : const Color(0xFF121212);
     const obsidian = Color(0xFF0B0F14);
     const surface = Color(0xFF101722);
 
-    const darkScheme = ColorScheme(
+    final darkScheme = ColorScheme(
       brightness: Brightness.dark,
-      primary: gold,
-      onPrimary: Color(0xFF0B0F14),
-      secondary: gold,
-      onSecondary: Color(0xFF0B0F14),
+      primary: accent,
+      onPrimary: onAccentDark,
+      secondary: accent,
+      onSecondary: onAccentDark,
       error: Color(0xFFFF5C5C),
       onError: Color(0xFF0B0F14),
       surface: surface,
@@ -167,17 +170,17 @@ class GymSaasApp extends ConsumerWidget {
       scrim: Colors.black,
       inverseSurface: Color(0xFFEAECEF),
       onInverseSurface: Color(0xFF0B0F14),
-      inversePrimary: gold,
+      inversePrimary: accent,
       tertiary: Color(0xFF0F766E),
       onTertiary: Color(0xFFE7FFF9),
     );
 
-    const lightScheme = ColorScheme(
+    final lightScheme = ColorScheme(
       brightness: Brightness.light,
-      primary: gold,
-      onPrimary: Color(0xFF121212),
-      secondary: gold,
-      onSecondary: Color(0xFF121212),
+      primary: accent,
+      onPrimary: onAccentLight,
+      secondary: accent,
+      onSecondary: onAccentLight,
       error: Color(0xFFB3261E),
       onError: Colors.white,
       surface: Colors.white,
@@ -190,7 +193,7 @@ class GymSaasApp extends ConsumerWidget {
       scrim: Colors.black,
       inverseSurface: Color(0xFF15181E),
       onInverseSurface: Colors.white,
-      inversePrimary: gold,
+      inversePrimary: accent,
       tertiary: Color(0xFF0F766E),
       onTertiary: Colors.white,
     );
@@ -215,6 +218,8 @@ class GymSaasApp extends ConsumerWidget {
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'Gym Management',
+      themeAnimationDuration: const Duration(milliseconds: 260),
+      themeAnimationCurve: Curves.easeInOut,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: lightScheme,
@@ -255,15 +260,15 @@ class GymSaasApp extends ConsumerWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: gold, width: 1.2),
+            borderSide: BorderSide(color: accent, width: 1.2),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             minimumSize: const Size(44, 44),
-            backgroundColor: gold,
-            foregroundColor: const Color(0xFF121212),
+            backgroundColor: accent,
+            foregroundColor: onAccentLight,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
@@ -327,15 +332,15 @@ class GymSaasApp extends ConsumerWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: gold, width: 1.2),
+            borderSide: BorderSide(color: accent, width: 1.2),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             minimumSize: const Size(44, 44),
-            backgroundColor: gold,
-            foregroundColor: const Color(0xFF0B0F14),
+            backgroundColor: accent,
+            foregroundColor: onAccentDark,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),

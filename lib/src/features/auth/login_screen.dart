@@ -33,9 +33,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     final errorText = switch (auth.error) {
       null => null,
-      'invalid_credentials' => 'Tenant / Email / Password galat hai',
+      'invalid_credentials' => 'Invalid tenant, email, or password',
       'unauthorized' => 'Login unauthorized',
-      'login_failed' => 'Server connect nahi ho raha ($apiBaseUrl). API URL/port check karo, backend run karo.',
+      'login_failed' => 'Cannot connect to server ($apiBaseUrl). Check the API URL/port and ensure the backend is running.',
       _ => auth.error,
     };
 

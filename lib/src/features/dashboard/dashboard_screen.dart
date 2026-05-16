@@ -116,7 +116,7 @@ class AtRiskMembersPayload {
     return AtRiskMembersPayload(
       days: (json['days'] as num?)?.toInt() ?? 3,
       template: json['template']?.toString() ??
-          'Assalam o Alaikum {name}, aap {days} din se gym nahi aaye. Please visit soon. {gym}',
+          'Hello {name}, you have not visited the gym for {days} days. Please visit soon. {gym}',
       gymName: json['gymName']?.toString(),
       items: (json['items'] as List<dynamic>? ?? [])
           .whereType<Map>()
@@ -375,9 +375,9 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
               String message = e.toString();
               if (e is ApiException) {
                 if (e.statusCode == 404) {
-                  message = 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+                  message = 'Backend update not applied. Stop the server and start it again.';
                 } else if (e.statusCode == 401) {
-                  message = 'Session expired. Dobara login karo.';
+                  message = 'Session expired. Please log in again.';
                 } else {
                   message = e.message;
                 }
@@ -765,9 +765,9 @@ class _AtRiskMembersCard extends ConsumerWidget {
     String formatError(Object e) {
       if (e is ApiException) {
         if (e.statusCode == 404) {
-          return 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+          return 'Backend update not applied. Stop the server and start it again.';
         }
-        if (e.statusCode == 401) return 'Session expired. Dobara login karo.';
+        if (e.statusCode == 401) return 'Session expired. Please log in again.';
         return e.message;
       }
       return e.toString();
@@ -933,9 +933,9 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
     String formatError(Object e) {
       if (e is ApiException) {
         if (e.statusCode == 404) {
-          return 'Backend update apply nahi hui. Server ko stop karke dobara start karo.';
+          return 'Backend update not applied. Stop the server and start it again.';
         }
-        if (e.statusCode == 401) return 'Session expired. Dobara login karo.';
+        if (e.statusCode == 401) return 'Session expired. Please log in again.';
         return e.message;
       }
       return e.toString();
@@ -1411,8 +1411,8 @@ class _MetricCardState extends State<_MetricCard> {
     final theme = Theme.of(context);
     final hover = _hover;
     final radius = BorderRadius.circular(16);
-    final goldA = const Color(0xFFD4AF37);
-    final goldB = const Color(0xFFFFE08A);
+    final goldA = theme.colorScheme.primary;
+    final goldB = Color.lerp(goldA, Colors.white, 0.35) ?? goldA;
     final blurSigma = hover ? 22.0 : 18.0;
     return SizedBox(
       width: widget.width,
@@ -1970,15 +1970,14 @@ class _RevenueChartPainter extends CustomPainter {
       ..lineTo(pts.first.dx, bottomY)
       ..close();
 
-    final gold = const Color(0xFFD4AF37);
     final fillPaint = Paint()
       ..style = PaintingStyle.fill
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          gold.withAlpha(68),
-          gold.withAlpha(18),
+          lineColor.withAlpha(68),
+          lineColor.withAlpha(18),
           Colors.transparent,
         ],
         stops: const [0.0, 0.55, 1.0],
@@ -2035,6 +2034,7 @@ class _ActiveInactiveCard extends StatelessWidget {
                         activeColor: theme.colorScheme.tertiary,
                         expiredColor: theme.colorScheme.error,
                         trackColor: theme.colorScheme.outlineVariant,
+                        glowColor: theme.colorScheme.primary,
                         ringWidth: ringW,
                       ),
                       child: Center(
@@ -2167,6 +2167,7 @@ class _DonutPiePainter extends CustomPainter {
     required this.activeColor,
     required this.expiredColor,
     required this.trackColor,
+    required this.glowColor,
     this.ringWidth = 12.0,
   });
 
@@ -2174,6 +2175,7 @@ class _DonutPiePainter extends CustomPainter {
   final Color activeColor;
   final Color expiredColor;
   final Color trackColor;
+  final Color glowColor;
   final double ringWidth;
 
   @override
@@ -2214,7 +2216,7 @@ class _DonutPiePainter extends CustomPainter {
       final sw = max(0.0, activeSweep - gap);
       if (sw > 0) {
         final glow = Paint()
-          ..color = const Color(0xFFD4AF37).withAlpha(24)
+          ..color = glowColor.withAlpha(24)
           ..style = PaintingStyle.stroke
           ..strokeWidth = ringWidth + 6
           ..strokeCap = StrokeCap.round;
@@ -2238,7 +2240,9 @@ class _DonutPiePainter extends CustomPainter {
     return oldDelegate.value != value ||
         oldDelegate.activeColor != activeColor ||
         oldDelegate.expiredColor != expiredColor ||
-        oldDelegate.trackColor != trackColor;
+        oldDelegate.trackColor != trackColor ||
+        oldDelegate.glowColor != glowColor ||
+        oldDelegate.ringWidth != ringWidth;
   }
 }
 

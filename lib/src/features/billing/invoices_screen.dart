@@ -896,7 +896,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
       var failCount = 0;
       for (final i in items) {
         final msg =
-            'Assalam o Alaikum ${i.memberName}, apka pending bill ${i.invoiceNo} (Rs ${i.total}) clear kar dein. Shukriya. $tenantLabel';
+            'Hello ${i.memberName}, your pending bill ${i.invoiceNo} (Rs ${i.total}) is due. Please clear it. Thank you. $tenantLabel';
         final ok = await openWhatsAppMessage(phone: i.phone ?? '', message: msg);
         if (ok) {
           okCount += 1;

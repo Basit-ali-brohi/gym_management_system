@@ -738,7 +738,7 @@ class _MetricCardState extends State<_MetricCard> {
                 boxShadow: _hover
                     ? [
                         BoxShadow(
-                          color: const Color(0xFFD4AF37).withAlpha(28),
+                          color: theme.colorScheme.primary.withAlpha(28),
                           blurRadius: 22,
                           offset: const Offset(0, 12),
                         )

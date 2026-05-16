@@ -2224,7 +2224,7 @@ app.get(
     );
     const template =
       settings.at_risk_whatsapp_template ??
-      'Assalam o Alaikum {name}, aap {days} din se gym nahi aaye. Please visit soon. {gym}';
+      'Hello {name}, you have not visited the gym for {days} days. Please visit soon. {gym}';
 
     const items = await queryMany(
       `SELECT m.id AS member_id,

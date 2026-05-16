@@ -158,7 +158,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     super.dispose();
   }
 
-  Color _statusColor(String status) {
+  Color _statusColor(BuildContext context, String status) {
     switch (status) {
       case 'trial':
         return const Color(0xFF2563EB);
@@ -167,13 +167,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
       case 'converted':
         return const Color(0xFF0F766E);
       default:
-        return const Color(0xFFD4AF37);
+        return Theme.of(context).colorScheme.primary;
     }
   }
 
   Widget _statusBadge(BuildContext context, String status) {
     final theme = Theme.of(context);
-    final c = _statusColor(status);
+    final c = _statusColor(context, status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(

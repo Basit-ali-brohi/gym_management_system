@@ -28,6 +28,61 @@ final themeModeProvider = StateNotifierProvider<ThemeModeController, ThemeMode>(
   return ThemeModeController(store);
 });
 
+enum AppAccent {
+  gold,
+  emerald,
+  crimson;
+
+  String get id => switch (this) {
+        AppAccent.gold => 'gold',
+        AppAccent.emerald => 'emerald',
+        AppAccent.crimson => 'crimson',
+      };
+
+  String get label => switch (this) {
+        AppAccent.gold => 'Gold',
+        AppAccent.emerald => 'Emerald Green',
+        AppAccent.crimson => 'Crimson Red',
+      };
+
+  Color get color => switch (this) {
+        AppAccent.gold => const Color(0xFFD4AF37),
+        AppAccent.emerald => const Color(0xFF10B981),
+        AppAccent.crimson => const Color(0xFFDC2626),
+      };
+
+  static AppAccent fromId(String? raw) {
+    final v = (raw ?? '').trim().toLowerCase();
+    if (v == 'emerald') return AppAccent.emerald;
+    if (v == 'crimson') return AppAccent.crimson;
+    return AppAccent.gold;
+  }
+}
+
+final accentProvider = StateNotifierProvider<AccentController, AppAccent>((ref) {
+  final store = ref.read(tokenStoreProvider);
+  return AccentController(store);
+});
+
+class AccentController extends StateNotifier<AppAccent> {
+  AccentController(this._store) : super(AppAccent.gold) {
+    _bootstrap();
+  }
+
+  final TokenStore _store;
+
+  Future<void> _bootstrap() async {
+    final raw = await _store.getAccent();
+    if (!mounted) return;
+    state = AppAccent.fromId(raw);
+  }
+
+  Future<void> setAccent(AppAccent accent) async {
+    state = accent;
+    await _store.setAccent(accent.id);
+  }
+}
+
 class ThemeModeController extends StateNotifier<ThemeMode> {
   ThemeModeController(this._store) : super(ThemeMode.dark) {
     _bootstrap();

@@ -1233,7 +1233,7 @@ class _AccessPreviewCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: green, width: 1.6),
           boxShadow: [
-            BoxShadow(color: const Color(0xFFD4AF37).withAlpha(30), blurRadius: 18, offset: const Offset(0, 10)),
+            BoxShadow(color: theme.colorScheme.primary.withAlpha(30), blurRadius: 18, offset: const Offset(0, 10)),
           ],
         ),
         child: child,
