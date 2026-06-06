@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/ui_kit.dart';
+import '../../core/in_app_pdf.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -348,46 +351,72 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       return '${h}h ${m}m';
     }
 
+    // Flex metric tile — no fixed width. The parent grid wraps each in an
+    // Expanded so 4 tiles span the container edge-to-edge.
     Widget metricCard({
       required String title,
       required String value,
       required String subtitle,
       required IconData icon,
+      required Color accent,
     }) {
-      return SizedBox(
-        width: 260,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 6),
-                      Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    // Bebas Neue display number; scales down so long datetimes fit.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        style: theme.textTheme.headlineSmall?.copyWith(color: accent),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -397,55 +426,171 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         ? (theme.cardTheme.shape as RoundedRectangleBorder).side
         : BorderSide(color: theme.colorScheme.outlineVariant);
 
-    final searchPanelInner = Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Check-in', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
+    final onVar = theme.colorScheme.onSurfaceVariant;
+
+    // ── Left wing: Manual Entry Kiosk ────────────────────────────────────
+    // High-focus Member Code field + hot primary Check-in button.
+    final manualKiosk = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('CHECK-IN', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+        const SizedBox(height: 2),
+        Text('Manual entry kiosk', style: GoogleFonts.inter(fontSize: 12, color: onVar)),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 52,
                 child: TextField(
                   controller: _codeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Member Code',
-                    prefixIcon: Icon(Icons.badge),
+                  style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600),
+                  decoration: appDenseInputDecoration(
+                    context,
+                    hint: 'Member Code',
+                    prefixIcon: Icon(Icons.badge_outlined, size: 20, color: onVar),
                   ),
                   onChanged: (v) => _scheduleValidate(v),
                   onSubmitted: (v) => _checkInByCode(v),
                 ),
               ),
-              const SizedBox(width: 10),
-              FilledButton(
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 52,
+              child: FilledButton.icon(
                 onPressed: () => _checkInByCode(_codeCtrl.text),
-                child: const Text('Check-in'),
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: const Text('Check-in'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  textStyle: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
               ),
-            ],
-          ),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            child: _codeCtrl.text.trim().isEmpty
-                ? const SizedBox.shrink()
-                : Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _AccessPreviewCard(
-                      loading: _accessLoading,
-                      preview: _accessPreview,
-                    ),
+            ),
+          ],
+        ),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          child: _codeCtrl.text.trim().isEmpty
+              ? const SizedBox.shrink()
+              : Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: _AccessPreviewCard(
+                    loading: _accessLoading,
+                    preview: _accessPreview,
                   ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+                ),
+        ),
+      ],
+    );
+
+    // Result rows / states for the live-search dropdown tile.
+    Widget liveResults() {
+      return searchAsync.when(
+        data: (items) {
+          if (_searchCtrl.text.trim().isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text('Type to filter members', style: GoogleFonts.inter(fontSize: 12.5, color: onVar)),
+              ),
+            );
+          }
+          if (items.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text('No results', style: GoogleFonts.inter(fontSize: 12.5, color: onVar)),
+              ),
+            );
+          }
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              physics: const ClampingScrollPhysics(),
+              itemCount: items.length,
+              separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.borderSubtle),
+              itemBuilder: (context, i) {
+                final m = items[i];
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    '${m.fullName} (${m.memberCode})',
+                    style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    [
+                      'ID: ${m.id}',
+                      if (m.phone != null && m.phone!.isNotEmpty) m.phone!,
+                      if (m.email != null && m.email!.isNotEmpty) m.email!,
+                    ].join(' • '),
+                    style: GoogleFonts.inter(fontSize: 11.5, color: onVar),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppTableActionButton(
+                        icon: Icons.visibility_outlined,
+                        tooltip: 'View',
+                        onPressed: () => _openMemberView(context, m.id),
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton(
+                        onPressed: () => _checkIn(context, m),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 34),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          textStyle: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w700),
+                        ),
+                        child: const Text('Check-in'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          );
+        },
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: Center(child: Text(e.toString(), style: GoogleFonts.inter(fontSize: 12.5, color: onVar))),
+        ),
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 28),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    // ── Right wing: Live Search Filter ───────────────────────────────────
+    final liveSearch = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('FIND MEMBER', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+        const SizedBox(height: 2),
+        Text('Live search', style: GoogleFonts.inter(fontSize: 12, color: onVar)),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 52,
+          child: TextField(
             controller: _searchCtrl,
-            decoration: InputDecoration(
-              labelText: 'Instant search (code / name / phone)',
-              prefixIcon: const Icon(Icons.search),
+            style: GoogleFonts.inter(fontSize: 14),
+            decoration: appDenseInputDecoration(
+              context,
+              hint: 'Instant search (code / name / phone)',
+              prefixIcon: Icon(Icons.search, size: 20, color: onVar),
+            ).copyWith(
               suffixIcon: IconButton(
                 tooltip: 'Search',
                 onPressed: () => ref.read(memberSearchProvider.notifier).search(_searchCtrl.text),
-                icon: const Icon(Icons.arrow_forward),
+                icon: Icon(Icons.arrow_forward, size: 18, color: onVar),
               ),
             ),
             onChanged: (v) {
@@ -456,61 +601,55 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             },
             onSubmitted: (v) => ref.read(memberSearchProvider.notifier).search(v),
           ),
-          const SizedBox(height: 12),
-          searchAsync.when(
-            data: (items) {
-              if (_searchCtrl.text.trim().isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  child: Center(child: Text('Type to filter members', style: theme.textTheme.bodySmall)),
-                );
-              }
-              if (items.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  child: Center(child: Text('No results', style: theme.textTheme.bodySmall)),
-                );
-              }
-              return ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                separatorBuilder: (context, index) => const Divider(height: 1),
-                itemBuilder: (context, i) {
-                  final m = items[i];
-                  return ListTile(
-                    dense: true,
-                    title: Text('${m.fullName} (${m.memberCode})'),
-                    subtitle: Text([
-                      'ID: ${m.id}',
-                      if (m.phone != null && m.phone!.isNotEmpty) m.phone!,
-                      if (m.email != null && m.email!.isNotEmpty) m.email!,
-                    ].join(' • ')),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'View',
-                          onPressed: () => _openMemberView(context, m.id),
-                          icon: const Icon(Icons.visibility),
-                        ),
-                        FilledButton(
-                          onPressed: () => _checkIn(context, m),
-                          child: const Text('Check-in'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
-            error: (e, _) => Center(child: Text(e.toString())),
-            loading: () => const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+        ),
+        const SizedBox(height: 10),
+        // Scrollable dropdown tile that sits directly under the search field.
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: theme.brightness == Brightness.dark
+                ? AppTheme.charcoalHigh.withAlpha(120)
+                : theme.colorScheme.surfaceContainerHighest.withAlpha(60),
+            border: Border.all(color: AppTheme.borderSubtle, width: 1),
           ),
-        ],
+          clipBehavior: Clip.antiAlias,
+          child: liveResults(),
+        ),
+      ],
+    );
+
+    // Split console: two wings side-by-side on wide, stacked on narrow.
+    final searchPanelInner = Padding(
+      padding: const EdgeInsets.all(18),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          if (c.maxWidth >= 720) {
+            // IntrinsicHeight + stretch lets the 1px divider span the full
+            // height of the taller wing.
+            return IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: Align(alignment: Alignment.topLeft, child: manualKiosk)),
+                  const SizedBox(width: 18),
+                  Container(width: 1, color: AppTheme.borderSubtle),
+                  const SizedBox(width: 18),
+                  Expanded(child: Align(alignment: Alignment.topLeft, child: liveSearch)),
+                ],
+              ),
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              manualKiosk,
+              const SizedBox(height: 18),
+              Divider(height: 1, color: AppTheme.borderSubtle),
+              const SizedBox(height: 18),
+              liveSearch,
+            ],
+          );
+        },
       ),
     );
 
@@ -545,7 +684,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           children: [
             Row(
               children: [
-                Expanded(child: Text("Today's Attendance", style: theme.textTheme.titleMedium)),
+                Expanded(
+                  child: Text("TODAY'S ATTENDANCE",
+                      style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+                ),
                 IconButton(
                   tooltip: 'Refresh',
                   onPressed: () => ref.read(attendanceControllerProvider.notifier).load(),
@@ -559,9 +701,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 final items = page.items;
                 if (items.isEmpty) {
                   return _EmptyState(
-                    icon: Icons.how_to_reg,
-                    title: 'No data found',
-                    subtitle: _range == 'today' ? 'No check-ins today' : 'No logs in this range',
+                    icon: Icons.how_to_reg_outlined,
+                    title: _range == 'today'
+                        ? 'No active check-ins for today yet'
+                        : 'No logs in this range',
+                    subtitle: 'Check-ins will appear here as members arrive.',
                   );
                 }
                 final fromN = page.total == 0 ? 0 : page.offset + 1;
@@ -648,37 +792,72 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           ],
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            metricCard(
-              title: '$rangeLabel Check-ins',
-              value: '$total',
-              subtitle: 'Attendance',
-              icon: Icons.how_to_reg,
-            ),
-            metricCard(
-              title: 'Unique members',
-              value: '$unique',
-              subtitle: 'Checked-in users',
-              icon: Icons.groups_outlined,
-            ),
-            metricCard(
-              title: 'Latest check-in',
-              value: latestLabel,
-              subtitle: 'Most recent',
-              icon: Icons.schedule_outlined,
-            ),
-            metricCard(
-              title: 'Avg session',
-              value: fmtAvgSession(),
-              subtitle: 'Based on check-outs',
-              icon: Icons.timelapse_outlined,
-            ),
-          ],
+        // ── Single-row 4-up metric grid ──────────────────────────────────
+        // 4 cols on desktop (span edge-to-edge via Expanded), 2 on tablet,
+        // 1 stacked on mobile. "Avg session" never drops to an isolated row.
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = <Widget>[
+              metricCard(
+                title: '$rangeLabel Check-ins',
+                value: '$total',
+                subtitle: 'Attendance',
+                icon: Icons.how_to_reg,
+                accent: theme.colorScheme.primary,
+              ),
+              metricCard(
+                title: 'Unique members',
+                value: '$unique',
+                subtitle: 'Checked-in users',
+                icon: Icons.groups_outlined,
+                accent: theme.colorScheme.tertiary,
+              ),
+              metricCard(
+                title: 'Latest check-in',
+                value: latestLabel,
+                subtitle: 'Most recent',
+                icon: Icons.schedule_outlined,
+                accent: const Color(0xFF3B82F6),
+              ),
+              metricCard(
+                title: 'Avg session',
+                value: fmtAvgSession(),
+                subtitle: 'Based on check-outs',
+                icon: Icons.timelapse_outlined,
+                accent: const Color(0xFFF59E0B),
+              ),
+            ];
+            final cols = c.maxWidth >= 900
+                ? 4
+                : c.maxWidth >= 520
+                    ? 2
+                    : 1;
+            const gap = 12.0;
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i += cols)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var j = 0; j < cols; j++) ...[
+                            if (j > 0) const SizedBox(width: gap),
+                            Expanded(
+                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
+        // ── Filter deck (controls locked to 40px, edge-aligned with metrics) ─
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -688,11 +867,15 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: 190,
+                  width: 180,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(_range),
                     initialValue: _range,
-                    decoration: const InputDecoration(labelText: 'Range'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'today', child: Text('Today')),
                       DropdownMenuItem(value: '7d', child: Text('Last 7 days')),
@@ -706,11 +889,15 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                   ),
                 ),
                 SizedBox(
-                  width: 180,
+                  width: 170,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(_sort),
                     initialValue: _sort,
-                    decoration: const InputDecoration(labelText: 'Sort'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                       DropdownMenuItem(value: 'oldest', child: Text('Oldest')),
@@ -723,12 +910,15 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                   ),
                 ),
                 SizedBox(
-                  width: 360,
+                  width: 340,
+                  height: 40,
                   child: TextField(
                     controller: _logSearchCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Search member, code',
-                      prefixIcon: Icon(Icons.search),
+                    style: GoogleFonts.inter(fontSize: 13.5),
+                    decoration: appDenseInputDecoration(
+                      context,
+                      hint: 'Search member, code',
+                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) {
                       _debounce?.cancel();
@@ -743,27 +933,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
           ),
         ),
         const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth >= 1100) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 6, child: searchPanel),
-                  const SizedBox(width: 12),
-                  Expanded(flex: 7, child: todayPanel),
-                ],
-              );
-            }
-            return Column(
-              children: [
-                searchPanel,
-                const SizedBox(height: 12),
-                todayPanel,
-              ],
-            );
-          },
-        ),
+        // Stacked full-width: split kiosk console, then today's attendance.
+        searchPanel,
+        const SizedBox(height: 12),
+        todayPanel,
       ],
     );
   }
@@ -807,16 +980,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/attendance.pdf', token: token, query: {'date': date});
       final name = 'attendance_$date.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Attendance Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -1319,6 +1484,8 @@ class _DashedRRectPainter extends CustomPainter {
   }
 }
 
+/// Premium subtle empty state — faint outer-bound panel, minimized muted-red
+/// utility icon, Inter typography. No heavy floating icon container.
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.icon, required this.title, required this.subtitle});
 
@@ -1326,37 +1493,57 @@ class _EmptyState extends StatelessWidget {
   final String title;
   final String subtitle;
 
+  static const Color _mutedRed = Color(0xFFE06C6C);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
+      padding: const EdgeInsets.symmetric(vertical: 28),
       child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: theme.colorScheme.primaryContainer,
-                    foregroundColor: theme.colorScheme.onPrimaryContainer,
-                    child: Icon(icon, size: 28),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(title, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 460),
+          padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 28),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            // Barely-there fill + faint outer bound (~white 0.03).
+            color: isDark ? Colors.white.withAlpha(4) : Colors.black.withAlpha(3),
+            border: Border.all(
+              color: isDark ? Colors.white.withAlpha(10) : Colors.black.withAlpha(14),
+              width: 1,
             ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Minimized muted-red utility icon — no heavy container.
+              Container(
+                height: 44,
+                width: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _mutedRed.withAlpha(22),
+                ),
+                child: Icon(icon, size: 22, color: _mutedRed),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
       ),

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/ui_kit.dart';
+import '../../core/in_app_pdf.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -13,6 +15,18 @@ final plansControllerProvider =
     StateNotifierProvider.autoDispose<PlansController, AsyncValue<List<Plan>>>((ref) {
   return PlansController(ref)..load();
 });
+
+/// Capitalises the first letter of each word, leaving the rest untouched so
+/// acronyms survive: "abc" -> "Abc", "monthly plan" -> "Monthly Plan",
+/// "VIP" -> "VIP". Used to sanitise free-typed plan names in the table.
+String _titleCase(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty) return s;
+  return s
+      .split(RegExp(r'\s+'))
+      .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+      .join(' ');
+}
 
 class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
   PlansController(this.ref) : super(const AsyncValue.loading());
@@ -140,15 +154,8 @@ class PlansScreen extends ConsumerStatefulWidget {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/plans.pdf', token: token);
       final name = 'plans_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Plans Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -173,46 +180,68 @@ class PlansScreen extends ConsumerStatefulWidget {
         : (itemsPreview.map((p) => p.durationDays).reduce((a, b) => a + b) / itemsPreview.length).round();
     final filteredPreview = state._applyPlanUiFilters(itemsPreview);
 
+    // Flex metric tile — no fixed width. The parent grid wraps each in an
+    // Expanded so 4 tiles span the container edge-to-edge.
     Widget metricCard({
       required String title,
       required String value,
       required String subtitle,
       required IconData icon,
+      required Color accent,
     }) {
-      return SizedBox(
-        width: 260,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 6),
-                      Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.headlineSmall?.copyWith(color: accent),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -244,37 +273,72 @@ class PlansScreen extends ConsumerStatefulWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            metricCard(
-              title: 'Total Plans',
-              value: '$total',
-              subtitle: 'In your gym',
-              icon: Icons.card_membership_outlined,
-            ),
-            metricCard(
-              title: 'Active',
-              value: '$active',
-              subtitle: 'Ready for production',
-              icon: Icons.verified_outlined,
-            ),
-            metricCard(
-              title: 'Inactive',
-              value: '$inactive',
-              subtitle: 'Archived / disabled',
-              icon: Icons.block_outlined,
-            ),
-            metricCard(
-              title: 'Avg Duration',
-              value: '$avgDays days',
-              subtitle: 'Across plans',
-              icon: Icons.timelapse_outlined,
-            ),
-          ],
+        // ── Single-row 4-up metric grid ──────────────────────────────────
+        // 4 cols on desktop (span edge-to-edge via Expanded), 2 cols on tablet,
+        // 1 col stacked on mobile. "Avg Duration" never gets isolated.
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = <Widget>[
+              metricCard(
+                title: 'Total Plans',
+                value: '$total',
+                subtitle: 'In your gym',
+                icon: Icons.card_membership_outlined,
+                accent: theme.colorScheme.primary,
+              ),
+              metricCard(
+                title: 'Active',
+                value: '$active',
+                subtitle: 'Ready for production',
+                icon: Icons.verified_outlined,
+                accent: theme.colorScheme.tertiary,
+              ),
+              metricCard(
+                title: 'Inactive',
+                value: '$inactive',
+                subtitle: 'Archived / disabled',
+                icon: Icons.block_outlined,
+                accent: theme.colorScheme.onSurfaceVariant,
+              ),
+              metricCard(
+                title: 'Avg Duration',
+                value: '$avgDays days',
+                subtitle: 'Across plans',
+                icon: Icons.timelapse_outlined,
+                accent: const Color(0xFFF59E0B),
+              ),
+            ];
+            final cols = c.maxWidth >= 900
+                ? 4
+                : c.maxWidth >= 520
+                    ? 2
+                    : 1;
+            const gap = 12.0;
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i += cols)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var j = 0; j < cols; j++) ...[
+                            if (j > 0) const SizedBox(width: gap),
+                            Expanded(
+                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
+        // ── Compact single-line filter bar (all controls locked to 40px) ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -284,11 +348,15 @@ class PlansScreen extends ConsumerStatefulWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: 190,
+                  width: 180,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._statusFilter),
                     initialValue: state._statusFilter,
-                    decoration: const InputDecoration(labelText: 'Status'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'active', child: Text('Active')),
@@ -298,39 +366,46 @@ class PlansScreen extends ConsumerStatefulWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 180,
+                  width: 170,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._sort),
                     initialValue: state._sort,
-                    decoration: const InputDecoration(labelText: 'Sort'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
-                      DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
-                      DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
+                      DropdownMenuItem(value: 'name_asc', child: Text('Name A-Z')),
+                      DropdownMenuItem(value: 'name_desc', child: Text('Name Z-A')),
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                     ],
                     onChanged: (v) => state._setSort(v ?? 'name_asc'),
                   ),
                 ),
                 SizedBox(
-                  width: 360,
+                  width: 340,
+                  height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Search plan',
-                      prefixIcon: Icon(Icons.search),
+                    style: GoogleFonts.inter(fontSize: 13.5),
+                    decoration: appDenseInputDecoration(
+                      context,
+                      hint: 'Search plan',
+                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 Text(
                   'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                 ),
-                OutlinedButton(
-                  onPressed: () {
-                    state._clearFilters();
-                  },
-                  child: const Text('Clear'),
+                AppFilterPill(
+                  label: 'Clear',
+                  icon: Icons.close_rounded,
+                  selected: false,
+                  onTap: () => state._clearFilters(),
                 ),
               ],
             ),
@@ -377,9 +452,37 @@ class PlansScreen extends ConsumerStatefulWidget {
                 if (constraints.maxWidth >= 900) {
                   return Padding(
                     padding: const EdgeInsets.all(12),
-                    child: DataTable(
+                    // Scoped Theme: Inter typography + faint dividers for the table only.
+                    child: Theme(
+                      data: theme.copyWith(
+                        dividerColor: theme.brightness == Brightness.dark
+                            ? Colors.white.withAlpha(15)
+                            : Colors.grey.shade200,
+                        dataTableTheme: DataTableThemeData(
+                          dividerThickness: 1,
+                          headingTextStyle: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          dataTextStyle: GoogleFonts.inter(
+                            fontSize: 13.5,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                          headingRowColor: WidgetStatePropertyAll(
+                            theme.brightness == Brightness.dark
+                                ? Colors.white.withAlpha(8)
+                                : Colors.black.withAlpha(5),
+                          ),
+                        ),
+                      ),
+                      child: DataTable(
                       columnSpacing: 18,
                       horizontalMargin: 12,
+                      headingRowHeight: 46,
+                      dataRowMinHeight: 52,
+                      dataRowMaxHeight: 58,
                       columns: const [
                         DataColumn(label: Text('Name')),
                         DataColumn(label: Text('Duration')),
@@ -395,7 +498,8 @@ class PlansScreen extends ConsumerStatefulWidget {
                               DataCell(
                                 SizedBox(
                                   width: 220,
-                                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                                  // Title-case so messy entries ("abc") read as "Abc".
+                                  child: Text(_titleCase(p.name), overflow: TextOverflow.ellipsis),
                                 ),
                               ),
                               DataCell(SizedBox(width: 110, child: Text('${p.durationDays} days'))),
@@ -416,35 +520,24 @@ class PlansScreen extends ConsumerStatefulWidget {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    IconButton(
+                                    AppTableActionButton(
+                                      icon: Icons.visibility_outlined,
                                       tooltip: 'View',
                                       onPressed: () => _openViewPlan(context, p),
-                                      icon: const Icon(Icons.visibility),
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                                      iconSize: 20,
                                     ),
                                     const SizedBox(width: 2),
-                                    IconButton(
+                                    AppTableActionButton(
+                                      icon: Icons.edit_outlined,
                                       tooltip: 'Edit',
                                       onPressed: () => _openEditPlan(context, ref, p),
-                                      icon: const Icon(Icons.edit_outlined),
-                                      visualDensity: VisualDensity.compact,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                                      iconSize: 20,
                                     ),
                                     if (canManage) ...[
                                       const SizedBox(width: 2),
-                                      IconButton(
+                                      AppTableActionButton(
+                                        icon: Icons.delete_outline,
                                         tooltip: 'Delete',
+                                        danger: true,
                                         onPressed: () => _confirmDelete(context, ref, p),
-                                        icon: const Icon(Icons.delete_outline),
-                                        visualDensity: VisualDensity.compact,
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                                        iconSize: 20,
                                       ),
                                     ],
                                   ],
@@ -453,6 +546,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                             ],
                           ),
                       ],
+                    ),
                     ),
                   );
                 }
@@ -466,7 +560,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                     final p = filtered[i];
                     return ListTile(
                       leading: const Icon(Icons.card_membership),
-                      title: Text(p.name),
+                      title: Text(_titleCase(p.name)),
                       subtitle: Text(
                         '${p.durationDays} days • Price: ${number.format(p.price)} • Admission: ${number.format(p.admissionFee)}',
                       ),
@@ -889,6 +983,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Flat read-only status pill — Inter, emerald for active, grey otherwise.
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
 
@@ -898,18 +993,24 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isActive = status == 'active';
-    final bg = isActive ? theme.colorScheme.primaryContainer : theme.colorScheme.surfaceContainerHighest;
-    final fg = isActive ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant;
-    return Chip(
-      label: Text(status),
-      backgroundColor: bg,
-      labelStyle: theme.textTheme.labelMedium?.copyWith(color: fg),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: accent.withAlpha(28),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+      ),
+      child: Text(
+        status,
+        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+      ),
     );
   }
 }
 
+/// Interactive status pill — same flat look, with an unfold cue to signal that
+/// tapping toggles active/inactive. Inter typography throughout.
 class _StatusToggleButton extends StatelessWidget {
   const _StatusToggleButton({required this.status, required this.onPressed});
 
@@ -920,19 +1021,32 @@ class _StatusToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isActive = status == 'active';
-    final bg = isActive ? theme.colorScheme.primaryContainer : theme.colorScheme.surfaceContainerHighest;
-    final fg = isActive ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant;
-    return OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        backgroundColor: bg,
-        foregroundColor: fg,
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
-        shape: const StadiumBorder(),
+    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: accent.withAlpha(28),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: accent.withAlpha(70), width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                status,
+                style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.unfold_more, size: 14, color: accent.withAlpha(180)),
+            ],
+          ),
+        ),
       ),
-      child: Text(status),
     );
   }
 }

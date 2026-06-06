@@ -15,6 +15,41 @@ app.use(express.json({ limit: '1mb' }));
 
 const jwtSecret = process.env.JWT_SECRET?.length ? process.env.JWT_SECRET : 'dev-secret-change-me';
 
+// ── Branded PDF factory ──────────────────────────────────────────────────────
+// Creates a buffered PDFKit document and overrides `.end()` so that, right
+// before the stream is finalised, a "Powered by Deverosity" signature is
+// stamped into the bottom margin of every page. Using buffered pages means the
+// footer is drawn after all content is laid out, so it never interferes with
+// the document's text flow. All PDF endpoints use this in place of
+// `new PDFDocument(...)`.
+function createBrandedPdf() {
+  const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+  const originalEnd = doc.end.bind(doc);
+  doc.end = function brandedEnd() {
+    try {
+      const range = doc.bufferedPageRange(); // { start, count }
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(8)
+          .fillColor('#999999')
+          .text(
+            'Powered by Deverosity (https://deverosity.com)',
+            40,
+            doc.page.height - 28,
+            { align: 'center', width: doc.page.width - 80, lineBreak: false },
+          );
+      }
+    } catch (err) {
+      // Footer is decorative — never let it break PDF generation.
+      console.error('PDF footer error:', err?.message || err);
+    }
+    return originalEnd();
+  };
+  return doc;
+}
+
 const signToken = (payload) => {
   return jwt.sign(payload, jwtSecret, { expiresIn: '7d' });
 };
@@ -156,6 +191,23 @@ const newInvoiceNo = () => {
 };
 
 const ensureOperationalTables = async () => {
+  // ── Performance indexes for at-risk member query and 7-day revenue chart ──
+  // These are added idempotently; MySQL silently skips if already present.
+  try {
+    await execute(
+      `ALTER TABLE attendance_logs
+       ADD INDEX IF NOT EXISTS ix_att_log_tenant_checkin (tenant_id, checked_in_at DESC),
+       ADD INDEX IF NOT EXISTS ix_att_log_tenant_member (tenant_id, member_id)`
+    );
+  } catch {}
+  try {
+    await execute(
+      `ALTER TABLE invoices
+       ADD INDEX IF NOT EXISTS ix_inv_tenant_paid_at (tenant_id, status, paid_at),
+       ADD INDEX IF NOT EXISTS ix_inv_tenant_created (tenant_id, status, created_at)`
+    );
+  } catch {}
+
   await execute(
     `CREATE TABLE IF NOT EXISTS attendance_events (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -4407,7 +4459,7 @@ app.get('/invoices/:id/pdf', authMiddleware, requireRole('owner', 'admin'), asyn
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${inv.invoice_no}.pdf"`);
 
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, {
@@ -4507,7 +4559,7 @@ app.get('/reports/monthly-revenue.pdf', authMiddleware, requireRole('owner', 'ad
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="monthly_revenue_${validMonth}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, {
@@ -4733,7 +4785,7 @@ app.get('/reports/expired-members.pdf', authMiddleware, async (req, res) => {
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="expired_members_${toDateOnly(new Date())}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, {
@@ -4805,7 +4857,7 @@ app.get('/reports/daily-attendance.pdf', authMiddleware, async (req, res) => {
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="attendance_${validDate}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, {
@@ -4925,7 +4977,7 @@ app.get('/pdf/dashboard.pdf', authMiddleware, async (req, res) => {
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="dashboard_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Dashboard', subtitle: `Date: ${today}` });
@@ -5024,7 +5076,7 @@ app.get('/pdf/leads.pdf', authMiddleware, requireRole('owner', 'admin', 'staff',
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="leads_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Leads', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5088,7 +5140,7 @@ app.get('/pdf/members.pdf', authMiddleware, async (req, res) => {
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="members_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Members', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5151,7 +5203,7 @@ app.get('/pdf/plans.pdf', authMiddleware, async (req, res) => {
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="plans_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Plans', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5216,7 +5268,7 @@ app.get('/pdf/attendance.pdf', authMiddleware, async (req, res) => {
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="attendance_${validDate}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Attendance', subtitle: `Date: ${validDate}  •  Count: ${rows.length}` });
@@ -5287,7 +5339,7 @@ app.get('/pdf/inventory.pdf', authMiddleware, requireRole('owner', 'admin', 'sta
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="inventory_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Inventory', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5351,7 +5403,7 @@ app.get('/pdf/invoices.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="invoices_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Invoices', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5413,7 +5465,7 @@ app.get('/pdf/invoice/:id.pdf', authMiddleware, requireRole('owner', 'admin'), a
   const safeNo = String(inv.invoice_no ?? invoiceId).replaceAll(/[^A-Za-z0-9_-]/g, '_');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="invoice_${safeNo}_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, {
@@ -5461,7 +5513,7 @@ app.get('/pdf/payments.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="payments_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Payments', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5654,7 +5706,7 @@ app.get('/pdf/reports.pdf', authMiddleware, requireRole('owner', 'admin'), async
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="reports_${validMonth}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   const subtitle = `Month: ${validMonth}  •  Range: ${rangeStart} → ${rangeEnd}`;
@@ -5836,7 +5888,7 @@ app.get('/pdf/expenses.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="expenses_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Expenses', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5912,7 +5964,7 @@ app.get('/pdf/staff.pdf', authMiddleware, requireRole('owner', 'admin'), async (
   const today = toDateOnly(new Date());
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="staff_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Staff', subtitle: `Date: ${today}  •  Count: ${rows.length}` });
@@ -5966,7 +6018,7 @@ app.get('/pdf/settings.pdf', authMiddleware, requireRole('owner', 'admin'), asyn
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="settings_${today}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = createBrandedPdf();
   doc.pipe(res);
 
   drawGymPdfHeader(doc, profile, { title: 'Gym Profile', subtitle: `Date: ${today}` });

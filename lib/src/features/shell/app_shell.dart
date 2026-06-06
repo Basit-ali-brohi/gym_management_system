@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_theme.dart'; // AppTheme + AppTypography
+import '../../core/branding.dart';
 import '../../core/providers.dart';
 import '../../core/whatsapp.dart';
 import '../auth/auth_controller.dart';
@@ -183,7 +185,17 @@ class AppShell extends ConsumerWidget {
     final isDark = mode == ThemeMode.dark;
     final expiringAsync = ref.watch(expiringPreviewProvider);
 
-    final tenantLabel = auth.user?.tenantSlug.isNotEmpty == true ? 'Gym (${auth.user!.tenantSlug})' : 'Gym';
+    // Clean, title-cased gym name (no "(slug)" parenthetical). e.g. a slug of
+    // "smartinn-fitness" → "Smartinn Fitness". Falls back to the product name.
+    final rawSlug = (auth.user?.tenantSlug ?? '').trim();
+    final tenantLabel = rawSlug.isEmpty
+        ? 'Gym Management'
+        : rawSlug
+            .replaceAll(RegExp(r'[_-]+'), ' ')
+            .split(RegExp(r'\s+'))
+            .where((s) => s.isNotEmpty)
+            .map((s) => s[0].toUpperCase() + s.substring(1))
+            .join(' ');
     void toggleTheme() {
       ref.read(themeModeProvider.notifier).setMode(isDark ? ThemeMode.light : ThemeMode.dark);
     }
@@ -515,6 +527,19 @@ class AppShell extends ConsumerWidget {
       );
     }
 
+    // Global Quick Actions ("+"): flag the create intent, then route to the
+    // owning screen which consumes the flag and opens its create modal.
+    void runQuickAction(QuickAction action) {
+      const routes = <QuickAction, String>{
+        QuickAction.addMember: '/members',
+        QuickAction.addLead: '/leads',
+        QuickAction.quickInvoice: '/invoices',
+        QuickAction.recordExpense: '/expenses',
+      };
+      ref.read(pendingQuickActionProvider.notifier).state = action;
+      context.go(routes[action]!);
+    }
+
     final roleList = auth.user?.roles ?? const <String>[];
     final roles = roleList
         .map((r) => r.trim().toLowerCase().replaceAll(' ', '_'))
@@ -613,6 +638,7 @@ class AppShell extends ConsumerWidget {
                       onPressed: openGlobalSearch,
                       icon: const Icon(Icons.search),
                     ),
+                    _QuickActionsButton(onQuickAction: runQuickAction),
                     PopupMenuButton<String>(
                       tooltip: 'Account',
                       onSelected: (v) {
@@ -674,6 +700,7 @@ class AppShell extends ConsumerWidget {
                 expiringAsync: expiringAsync,
                 onOpenNotifications: openExpiringDialog,
                 onOpenSearch: openGlobalSearch,
+                onQuickAction: runQuickAction,
                 child: child,
               ),
             );
@@ -1204,6 +1231,7 @@ class _DesktopFrame extends StatelessWidget {
     required this.expiringAsync,
     required this.onOpenNotifications,
     required this.onOpenSearch,
+    required this.onQuickAction,
     required this.child,
   });
 
@@ -1221,6 +1249,7 @@ class _DesktopFrame extends StatelessWidget {
   final AsyncValue<List<ExpiringPreviewMember>> expiringAsync;
   final VoidCallback onOpenNotifications;
   final VoidCallback onOpenSearch;
+  final void Function(QuickAction action) onQuickAction;
   final Widget child;
 
   @override
@@ -1228,32 +1257,40 @@ class _DesktopFrame extends StatelessWidget {
     final theme = Theme.of(context);
     final bg = theme.scaffoldBackgroundColor;
 
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = theme.colorScheme.primary;
+
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            bg,
-            theme.colorScheme.surface,
-          ],
-        ),
+        color: isDark ? AppTheme.obsidian : bg,
+        gradient: isDark
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [bg, theme.colorScheme.surface],
+              ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
-            color: theme.colorScheme.surface,
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-            boxShadow: [
-              BoxShadow(
-                color: theme.brightness == Brightness.dark ? Colors.black.withAlpha(115) : Colors.black.withAlpha(30),
-                blurRadius: 40,
-                spreadRadius: 0,
-                offset: const Offset(0, 18),
-              ),
-            ],
+            color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
+            // 5 % white border on the outer frame — shape only, no accent colour.
+            border: Border.all(
+              color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
+              width: 0.8,
+            ),
+            boxShadow: isDark
+                ? [
+                    // Accent ambient glow stays in the shadow layer, not on the border.
+                    BoxShadow(color: accent.withAlpha(12), blurRadius: 70, spreadRadius: 0, offset: const Offset(0, 24)),
+                    BoxShadow(color: Colors.black.withAlpha(200), blurRadius: 44, spreadRadius: 0, offset: const Offset(0, 20)),
+                  ]
+                : [
+                    BoxShadow(color: Colors.black.withAlpha(28), blurRadius: 40, spreadRadius: 0, offset: const Offset(0, 18)),
+                  ],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(28),
@@ -1272,7 +1309,9 @@ class _DesktopFrame extends StatelessWidget {
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withAlpha(64),
+                      color: isDark
+                          ? AppTheme.obsidian.withAlpha(200)
+                          : theme.colorScheme.surfaceContainerHighest.withAlpha(64),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(6),
@@ -1287,6 +1326,7 @@ class _DesktopFrame extends StatelessWidget {
                                 onToggleTheme: onToggleTheme,
                                 onOpenNotifications: onOpenNotifications,
                                 onOpenSearch: onOpenSearch,
+                                onQuickAction: onQuickAction,
                                 expiringCount: expiringAsync.valueOrNull?.length ?? 0,
                               ),
                               Expanded(child: child),
@@ -1330,34 +1370,66 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = theme.colorScheme.primary;
+
     return Container(
       width: 260,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(77),
-        border: Border(right: BorderSide(color: theme.colorScheme.outlineVariant)),
+        color: isDark ? AppTheme.obsidian : theme.colorScheme.surfaceContainerHighest.withAlpha(77),
+        border: Border(
+          right: BorderSide(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
+        ),
+        gradient: isDark
+            ? const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0D0D10), AppTheme.obsidian],
+              )
+            : null,
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+          // Premium brand header
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
+              ),
+            ),
             child: Row(
               children: [
-                CircleAvatar(
-                  backgroundColor: theme.colorScheme.primary,
-                  foregroundColor: theme.colorScheme.onPrimary,
-                  child: const Icon(Icons.fitness_center),
+                Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent,
+                    // No border ring on the logo avatar — accent fill is enough.
+                    // Neon glow removed; the avatar colour is the brand signal.
+                  ),
+                  child: Icon(Icons.fitness_center, color: theme.colorScheme.onPrimary, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Gym Management', style: theme.textTheme.titleMedium),
+                      // Bebas Neue lockup — "GYM MANAGEMENT" in brand tracking
+                      Text(
+                        'GYM MANAGEMENT',
+                        style: AppTypography.brandTitle(color: theme.colorScheme.onSurface),
+                      ),
+                      // Inter for tenant slug — data text, must stay readable at 11 px
                       Text(
                         tenantLabel,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        style: AppTypography.uiLabel(
+                          color: isDark ? accent.withAlpha(160) : theme.colorScheme.onSurfaceVariant,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -1365,7 +1437,6 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(12),
@@ -1373,13 +1444,22 @@ class _Sidebar extends StatelessWidget {
                 for (final d in destinations)
                   if (d.isHeader)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 12, 6, 6),
-                      child: Text(
-                        d.label.toUpperCase(),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          letterSpacing: 0.8,
-                        ),
+                      padding: const EdgeInsets.fromLTRB(6, 14, 6, 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            // Nav group headers: Inter small-caps — legibility over brand.
+                            child: Text(
+                              d.label.toUpperCase(),
+                              style: AppTypography.uiLabel(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 11,
+                                weight: FontWeight.w700,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   else
@@ -1392,25 +1472,36 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
+          // User profile footer
           Padding(
             padding: const EdgeInsets.all(12),
             child: Container(
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withAlpha(64),
+                color: isDark ? AppTheme.charcoalHigh.withAlpha(200) : theme.colorScheme.surfaceContainerHighest.withAlpha(64),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
+                border: Border.all(color: isDark ? AppTheme.borderHover : theme.colorScheme.outlineVariant, width: 0.8),
+                boxShadow: isDark ? [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 14, offset: const Offset(0, 6))] : [],
               ),
               child: ListTile(
-                leading: CircleAvatar(child: Text(initials)),
-                title: Text(userName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                leading: CircleAvatar(
+                  backgroundColor: accent.withAlpha(isDark ? 40 : 30),
+                  foregroundColor: accent,
+                  child: Text(initials, style: const TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                title: Text(userName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text(email, maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
                   tooltip: 'Logout',
                   onPressed: onLogout,
-                  icon: const Icon(Icons.logout),
+                  icon: Icon(Icons.logout, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
             ),
+          ),
+          // ── Corporate branding link, pinned to the sidebar base ──────────
+          const Padding(
+            padding: EdgeInsets.only(bottom: 6),
+            child: PoweredByDeverosity(padding: EdgeInsets.symmetric(vertical: 8)),
           ),
         ],
       ),
@@ -1418,7 +1509,9 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _SidebarItem extends StatelessWidget {
+// Sidebar item is stateful so it can track hover internally.
+// No external wrapper needed — all hover logic lives here.
+class _SidebarItem extends StatefulWidget {
   const _SidebarItem({
     required this.icon,
     required this.label,
@@ -1432,97 +1525,90 @@ class _SidebarItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bg = selected ? theme.colorScheme.tertiary.withAlpha(36) : theme.colorScheme.surface.withAlpha(28);
-    final iconColor = selected ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
-    final textColor = selected ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant;
-    return _HoverScale(
-      selected: selected,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-            child: Row(
-              children: [
-                if (selected)
-                  Container(
-                    height: 18,
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  )
-                else
-                  const SizedBox(width: 4),
-                const SizedBox(width: 10),
-                Icon(icon, color: iconColor),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                  ),
-                ),
-                if (selected) Icon(Icons.chevron_right, color: iconColor),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  State<_SidebarItem> createState() => _SidebarItemState();
 }
 
-class _HoverScale extends StatefulWidget {
-  const _HoverScale({required this.child, required this.selected});
-
-  final Widget child;
-  final bool selected;
-
-  @override
-  State<_HoverScale> createState() => _HoverScaleState();
-}
-
-class _HoverScaleState extends State<_HoverScale> {
+class _SidebarItemState extends State<_SidebarItem> {
   bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = theme.colorScheme.primary;
+    // Only show hover state on non-selected items.
     final hover = _hover && !widget.selected;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedScale(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOut,
-        scale: hover ? 1.02 : 1,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOut,
-          decoration: BoxDecoration(
-            boxShadow: hover
-                ? [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withAlpha(38),
-                      blurRadius: 22,
-                      offset: const Offset(0, 12),
+    final iconColor = widget.selected ? accent : theme.colorScheme.onSurfaceVariant;
+    final textColor = widget.selected ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(AppTheme.sidebarItemRadius),
+          // Suppress the default ink splash/highlight so the tile reads as
+          // a flat solid fill, not a rippling Material surface.
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          hoverColor: Colors.transparent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: isDark
+                // Dark mode: white 5% tile on hover — no glow, no scale.
+                ? AppTheme.sidebarItem(accent: accent, selected: widget.selected, hover: hover)
+                // Light mode: black 4% tile on hover — matches Linear / Notion.
+                : BoxDecoration(
+                    borderRadius: BorderRadius.circular(AppTheme.sidebarItemRadius),
+                    color: widget.selected
+                        ? accent.withAlpha(22)
+                        : hover
+                            ? Colors.black.withAlpha(10) // ≈ black.withOpacity(0.04)
+                            : Colors.transparent,
+                    border: Border.all(
+                      color: widget.selected ? accent.withAlpha(80) : Colors.transparent,
+                      width: 0.8,
                     ),
-                  ]
-                : const [],
-            borderRadius: BorderRadius.circular(14),
+                  ),
+            child: Row(
+              children: [
+                // Selected-state accent pill (left edge).
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  height: widget.selected ? 20 : 0,
+                  width: 4,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: widget.selected && isDark
+                        ? AppTheme.neonGlow(accent, blur: 8)
+                        : const [],
+                  ),
+                ),
+                SizedBox(width: widget.selected ? 10 : 14),
+                Icon(widget.icon, color: iconColor, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    style: AppTypography.emphasisLabel(color: textColor).copyWith(
+                      fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                ),
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 160),
+                  opacity: widget.selected ? 1.0 : 0.0,
+                  child: Icon(Icons.chevron_right, color: iconColor, size: 18),
+                ),
+              ],
+            ),
           ),
-          child: widget.child,
         ),
       ),
     );
@@ -1535,6 +1621,7 @@ class _TopBar extends StatelessWidget {
     required this.onToggleTheme,
     required this.onOpenNotifications,
     required this.onOpenSearch,
+    required this.onQuickAction,
     required this.expiringCount,
   });
 
@@ -1542,62 +1629,189 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onToggleTheme;
   final VoidCallback onOpenNotifications;
   final VoidCallback onOpenSearch;
+  final void Function(QuickAction action) onQuickAction;
   final int expiringCount;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withAlpha(210),
-        border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          const Spacer(),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshed')));
-            },
-            icon: const Icon(Icons.refresh),
-          ),
-          IconButton(
-            tooltip: isDark ? 'Light theme' : 'Dark theme',
-            onPressed: onToggleTheme,
-            icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
-          ),
-          _IconBadgeButton(
-            tooltip: 'Notifications',
-            icon: const Icon(Icons.notifications_none),
-            badgeCount: expiringCount,
-            onPressed: onOpenNotifications,
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 260,
-            child: TextField(
-              readOnly: true,
-              onTap: onOpenSearch,
-              decoration: const InputDecoration(
-                hintText: 'Search',
-                prefixIcon: Icon(Icons.search),
+    final isDark2 = theme.brightness == Brightness.dark;
+    final accent = theme.colorScheme.primary;
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: isDark2 ? ImageFilter.blur(sigmaX: 12, sigmaY: 12) : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: isDark2
+                ? AppTheme.charcoal.withAlpha(220)
+                : theme.colorScheme.surface.withAlpha(220),
+            border: Border(
+              bottom: BorderSide(
+                color: isDark2 ? AppTheme.strokeSubtle : theme.colorScheme.outlineVariant,
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Add',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Use Add button inside Members/Plans/Invoices screens')),
-              );
-            },
-            icon: const Icon(Icons.add),
+          child: Row(
+            children: [
+              const Spacer(),
+              IconButton(
+                tooltip: 'Refresh',
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshed')));
+                },
+                icon: Icon(Icons.refresh, color: theme.colorScheme.onSurfaceVariant),
+              ),
+              IconButton(
+                tooltip: isDark ? 'Light theme' : 'Dark theme',
+                onPressed: onToggleTheme,
+                icon: Icon(
+                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              _IconBadgeButton(
+                tooltip: 'Notifications',
+                icon: Icon(Icons.notifications_none, color: theme.colorScheme.onSurfaceVariant),
+                badgeCount: expiringCount,
+                onPressed: onOpenNotifications,
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 260,
+                child: TextField(
+                  readOnly: true,
+                  onTap: onOpenSearch,
+                  decoration: InputDecoration(
+                    hintText: 'Search members, leads…',
+                    prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    filled: true,
+                    fillColor: isDark2 ? AppTheme.charcoalHigh.withAlpha(160) : null,
+                    border: OutlineInputBorder(
+                      borderRadius: AppRadius.mediumAll,
+                      borderSide: BorderSide(color: isDark2 ? AppTheme.borderHover : theme.colorScheme.outlineVariant, width: 0.8),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: AppRadius.mediumAll,
+                      borderSide: BorderSide(color: isDark2 ? AppTheme.borderHover : theme.colorScheme.outlineVariant, width: 0.8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: AppRadius.mediumAll,
+                      borderSide: BorderSide(color: accent, width: 1.3),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _QuickActionsButton(onQuickAction: onQuickAction),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Global "+" Quick Actions popover — opens the four primary create modals from
+/// anywhere in the app, matching the app design system (rounded 12px, line
+/// icons, elegant separation).
+class _QuickActionsButton extends StatelessWidget {
+  const _QuickActionsButton({required this.onQuickAction});
+
+  final void Function(QuickAction action) onQuickAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = theme.colorScheme.primary;
+
+    PopupMenuItem<QuickAction> row(
+      QuickAction value,
+      IconData icon,
+      String title,
+      String subtitle,
+      Color tint,
+    ) {
+      return PopupMenuItem<QuickAction>(
+        value: value,
+        height: 56,
+        child: Row(
+          children: [
+            Container(
+              height: 34,
+              width: 34,
+              decoration: BoxDecoration(
+                color: tint.withAlpha(28),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 18, color: tint),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return PopupMenuButton<QuickAction>(
+      tooltip: 'Quick actions',
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 8),
+      elevation: 12,
+      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          width: 0.8,
+        ),
+      ),
+      onSelected: onQuickAction,
+      itemBuilder: (context) => [
+        const PopupMenuItem<QuickAction>(
+          enabled: false,
+          height: 30,
+          child: Text(
+            'QUICK ACTIONS',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8),
+          ),
+        ),
+        row(QuickAction.addMember, Icons.person_add_alt_1_outlined, 'Add Member',
+            'Register a new member', accent),
+        row(QuickAction.addLead, Icons.person_search_outlined, 'Add Lead',
+            'Capture a CRM enquiry', const Color(0xFF2563EB)),
+        const PopupMenuDivider(),
+        row(QuickAction.quickInvoice, Icons.receipt_long_outlined, 'Quick Invoice',
+            'Auto-generate an invoice', const Color(0xFF10B981)),
+        row(QuickAction.recordExpense, Icons.account_balance_wallet_outlined, 'Record Expense',
+            'Log a business expense', const Color(0xFFF59E0B)),
+      ],
+      child: Container(
+        height: 38,
+        width: 38,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: accent.withAlpha(isDark ? 36 : 24),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accent.withAlpha(90)),
+        ),
+        child: Icon(Icons.add, size: 20, color: accent),
       ),
     );
   }

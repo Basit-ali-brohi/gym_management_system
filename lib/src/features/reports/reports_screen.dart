@@ -1,12 +1,28 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/in_app_pdf.dart';
 import '../auth/auth_controller.dart';
+
+/// Abbreviates large financial figures for chart axes: 114949 -> "115K",
+/// 68422 -> "68K", 1.2M, 3B. Keeps the Y-axis readable and unclipped.
+String _abbrevNum(double v) {
+  final a = v.abs();
+  if (a >= 1e9) return '${(v / 1e9).toStringAsFixed(a >= 1e10 ? 0 : 1)}B';
+  if (a >= 1e6) return '${(v / 1e6).toStringAsFixed(a >= 1e7 ? 0 : 1)}M';
+  if (a >= 1e3) return '${(v / 1e3).round()}K';
+  return v.round().toString();
+}
+
+// Emerald shades for premium gradient line series (Colors has no "emerald").
+const Color _emerald400 = Color(0xFF34D399);
+const Color _emerald700 = Color(0xFF047857);
 
 class _RevenueHistoryPoint {
   const _RevenueHistoryPoint({required this.month, required this.revenue});
@@ -165,46 +181,68 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final q = _searchCtrl.text.trim().toLowerCase();
     final profitAsync = ref.watch(profitSeriesProvider(monthLabel));
     final predictionAsync = ref.watch(revenuePredictionProvider);
+    // Flex KPI tile — no fixed width. The parent grid wraps each in an
+    // Expanded so 4 tiles span the container edge-to-edge.
     Widget metricCard({
       required String title,
       required String value,
       required String subtitle,
       required IconData icon,
+      required Color accent,
     }) {
-      return SizedBox(
-        width: 260,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 6),
-                      Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        style: theme.textTheme.headlineSmall?.copyWith(color: accent),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -224,35 +262,69 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            metricCard(
-              title: 'Total Reports',
-              value: '4',
-              subtitle: 'PDF exports',
-              icon: Icons.picture_as_pdf_outlined,
-            ),
-            metricCard(
-              title: 'Monthly Revenue',
-              value: monthLabel,
-              subtitle: 'Selected month',
-              icon: Icons.trending_up,
-            ),
-            metricCard(
-              title: 'Daily Attendance',
-              value: dateLabel,
-              subtitle: 'Selected date',
-              icon: Icons.how_to_reg,
-            ),
-            metricCard(
-              title: 'Quick Export',
-              value: 'Ready',
-              subtitle: 'One-click PDFs',
-              icon: Icons.timelapse_outlined,
-            ),
-          ],
+        // ── Single-row 4-up KPI block ────────────────────────────────────
+        // 4 cols on desktop (span edge-to-edge via Expanded), 2 on tablet,
+        // 1 stacked on mobile. "Quick Export" never drops to an isolated row.
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = <Widget>[
+              metricCard(
+                title: 'Total Reports',
+                value: '4',
+                subtitle: 'PDF exports',
+                icon: Icons.picture_as_pdf_outlined,
+                accent: theme.colorScheme.primary,
+              ),
+              metricCard(
+                title: 'Monthly Revenue',
+                value: monthLabel,
+                subtitle: 'Selected month',
+                icon: Icons.trending_up,
+                accent: theme.colorScheme.tertiary,
+              ),
+              metricCard(
+                title: 'Daily Attendance',
+                value: dateLabel,
+                subtitle: 'Selected date',
+                icon: Icons.how_to_reg,
+                accent: const Color(0xFF3B82F6),
+              ),
+              metricCard(
+                title: 'Quick Export',
+                value: 'READY',
+                subtitle: 'One-click PDFs',
+                icon: Icons.bolt_outlined,
+                accent: const Color(0xFFF59E0B),
+              ),
+            ];
+            final cols = c.maxWidth >= 900
+                ? 4
+                : c.maxWidth >= 520
+                    ? 2
+                    : 1;
+            const gap = 12.0;
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i += cols)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var j = 0; j < cols; j++) ...[
+                            if (j > 0) const SizedBox(width: gap),
+                            Expanded(
+                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         Card(
@@ -356,11 +428,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                             LineChartData(
                               minY: 0,
                               maxY: maxY * 1.12,
+                              // Sharp, very faint horizontal gridlines only.
                               gridData: FlGridData(
                                 show: true,
-                                horizontalInterval: maxY / 4,
+                                horizontalInterval: maxY / 4 <= 0 ? 1 : maxY / 4,
                                 getDrawingHorizontalLine: (v) => FlLine(
-                                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+                                  color: Colors.white.withAlpha(13), // ~white 5%
                                   strokeWidth: 1,
                                 ),
                                 drawVerticalLine: false,
@@ -369,15 +442,26 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                               titlesData: FlTitlesData(
                                 topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                                 rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                // Left axis: wider reserve + abbreviated K/M labels
+                                // so figures never clip or overlap.
                                 leftTitles: AxisTitles(
                                   sideTitles: SideTitles(
                                     showTitles: true,
-                                    reservedSize: 44,
-                                    interval: maxY / 3,
+                                    reservedSize: 52,
+                                    interval: maxY / 3 <= 0 ? 1 : maxY / 3,
                                     getTitlesWidget: (value, meta) {
-                                      return Text(
-                                        number.format(value),
-                                        style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                      if (value <= 0) return const SizedBox.shrink();
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 8),
+                                        child: Text(
+                                          _abbrevNum(value),
+                                          textAlign: TextAlign.right,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
                                       );
                                     },
                                   ),
@@ -428,20 +512,17 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                 ),
                               ),
                               lineBarsData: [
+                                // Historical trend — accent gradient curve with
+                                // a fading area fill for premium depth.
                                 LineChartBarData(
                                   spots: spots,
                                   isCurved: true,
-                                  curveSmoothness: 0.22,
-                                  color: gold.withValues(alpha: 0.22),
-                                  barWidth: 10,
-                                  dotData: const FlDotData(show: false),
-                                ),
-                                LineChartBarData(
-                                  spots: spots,
-                                  isCurved: true,
-                                  curveSmoothness: 0.22,
-                                  color: gold,
-                                  barWidth: 2.8,
+                                  curveSmoothness: 0.28,
+                                  isStrokeCapRound: true,
+                                  gradient: LinearGradient(
+                                    colors: [Color.lerp(gold, Colors.white, 0.30) ?? gold, gold],
+                                  ),
+                                  barWidth: 3,
                                   dotData: FlDotData(
                                     show: true,
                                     checkToShowDot: (spot, barData) => spot.x >= history.length - 0.5,
@@ -449,30 +530,42 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                       final isPred = spot.x.round() == history.length;
                                       final c = isPred ? neon : gold;
                                       return FlDotCirclePainter(
-                                        radius: isPred ? 4.8 : 3.6,
+                                        radius: isPred ? 5 : 3.6,
                                         color: c,
                                         strokeWidth: 2,
                                         strokeColor: theme.colorScheme.surface,
                                       );
                                     },
                                   ),
+                                  belowBarData: BarAreaData(
+                                    show: true,
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [gold.withAlpha(60), gold.withAlpha(4)],
+                                    ),
+                                  ),
                                 ),
-                                if (predictedSegment.isNotEmpty) ...[
+                                // Predicted segment — emerald neon gradient with
+                                // its own fading area fill (the green "forecast").
+                                if (predictedSegment.isNotEmpty)
                                   LineChartBarData(
                                     spots: predictedSegment,
-                                    isCurved: false,
-                                    color: neon.withValues(alpha: 0.22),
-                                    barWidth: 10,
+                                    isCurved: true,
+                                    curveSmoothness: 0.28,
+                                    isStrokeCapRound: true,
+                                    gradient: const LinearGradient(colors: [_emerald400, _emerald700]),
+                                    barWidth: 3.2,
                                     dotData: const FlDotData(show: false),
+                                    belowBarData: BarAreaData(
+                                      show: true,
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [_emerald400.withAlpha(55), _emerald400.withAlpha(0)],
+                                      ),
+                                    ),
                                   ),
-                                  LineChartBarData(
-                                    spots: predictedSegment,
-                                    isCurved: false,
-                                    color: neon,
-                                    barWidth: 2.8,
-                                    dotData: const FlDotData(show: false),
-                                  ),
-                                ],
                               ],
                             ),
                           ),
@@ -894,16 +987,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       if (token == null || token.isEmpty) throw ApiException('unauthorized');
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes(path, token: token, query: query);
-      final savedPath = preview
-          ? previewBytes(fileName: fileName, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: fileName, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: fileName, title: 'Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -925,23 +1010,33 @@ class _MetricPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withAlpha(28),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.24)),
+        border: Border.all(color: color.withAlpha(70), width: 0.8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            height: 10,
-            width: 10,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            height: 9,
+            width: 9,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: AppTheme.neonGlow(color, blur: 6),
+            ),
           ),
           const SizedBox(width: 8),
-          Text('$label: ', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          Text(value, style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            '$label: ',
+            style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: theme.colorScheme.onSurface),
+          ),
         ],
       ),
     );

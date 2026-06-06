@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 
@@ -8,9 +8,10 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography
 import '../../core/providers.dart';
 import '../../core/whatsapp.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/in_app_pdf.dart';
 import '../auth/auth_controller.dart';
 
 final dashboardSummaryProvider = FutureProvider.autoDispose<DashboardSummary>((ref) async {
@@ -244,7 +245,7 @@ class DashboardScreen extends ConsumerWidget {
     final summaryAsync = ref.watch(dashboardSummaryProvider);
     final number = NumberFormat.decimalPattern();
     final auth = ref.watch(authControllerProvider);
-    final tenantSlug = auth.user?.tenantSlug ?? 'demo';
+    final tenantSlug = auth.user?.tenantSlug ?? '';
 
     return _DashboardScaffold(
       tenantSlug: tenantSlug,
@@ -286,7 +287,10 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
     final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
     final activityCollapsed = ref.watch(dashboardActivityPanelCollapsedProvider);
 
-    Widget mainList({required EdgeInsets padding, required bool includeInlineActivity}) {
+    Widget mainList({
+      required EdgeInsets padding,
+      required bool includeInlineActivity,
+    }) {
       return ListView(
         padding: padding,
         children: [
@@ -299,74 +303,113 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
           const SizedBox(height: 16),
           widget.summaryAsync.when(
             data: (s) {
+              final frozen = s.frozenMembers;
               return LayoutBuilder(
-                builder: (context, constraints) {
-                  final cardWidth = constraints.maxWidth >= 1200 ? 280.0 : 320.0;
-                  final frozen = s.frozenMembers;
-                  return Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (canSeeRevenue)
-                        _MetricCard(
-                          width: cardWidth,
-                          title: 'Total Revenue',
-                          value: widget.number.format(s.revenueTotal),
-                          subtitle: 'All-time paid',
-                          icon: Icons.payments,
-                          onTap: () => context.go('/invoices'),
-                        ),
-                      if (canSeeRevenue)
-                        _MetricCard(
-                          width: cardWidth,
-                          title: 'Revenue (30d)',
-                          value: widget.number.format(s.revenueLast30Days),
-                          subtitle: 'Last 30 days',
-                          icon: Icons.show_chart,
-                          onTap: () => context.go('/invoices'),
-                        ),
-                      _MetricCard(
-                        width: cardWidth,
-                        title: 'Active Members',
-                        value: widget.number.format(s.membershipActiveMembers),
-                        subtitle: 'Membership active',
-                        icon: Icons.people,
-                        onTap: () => context.go('/members'),
-                      ),
-                      _MetricCard(
-                        width: cardWidth,
-                        title: 'Frozen Members',
-                        value: frozen == null ? '—' : widget.number.format(frozen),
-                        subtitle: frozen == null ? 'Restart backend to enable' : 'Access blocked',
-                        icon: Icons.ac_unit_outlined,
-                        onTap: () => context.go('/members'),
-                      ),
-                      if (canSeeRevenue)
-                        _MetricCard(
-                          width: cardWidth,
-                          title: 'Unpaid Dues',
-                          value: widget.number.format(s.unpaidAmount),
-                          subtitle: '${widget.number.format(s.unpaidInvoices)} invoices',
-                          icon: Icons.receipt_long,
-                          onTap: () => context.go('/invoices'),
-                        ),
-                      _MetricCard(
-                        width: cardWidth,
-                        title: "Today's Check-ins",
-                        value: widget.number.format(s.todayCheckins),
-                        subtitle: 'Attendance today',
-                        icon: Icons.how_to_reg,
-                        onTap: () => context.go('/attendance'),
-                      ),
-                      _MetricCard(
-                        width: cardWidth,
-                        title: 'Plans',
-                        value: widget.number.format(s.plansTotal),
-                        subtitle: 'Membership plans',
-                        icon: Icons.card_membership,
-                        onTap: () => context.go('/plans'),
-                      ),
-                    ],
+                builder: (context, box) {
+                  // ── Strict 3-column layout ────────────────────────────────
+                  // Column count is fixed at 3 across all drawer states so the
+                  // KPI grid always shares vertical alignment edges with the
+                  // 3-column Quick Actions grid below.
+                  // Card WIDTH (not column count) changes when the drawer opens
+                  // or closes — the TweenAnimationBuilder handles that smoothly.
+                  final int cols;
+                  if (box.maxWidth >= 480) {
+                    cols = 3;
+                  } else if (box.maxWidth >= 320) {
+                    cols = 2;
+                  } else {
+                    cols = 1;
+                  }
+
+                  const double gap = 12;
+
+                  // Exact card width: fills the row wall-to-wall.
+                  // Same formula used by _QuickActionsSection → guarantees
+                  // the right edge of row N aligns with the banner's right edge.
+                  final double targetW =
+                      (box.maxWidth - (cols - 1) * gap) / cols;
+
+                  // AnimatedSize smooths the height change when the row count
+                  // changes (e.g. 2 rows of 4 → 2 rows of 3 when drawer opens).
+                  // TweenAnimationBuilder interpolates each card's width at
+                  // 60 fps so the expansion/contraction is a true size morph,
+                  // not an instant snap or a cross-fade.
+                  return AnimatedSize(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeInOut,
+                    alignment: Alignment.topCenter,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: targetW),
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeInOut,
+                      builder: (context, animW, _) {
+                        return Wrap(
+                          spacing: gap,
+                          runSpacing: gap,
+                          children: [
+                            if (canSeeRevenue)
+                              _MetricCard(
+                                width: animW,
+                                title: 'Total Revenue',
+                                value: widget.number.format(s.revenueTotal),
+                                subtitle: 'All-time paid',
+                                icon: Icons.payments,
+                                onTap: () => context.go('/invoices'),
+                              ),
+                            if (canSeeRevenue)
+                              _MetricCard(
+                                width: animW,
+                                title: 'Revenue (30d)',
+                                value: widget.number.format(s.revenueLast30Days),
+                                subtitle: 'Last 30 days',
+                                icon: Icons.show_chart,
+                                onTap: () => context.go('/invoices'),
+                              ),
+                            _MetricCard(
+                              width: animW,
+                              title: 'Active Members',
+                              value: widget.number.format(s.membershipActiveMembers),
+                              subtitle: 'Membership active',
+                              icon: Icons.people,
+                              onTap: () => context.go('/members'),
+                            ),
+                            _MetricCard(
+                              width: animW,
+                              title: 'Frozen Members',
+                              value: frozen == null ? '—' : widget.number.format(frozen),
+                              subtitle: frozen == null ? 'Restart backend to enable' : 'Access blocked',
+                              icon: Icons.ac_unit_outlined,
+                              onTap: () => context.go('/members'),
+                            ),
+                            if (canSeeRevenue)
+                              _MetricCard(
+                                width: animW,
+                                title: 'Unpaid Dues',
+                                value: widget.number.format(s.unpaidAmount),
+                                subtitle: '${widget.number.format(s.unpaidInvoices)} invoices',
+                                icon: Icons.receipt_long,
+                                onTap: () => context.go('/invoices'),
+                              ),
+                            _MetricCard(
+                              width: animW,
+                              title: "Today's Check-ins",
+                              value: widget.number.format(s.todayCheckins),
+                              subtitle: 'Attendance today',
+                              icon: Icons.how_to_reg,
+                              onTap: () => context.go('/attendance'),
+                            ),
+                            _MetricCard(
+                              width: animW,
+                              title: 'Plans',
+                              value: widget.number.format(s.plansTotal),
+                              subtitle: 'Membership plans',
+                              icon: Icons.card_membership,
+                              onTap: () => context.go('/plans'),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   );
                 },
               );
@@ -477,7 +520,9 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
 
     return Row(
       children: [
-        Expanded(child: mainList(padding: const EdgeInsets.all(20), includeInlineActivity: false)),
+        Expanded(
+          child: mainList(padding: const EdgeInsets.all(20), includeInlineActivity: false),
+        ),
         AnimatedPadding(
           duration: const Duration(milliseconds: 260),
           curve: Curves.easeInOut,
@@ -583,16 +628,8 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/dashboard.pdf', token: token);
       final name = 'dashboard_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Dashboard Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -613,54 +650,82 @@ class _QuickActionsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Quick Actions', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _ActionCard(
-              title: 'Add Member',
-              subtitle: 'New registration',
-              icon: Icons.person_add_alt_1,
-              onTap: () => context.go('/members'),
-            ),
-            _ActionCard(
-              title: 'Add Plan',
-              subtitle: 'Pricing & duration',
-              icon: Icons.add_card,
-              onTap: () => context.go('/plans'),
-            ),
-            _ActionCard(
-              title: 'Check-in',
-              subtitle: 'Search member & check-in',
-              icon: Icons.qr_code_scanner,
-              onTap: () => context.go('/attendance'),
-            ),
-            _ActionCard(
-              title: 'Add Lead',
-              subtitle: 'New enquiry',
-              icon: Icons.person_search,
-              onTap: () => context.go('/leads'),
-            ),
-            if (canSeeRevenue)
-              _ActionCard(
-                title: 'Invoices',
-                subtitle: 'Generate & track',
-                icon: Icons.receipt_long,
-                onTap: () => context.go('/invoices'),
+        Text(
+          'QUICK ACTIONS',
+          style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, box) {
+            // ── Strict 3-column layout ────────────────────────────────────
+            // Matches the KPI card grid above: identical breakpoints so both
+            // grids always have the same column count and shared vertical edges.
+            // Width (not column count) adapts when the drawer opens / closes.
+            final int cols;
+            if (box.maxWidth >= 480) {
+              cols = 3;
+            } else if (box.maxWidth >= 320) {
+              cols = 2;
+            } else {
+              cols = 1;
+            }
+
+            const double gap = 12;
+
+            // Exact card width: fills the row wall-to-wall, matching banner bounds.
+            final double targetW =
+                (box.maxWidth - (cols - 1) * gap) / cols;
+
+            // ── Animation ─────────────────────────────────────────────────
+            // AnimatedSize handles smooth height change when row count changes.
+            // TweenAnimationBuilder interpolates each card's width at 60 fps,
+            // giving the wall-to-wall expansion effect without snapping.
+            return AnimatedSize(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: targetW),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                builder: (context, animW, _) {
+                  // Local helper keeps card list readable.
+                  Widget card(
+                    String title,
+                    String subtitle,
+                    IconData icon,
+                    VoidCallback onTap,
+                  ) =>
+                      SizedBox(
+                        width: animW,
+                        child: _ActionCard(
+                          title: title,
+                          subtitle: subtitle,
+                          icon: icon,
+                          onTap: onTap,
+                        ),
+                      );
+
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      card('Add Member', 'New registration', Icons.person_add_alt_1, () => context.go('/members')),
+                      card('Add Plan', 'Pricing & duration', Icons.add_card, () => context.go('/plans')),
+                      card('Check-in', 'Search member & check-in', Icons.qr_code_scanner, () => context.go('/attendance')),
+                      card('Add Lead', 'New enquiry', Icons.person_search, () => context.go('/leads')),
+                      if (canSeeRevenue) card('Invoices', 'Generate & track', Icons.receipt_long, () => context.go('/invoices')),
+                      if (canSeeRevenue) card('Record Expense', 'Track costs', Icons.account_balance_wallet, () => context.go('/expenses')),
+                    ],
+                  );
+                },
               ),
-            if (canSeeRevenue)
-              _ActionCard(
-                title: 'Record Expense',
-                subtitle: 'Track costs',
-                icon: Icons.account_balance_wallet,
-                onTap: () => context.go('/expenses'),
-              ),
-          ],
+            );
+          },
         ),
       ],
     );
@@ -793,25 +858,20 @@ class _AtRiskMembersCard extends ConsumerWidget {
     }
 
     Widget header({required int days, required int count}) {
-      final primary = theme.colorScheme.primary;
+      const amber = AppTheme.alertAmber;
       return Row(
         children: [
           Container(
-            height: 40,
-            width: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: primary.withValues(alpha: 0.12),
-              border: Border.all(color: primary.withValues(alpha: 0.28)),
-            ),
-            child: Icon(Icons.warning_amber_outlined, color: primary, size: 20),
+            height: 40, width: 40,
+            decoration: AppTheme.iconBox(color: amber),
+            child: const Center(child: Icon(Icons.warning_amber_rounded, color: amber, size: 20)),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('At-Risk Members', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                Text('AT-RISK MEMBERS', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
                 Text(
                   'No check-in for $days+ days • $count',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -876,17 +936,26 @@ class _AtRiskMembersCard extends ConsumerWidget {
                         final m = payload.items[i];
                         final msg = buildMessage(m);
                         final phoneOk = normalizeWhatsAppPhone(m.phone).isNotEmpty;
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.people),
-                          title: Text('${m.fullName} (${m.memberCode})', maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text('Last: ${fmtDate(m.lastCheckinAt)}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                          trailing: IconButton(
-                            tooltip: phoneOk ? 'WhatsApp' : 'Phone missing',
-                            onPressed: phoneOk ? () => openWhatsApp(phone: m.phone, message: msg) : null,
-                            icon: const Icon(Icons.chat_bubble_outline),
+                        const amber = AppTheme.alertAmber;
+                        final initials = m.fullName.trim().isEmpty ? '?' : m.fullName.trim().substring(0, 1).toUpperCase();
+                        return Container(
+                          decoration: const BoxDecoration(border: Border(left: BorderSide(color: amber, width: 3))),
+                          child: ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: amber.withAlpha(28),
+                              child: Text(initials, style: theme.textTheme.labelMedium?.copyWith(color: amber, fontWeight: FontWeight.w700)),
+                            ),
+                            title: Text('${m.fullName} (${m.memberCode})', maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text('Last visit: ${fmtDate(m.lastCheckinAt)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                            trailing: IconButton(
+                              tooltip: phoneOk ? 'Send WhatsApp' : 'Phone missing',
+                              onPressed: phoneOk ? () => openWhatsApp(phone: m.phone, message: msg) : null,
+                              icon: Icon(Icons.chat_bubble_outline, color: phoneOk ? AppTheme.emerald : theme.colorScheme.onSurfaceVariant),
+                            ),
+                            onTap: () => context.go('/members?q=${Uri.encodeComponent(m.memberCode)}'),
                           ),
-                          onTap: () => context.go('/members?q=${Uri.encodeComponent(m.memberCode)}'),
                         );
                       },
                     ),
@@ -965,7 +1034,7 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Recent Activity', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                Text('RECENT ACTIVITY', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
                 Text(
                   'Auto refresh • check-ins & payments',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -1005,10 +1074,13 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
         );
       }
 
-      return SizedBox(
-        height: floating ? 340 : 320,
+      // Dynamic height: the card wraps exactly around the rows (no trailing
+      // empty surface), but still caps + scrolls when the feed grows long.
+      return ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: floating ? 340 : 320),
         child: Scrollbar(
           child: ListView.separated(
+            shrinkWrap: true,
             itemCount: items.length,
             separatorBuilder: (context, _) => Divider(height: 1, color: theme.colorScheme.outlineVariant),
             itemBuilder: (context, i) {
@@ -1030,18 +1102,21 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
                   : isAlert
                       ? '/inventory'
                       : '/attendance';
-              return ListTile(
-                dense: true,
-                leading: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: chipColor.withValues(alpha: 0.14),
-                  foregroundColor: chipColor,
-                  child: Icon(icon, size: 18),
+              return Container(
+                decoration: BoxDecoration(border: Border(left: BorderSide(color: chipColor, width: 3))),
+                child: ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: chipColor.withAlpha(32),
+                    foregroundColor: chipColor,
+                    child: Icon(icon, size: 17),
+                  ),
+                  title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Text(fmtTime(a.at), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  onTap: () => context.go(route),
                 ),
-                title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: Text(fmtTime(a.at), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                onTap: () => context.go(route),
               );
             },
           ),
@@ -1208,152 +1283,174 @@ class _HeroBanner extends StatelessWidget {
             ? 'Good afternoon'
             : 'Good evening';
     final today = DateFormat('EEE, MMM d').format(DateTime.now());
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 190),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              theme.colorScheme.primary.withAlpha(41),
-              theme.colorScheme.tertiary.withAlpha(31),
-              theme.colorScheme.surface.withAlpha(89),
+    final gold = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
+
+    // Theme-aware banner tokens. Light mode abandons the dark charcoal gradient
+    // for a clean white→cream surface so it no longer clashes with the canvas.
+    final headingColor = isDark ? theme.colorScheme.onSurface : const Color(0xFF1E1E1E);
+    final greetingColor = isDark ? gold.withAlpha(200) : const Color(0xFF475569);
+
+    final BoxDecoration bannerDecoration = isDark
+        ? BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.large),
+            border: Border.all(color: AppTheme.borderSubtle, width: 0.8),
+            gradient: AppTheme.heroBannerGradient(primary: gold),
+            boxShadow: [
+              // Ambient accent glow lives OUTSIDE the card, not on the border.
+              BoxShadow(color: gold.withAlpha(16), blurRadius: 56, spreadRadius: 0, offset: const Offset(0, 28)),
+              BoxShadow(color: Colors.black.withAlpha(110), blurRadius: 30, offset: const Offset(0, 14)),
             ],
-          ),
-        ),
+          )
+        : BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.large),
+            // Razor-thin structural border + soft elevation per spec.
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06), width: 1),
+            // Ultra-soft slate-white → muted premium cream.
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFFAFBFC), Color(0xFFFAF7F0)],
+            ),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+            ],
+          );
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 200),
+      child: Container(
+        decoration: bannerDecoration,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadius.large),
           child: Stack(
             children: [
-            Positioned(
-              right: -40,
-              top: -40,
-              child: Container(
-                height: 190,
-                width: 190,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: theme.colorScheme.primary.withAlpha(31),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 40,
-              bottom: -60,
-              child: Container(
-                height: 220,
-                width: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: theme.colorScheme.tertiary.withAlpha(26),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(18),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$greeting • $today',
-                          style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          gymName.isEmpty ? 'Gym Dashboard' : gymName,
-                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Gym: $tenantSlug • Performance overview',
-                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            const _TagChip(label: 'Members'),
-                            const _TagChip(label: 'Attendance'),
-                            if (canSeeRevenue) const _TagChip(label: 'Billing'),
-                            const _TagChip(label: 'CRM'),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            FilledButton.icon(
-                              onPressed: () => context.go('/members'),
-                              icon: const Icon(Icons.person_add_alt_1_outlined),
-                              label: const Text('Add member'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () => context.go('/attendance'),
-                              icon: const Icon(Icons.qr_code_scanner),
-                              label: const Text('Check-in'),
-                            ),
-                            if (canSeeRevenue)
-                              OutlinedButton.icon(
-                                onPressed: () => context.go('/invoices'),
-                                icon: const Icon(Icons.receipt_long_outlined),
-                                label: const Text('Invoices'),
-                              ),
-                            OutlinedButton.icon(
-                              onPressed: () => context.go('/leads'),
-                              icon: const Icon(Icons.person_search_outlined),
-                              label: const Text('Leads'),
-                            ),
-                          ],
-                        ),
-                      ],
+              // Single decorative accent bloom — top-left corner only.
+              // Very faint in light mode (premium cream tint, no contrast shock).
+              Positioned(
+                left: -60,
+                top: -60,
+                child: Container(
+                  height: 260,
+                  width: 260,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [gold.withAlpha(isDark ? 32 : 12), Colors.transparent],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         children: [
-                          IconButton(
-                            tooltip: 'Refresh',
-                            onPressed: onRefresh,
-                            icon: const Icon(Icons.refresh),
+                          Text(
+                            '$greeting  $today',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: greetingColor,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.3,
+                            ),
                           ),
-                          IconButton(
-                            tooltip: 'PDF',
-                            onPressed: onExportPdf,
-                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                          const SizedBox(height: 6),
+                          Text(
+                            gymName.isEmpty ? 'GYM DASHBOARD' : gymName.toUpperCase(),
+                            style: theme.textTheme.headlineSmall?.copyWith(color: headingColor),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            tenantSlug.trim().isEmpty
+                                ? 'Performance overview'
+                                : 'Gym: $tenantSlug  •  Performance overview',
+                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              const _TagChip(label: 'Members'),
+                              const _TagChip(label: 'Attendance'),
+                              if (canSeeRevenue) const _TagChip(label: 'Billing'),
+                              const _TagChip(label: 'CRM'),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: () => context.go('/members'),
+                                icon: const Icon(Icons.person_add_alt_1_outlined),
+                                label: const Text('Add member'),
+                              ),
+                              _HeroBorderButton(label: 'Check-in', icon: Icons.qr_code_scanner, accent: gold, onTap: () => context.go('/attendance')),
+                              if (canSeeRevenue)
+                                _HeroBorderButton(label: 'Invoices', icon: Icons.receipt_long_outlined, accent: gold, onTap: () => context.go('/invoices')),
+                              _HeroBorderButton(label: 'Leads', icon: Icons.person_search_outlined, accent: theme.colorScheme.tertiary, onTap: () => context.go('/leads')),
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          color: theme.colorScheme.surface.withAlpha(64),
-                          border: Border.all(color: theme.colorScheme.outlineVariant),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Refresh',
+                              onPressed: onRefresh,
+                              icon: Icon(Icons.refresh, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
+                            ),
+                            IconButton(
+                              tooltip: 'PDF',
+                              onPressed: onExportPdf,
+                              icon: Icon(Icons.picture_as_pdf_outlined, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
+                            ),
+                          ],
                         ),
-                        child: Icon(Icons.apartment, size: 44, color: theme.colorScheme.primary),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(height: 10),
+                        // Branding asset — bold gold tile (dark) vs desaturated
+                        // soft-grey circle (light) that blends with the canvas.
+                        isDark
+                            ? Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  color: AppTheme.charcoal.withAlpha(180),
+                                  border: Border.all(color: gold.withAlpha(80)),
+                                  boxShadow: AppTheme.neonGlow(gold, blur: 22),
+                                ),
+                                child: Icon(Icons.fitness_center_rounded, size: 44, color: gold),
+                              )
+                            : Container(
+                                height: 72,
+                                width: 72,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.grey.shade100,
+                                  border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1),
+                                ),
+                                child: Icon(Icons.fitness_center_rounded, size: 34, color: Colors.grey.shade400),
+                              ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
             ],
           ),
         ),
@@ -1370,14 +1467,73 @@ class _TagChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: theme.colorScheme.surface.withAlpha(64),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        // Light: soft grey-100 pill; Dark: elevated charcoal.
+        color: isDark ? AppTheme.charcoalHigh : Colors.grey.shade100,
+        border: Border.all(
+          color: isDark ? AppTheme.borderHover : Colors.black.withValues(alpha: 0.06),
+          width: 0.8,
+        ),
       ),
-      child: Text(label, style: theme.textTheme.labelMedium),
+      child: Text(
+        label,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: isDark ? theme.colorScheme.onSurface.withAlpha(200) : const Color(0xFF374151),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroBorderButton extends StatefulWidget {
+  const _HeroBorderButton({required this.label, required this.icon, required this.accent, required this.onTap});
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+  @override
+  State<_HeroBorderButton> createState() => _HeroBorderButtonState();
+}
+
+class _HeroBorderButtonState extends State<_HeroBorderButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: _hover ? widget.accent.withAlpha(22) : Colors.transparent,
+          border: Border.all(color: widget.accent.withAlpha(_hover ? 180 : 100), width: _hover ? 1.2 : 1.0),
+          boxShadow: _hover ? AppTheme.neonGlow(widget.accent, blur: 14) : const [],
+        ),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icon, size: 18, color: widget.accent),
+                const SizedBox(width: 8),
+                Text(widget.label, style: theme.textTheme.labelLarge?.copyWith(color: widget.accent, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1410,45 +1566,33 @@ class _MetricCardState extends State<_MetricCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hover = _hover;
-    final radius = BorderRadius.circular(16);
-    final goldA = theme.colorScheme.primary;
-    final goldB = Color.lerp(goldA, Colors.white, 0.35) ?? goldA;
-    final blurSigma = hover ? 22.0 : 18.0;
+    final radius = AppRadius.largeAll;
+    final accent = theme.colorScheme.primary;
+    final accentLight = Color.lerp(accent, Colors.white, 0.40) ?? accent;
+    final isDark = theme.brightness == Brightness.dark;
+    final blurSigma = hover ? 30.0 : 24.0;
+
     return SizedBox(
       width: widget.width,
       child: MouseRegion(
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
+          duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
-          scale: hover ? 1.015 : 1,
+          scale: hover ? 1.018 : 1,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOut,
-            transform: Matrix4.translationValues(0, hover ? -5 : 0, 0),
+            transform: Matrix4.translationValues(0, hover ? -6 : 0, 0),
             decoration: BoxDecoration(
               borderRadius: radius,
               boxShadow: hover
                   ? [
-                      BoxShadow(
-                        color: goldA.withAlpha(52),
-                        blurRadius: 34,
-                        offset: const Offset(0, 18),
-                      ),
-                      BoxShadow(
-                        color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 90 : 30),
-                        blurRadius: 26,
-                        offset: const Offset(0, 14),
-                      ),
+                      BoxShadow(color: accent.withAlpha(62), blurRadius: 40, offset: const Offset(0, 20)),
+                      BoxShadow(color: Colors.black.withAlpha(isDark ? 110 : 36), blurRadius: 28, offset: const Offset(0, 14)),
                     ]
-                  : [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 60 : 20),
-                        blurRadius: 18,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
+                  : [BoxShadow(color: Colors.black.withAlpha(isDark ? 75 : 22), blurRadius: 20, offset: const Offset(0, 10))],
             ),
             child: ClipRRect(
               borderRadius: radius,
@@ -1460,63 +1604,56 @@ class _MetricCardState extends State<_MetricCard> {
                     onTap: widget.onTap,
                     borderRadius: radius,
                     child: CustomPaint(
+                      // At rest: barely-visible white shimmer — just shape, no colour.
+                      // On hover: thin accent stroke signals interactivity.
                       foregroundPainter: _GradientStrokePainter(
                         radius: radius,
-                        width: 1,
+                        width: hover ? 1.1 : 0.8,
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
-                            goldA.withAlpha(hover ? 220 : 160),
-                            goldB.withAlpha(hover ? 170 : 110),
-                            goldA.withAlpha(hover ? 220 : 160),
-                          ],
+                          colors: hover
+                              ? [accent.withAlpha(100), accentLight.withAlpha(60), accent.withAlpha(100)]
+                              : [Colors.white.withAlpha(18), Colors.white.withAlpha(8), Colors.white.withAlpha(18)],
                         ),
                       ),
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: radius,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              theme.colorScheme.surfaceContainerHighest.withAlpha(theme.brightness == Brightness.dark ? 70 : 120),
-                              theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 58 : 110),
-                            ],
-                          ),
-                          border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(hover ? 170 : 120)),
+                          // Flat charcoal — no competing colour gradient in the background.
+                          color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Row(
                             children: [
-                              Container(
-                                height: 44,
-                                width: 44,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(14),
-                                  color: theme.colorScheme.primary.withAlpha(hover ? 52 : 38),
-                                  border: Border.all(color: theme.colorScheme.primary.withAlpha(hover ? 130 : 90)),
-                                ),
-                                child: Icon(widget.icon, color: theme.colorScheme.primary),
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                height: 46,
+                                width: 46,
+                                decoration: AppTheme.iconBox(color: accent, hover: hover),
+                                child: Center(child: Icon(widget.icon, color: accent, size: 22)),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 14),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(widget.title, style: theme.textTheme.labelLarge),
-                                    const SizedBox(height: 6),
+                                    Text(widget.title, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                                    const SizedBox(height: 5),
+                                    // headlineSmall is Bebas Neue via theme — preserve only colour.
                                     Text(
                                       widget.value,
-                                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                                      style: theme.textTheme.headlineSmall?.copyWith(
+                                        color: isDark ? accent : theme.colorScheme.onSurface,
+                                      ),
                                     ),
                                     const SizedBox(height: 2),
-                                    Text(widget.subtitle, style: theme.textTheme.bodySmall),
+                                    Text(widget.subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                                   ],
                                 ),
                               ),
-                              Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+                              Icon(Icons.chevron_right, color: accent.withAlpha(hover ? 200 : 100), size: 20),
                             ],
                           ),
                         ),
@@ -1605,42 +1742,72 @@ class _Revenue7dCard extends StatelessWidget {
       return DateFormat('E').format(parsed);
     }
 
-    return Card(
+    final isDark = theme.brightness == Brightness.dark;
+    final gold = theme.colorScheme.primary;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
+        border: Border.all(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 70 : 16), blurRadius: 18, offset: const Offset(0, 8))],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Expanded(child: Text('Revenue (7 days)', style: theme.textTheme.titleMedium)),
-                Text(number.format(total7d), style: theme.textTheme.labelLarge),
+                Container(
+                  height: 38, width: 38,
+                  decoration: AppTheme.iconBox(color: gold),
+                  child: Center(child: Icon(Icons.show_chart_rounded, color: gold, size: 20)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('REVENUE (7 DAYS)', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+                      Text('Daily earnings trend', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // titleLarge = Bebas Neue — keep only colour; tracking comes from theme.
+                    Text(number.format(total7d), style: theme.textTheme.titleLarge?.copyWith(color: gold)),
+                    Text('7-day total', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             SizedBox(
               height: 160,
               child: CustomPaint(
                 painter: _RevenueChartPainter(
                   points: normalized,
-                  lineColor: theme.colorScheme.tertiary,
-                  gridColor: theme.colorScheme.outlineVariant,
+                  lineColor: gold,
+                  gridColor: isDark ? AppTheme.borderHover : theme.colorScheme.outlineVariant,
+                  dotColor: gold,
                 ),
+                size: Size.infinite,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                for (final p in normalized.take(7)) Text(labelFor(p.date), style: theme.textTheme.labelSmall),
+                for (final p in normalized.take(7))
+                  Text(labelFor(p.date), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ],
             ),
             if (maxValue <= 0) ...[
               const SizedBox(height: 8),
-              Text(
-                'No revenue recorded in the last 7 days.',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
+              Text('No revenue recorded in the last 7 days.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ],
           ],
         ),
@@ -1664,19 +1831,22 @@ class _InsightsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final expiringSoon = summary.expiringMembers.where((m) => m.daysLeft >= 0 && m.daysLeft <= 3).length;
-    final items = <({IconData icon, String title, String subtitle})>[];
+    final isDark = theme.brightness == Brightness.dark;
+    final items = <({IconData icon, Color color, String title, String subtitle})>[];
 
     if (expiringSoon > 0) {
       items.add((
         icon: Icons.notifications_active_outlined,
+        color: AppTheme.alertAmber,
         title: '$expiringSoon memberships expiring',
-        subtitle: 'Due within 3 days',
+        subtitle: 'Due within 3 days - action needed',
       ));
     }
 
     if (summary.membershipExpiredMembers > 0) {
       items.add((
         icon: Icons.event_busy_outlined,
+        color: theme.colorScheme.error,
         title: '${number.format(summary.membershipExpiredMembers)} expired members',
         subtitle: 'Renewal follow-ups needed',
       ));
@@ -1685,6 +1855,7 @@ class _InsightsCard extends StatelessWidget {
     if (canSeeRevenue && summary.unpaidAmount > 0) {
       items.add((
         icon: Icons.payments_outlined,
+        color: theme.colorScheme.primary,
         title: '${number.format(summary.unpaidAmount)} unpaid dues',
         subtitle: '${number.format(summary.unpaidInvoices)} invoices pending',
       ));
@@ -1693,67 +1864,76 @@ class _InsightsCard extends StatelessWidget {
     if (summary.todayCheckins == 0) {
       items.add((
         icon: Icons.how_to_reg_outlined,
+        color: theme.colorScheme.tertiary,
         title: 'No check-ins yet',
-        subtitle: 'Today’s attendance is still zero',
+        subtitle: "Today's attendance is still zero",
       ));
     }
 
     if (items.isEmpty) {
       items.add((
         icon: Icons.check_circle_outline,
-        title: 'All good',
-        subtitle: 'No urgent actions right now',
+        color: AppTheme.emeraldNeon,
+        title: 'All systems green',
+        subtitle: 'No urgent actions required',
       ));
     }
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
+        border: Border.all(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 70 : 16), blurRadius: 18, offset: const Offset(0, 8))],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Expanded(child: Text('Insights', style: theme.textTheme.titleMedium)),
+                Expanded(child: Text('INSIGHTS', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface))),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: theme.colorScheme.outlineVariant),
-                    color: theme.colorScheme.surface.withAlpha(32),
+                    border: Border.all(color: isDark ? AppTheme.borderHover : theme.colorScheme.outlineVariant, width: 0.8),
+                    color: isDark ? AppTheme.charcoalHigh : theme.colorScheme.surfaceContainerHighest,
                   ),
-                  child: Text('Today', style: theme.textTheme.labelMedium),
+                  child: Text('Today', style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             for (final it in items.take(4))
               Padding(
-                padding: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.only(bottom: 12),
                 child: Row(
                   children: [
                     Container(
-                      height: 38,
-                      width: 38,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        color: theme.colorScheme.primary.withAlpha(24),
-                        border: Border.all(color: theme.colorScheme.outlineVariant),
-                      ),
-                      child: Icon(it.icon, color: theme.colorScheme.primary),
+                      height: 40,
+                      width: 40,
+                      decoration: AppTheme.iconBox(color: it.color, radius: 12),
+                      child: Center(child: Icon(it.icon, color: it.color, size: 20)),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(it.title, style: theme.textTheme.titleSmall),
+                          Text(it.title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
                           const SizedBox(height: 2),
-                          Text(
-                            it.subtitle,
-                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                          ),
+                          Text(it.subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                         ],
+                      ),
+                    ),
+                    Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: it.color,
+                        boxShadow: AppTheme.neonGlow(it.color, blur: 6),
                       ),
                     ),
                   ],
@@ -1900,24 +2080,26 @@ class _RevenueChartPainter extends CustomPainter {
     required this.points,
     required this.lineColor,
     required this.gridColor,
+    this.dotColor,
   });
 
   final List<RevenuePoint> points;
   final Color lineColor;
   final Color gridColor;
+  final Color? dotColor;
 
   @override
   void paint(Canvas canvas, Size size) {
     final p = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4
+      ..strokeWidth = 2.8
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..color = lineColor;
 
     final grid = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
+      ..strokeWidth = 0.8
       ..color = gridColor;
 
     final padding = 8.0;
@@ -1976,25 +2158,33 @@ class _RevenueChartPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          lineColor.withAlpha(68),
-          lineColor.withAlpha(18),
-          Colors.transparent,
+          lineColor.withAlpha(90),
+          lineColor.withAlpha(38),
+          lineColor.withAlpha(8),
         ],
-        stops: const [0.0, 0.55, 1.0],
+        stops: const [0.0, 0.5, 1.0],
       ).createShader(Rect.fromLTWH(origin.dx, origin.dy, w, h));
 
     canvas.drawPath(fill, fillPaint);
     canvas.drawPath(path, p);
 
-    final dot = Paint()..color = lineColor;
-    for (final pt in pts) {
-      canvas.drawCircle(pt, 2.6, dot);
+    // Neon glow data-point markers
+    if (maxY > 0) {
+      final dc = dotColor ?? lineColor;
+      final dotGlow = Paint()..color = dc.withAlpha(38)..style = PaintingStyle.fill;
+      final dotCore = Paint()..color = dc..style = PaintingStyle.fill;
+      final dotRing = Paint()..color = dc.withAlpha(80)..style = PaintingStyle.stroke..strokeWidth = 1.2;
+      for (final pt in pts) {
+        canvas.drawCircle(pt, 6.0, dotGlow);
+        canvas.drawCircle(pt, 3.5, dotCore);
+        canvas.drawCircle(pt, 5.0, dotRing);
+      }
     }
   }
 
   @override
   bool shouldRepaint(covariant _RevenueChartPainter oldDelegate) {
-    return oldDelegate.points != points || oldDelegate.lineColor != lineColor || oldDelegate.gridColor != gridColor;
+    return oldDelegate.points != points || oldDelegate.lineColor != lineColor || oldDelegate.gridColor != gridColor || oldDelegate.dotColor != dotColor;
   }
 }
 
@@ -2018,7 +2208,8 @@ class _ActiveInactiveCard extends StatelessWidget {
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 620;
             final donutSize = wide ? 150.0 : 132.0;
-            final ringW = wide ? 14.0 : 12.0;
+            // Slimmer rings for the sharp enterprise look (was 14/12).
+            final ringW = wide ? 10.0 : 9.0;
             Widget donut() {
               return SizedBox(
                 height: donutSize,
@@ -2034,22 +2225,27 @@ class _ActiveInactiveCard extends StatelessWidget {
                         activeColor: theme.colorScheme.tertiary,
                         expiredColor: theme.colorScheme.error,
                         trackColor: theme.colorScheme.outlineVariant,
-                        glowColor: theme.colorScheme.primary,
+                        glowColor: theme.colorScheme.tertiary,
                         ringWidth: ringW,
                       ),
                       child: Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            // titleMedium = Bebas Neue — percentage reads as a scoreboard digit.
                             Text(
                               pctText,
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: theme.colorScheme.primary,
+                              ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'Active',
-                              style: theme.textTheme.labelMedium
-                                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: theme.colorScheme.tertiary,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ],
                         ),
@@ -2060,30 +2256,57 @@ class _ActiveInactiveCard extends StatelessWidget {
               );
             }
 
+            // One clean legend row: [• label] ............ [count (pct%)]
+            Widget legendRow(Color dot, String label, int count) {
+              final pctInt = total <= 0 ? 0 : ((count * 100) / total).round();
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          label,
+                          style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '$count ($pctInt%)',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             Widget legend({required CrossAxisAlignment crossAxisAlignment}) {
               return Column(
                 crossAxisAlignment: crossAxisAlignment,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text('Active vs Expired', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      _LegendPill(
-                        color: theme.colorScheme.tertiary,
-                        label: 'Active',
-                        value: active.toString(),
-                      ),
-                      _LegendPill(
-                        color: theme.colorScheme.error,
-                        label: 'Expired',
-                        value: expired.toString(),
-                      ),
-                    ],
+                  const SizedBox(height: 10),
+                  legendRow(theme.colorScheme.tertiary, 'Active', active),
+                  Divider(height: 1, color: theme.dividerColor),
+                  legendRow(theme.colorScheme.error, 'Expired', expired),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Total: $total',
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
-                  const SizedBox(height: 6),
-                  Text('Total: $total', style: theme.textTheme.bodySmall),
                 ],
               );
             }
@@ -2099,63 +2322,23 @@ class _ActiveInactiveCard extends StatelessWidget {
               );
             }
 
-            final legendWidthCap = (constraints.maxWidth / 2) - 110;
-            final legendWidth = min(320.0, max(220.0, legendWidthCap));
             return SizedBox(
               height: 168,
-              child: Stack(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Center(child: donut()),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(width: legendWidth, child: legend(crossAxisAlignment: CrossAxisAlignment.start)),
+                  Expanded(child: Center(child: donut())),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: legend(crossAxisAlignment: CrossAxisAlignment.start),
+                    ),
                   ),
                 ],
               ),
             );
           },
         ),
-      ),
-    );
-  }
-}
-
-class _LegendPill extends StatelessWidget {
-  const _LegendPill({required this.color, required this.label, required this.value});
-
-  final Color color;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        color: theme.colorScheme.surface.withAlpha(32),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 10,
-            width: 10,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(label, style: theme.textTheme.labelMedium),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-          ),
-        ],
       ),
     );
   }
@@ -2216,9 +2399,9 @@ class _DonutPiePainter extends CustomPainter {
       final sw = max(0.0, activeSweep - gap);
       if (sw > 0) {
         final glow = Paint()
-          ..color = glowColor.withAlpha(24)
+          ..color = glowColor.withAlpha(55)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = ringWidth + 6
+          ..strokeWidth = ringWidth + 8
           ..strokeCap = StrokeCap.round;
         canvas.drawArc(arcRect, s, sw, false, glow);
         canvas.drawArc(arcRect, s, sw, false, activePaint);
@@ -2270,71 +2453,89 @@ class _ActionCardState extends State<_ActionCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hover = _hover;
-    final gold = theme.colorScheme.primary;
-    return SizedBox(
-      width: 320,
-      child: MouseRegion(
+    final accent = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final radius = AppRadius.largeAll;
+
+    // Width is controlled by the SizedBox wrapper in _QuickActionsSection.
+    // TweenAnimationBuilder there drives the smooth resize between column modes.
+    return MouseRegion(
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
+          duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
-          scale: hover ? 1.012 : 1,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOut,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-                boxShadow: hover
-                    ? [
-                        BoxShadow(
-                          color: gold.withValues(alpha: 0.16),
-                          blurRadius: 22,
-                          offset: const Offset(0, 12),
+          scale: hover ? 1.013 : 1,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            transform: Matrix4.translationValues(0, hover ? -5 : 0, 0),
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: radius,
+              child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  // Minimum height so cards never collapse on very narrow viewports.
+                  constraints: const BoxConstraints(minHeight: 76),
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    color: isDark
+                        ? (hover ? AppTheme.charcoalHigh : AppTheme.charcoal)
+                        : (hover ? theme.colorScheme.surfaceContainerHighest : theme.colorScheme.surface),
+                    // White-only border at rest; accent on hover — accent is earned.
+                    border: Border.all(
+                      color: hover
+                          ? accent.withAlpha(90)
+                          : (isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant),
+                      width: hover ? 1.0 : 0.8,
+                    ),
+                    boxShadow: hover
+                        ? [
+                            BoxShadow(color: accent.withAlpha(45), blurRadius: 32, offset: const Offset(0, 16)),
+                            BoxShadow(color: Colors.black.withAlpha(isDark ? 100 : 22), blurRadius: 20, offset: const Offset(0, 10)),
+                          ]
+                        : [BoxShadow(color: Colors.black.withAlpha(isDark ? 50 : 12), blurRadius: 12, offset: const Offset(0, 4))],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          height: 44,
+                          width: 44,
+                          decoration: AppTheme.iconBox(color: accent, hover: hover),
+                          child: Center(child: Icon(widget.icon, size: 22, color: accent)),
                         ),
-                      ]
-                    : const [],
-              ),
-              child: Card(
-                margin: EdgeInsets.zero,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          color: gold.withValues(alpha: 0.12),
-                          border: Border.all(color: gold.withValues(alpha: 0.28)),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Bebas Neue for the action verb ("ADD MEMBER", "CHECK-IN")
+                              Text(
+                                widget.title.toUpperCase(),
+                                style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface, fontSize: 15),
+                              ),
+                              const SizedBox(height: 3),
+                              // Inter for the functional subtitle — stays legible at small size
+                              Text(widget.subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                            ],
+                          ),
                         ),
-                        child: Icon(widget.icon, size: 22, color: gold),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(widget.title, style: theme.textTheme.titleMedium),
-                            const SizedBox(height: 4),
-                            Text(widget.subtitle, style: theme.textTheme.bodySmall),
-                          ],
+                        AnimatedOpacity(
+                          duration: const Duration(milliseconds: 160),
+                          opacity: hover ? 1.0 : 0.4,
+                          child: Icon(Icons.chevron_right, color: accent, size: 20),
                         ),
-                      ),
-                      const Icon(Icons.chevron_right),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ),
           ),
         ),
-      ),
     );
   }
 }

@@ -3,14 +3,26 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
+import '../../core/ui_kit.dart';
+import '../../core/in_app_pdf.dart';
 import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
+
+/// Parses a raw DB timestamp ("2026-05-15T05:04:06.000Z") into a clean,
+/// human-readable label: "15 May 2026 • 05:04 AM".
+String _fmtLogTime(String raw) {
+  final d = DateTime.tryParse(raw);
+  if (d == null) return raw;
+  return DateFormat('dd MMM yyyy • hh:mm a').format(d);
+}
 
 final inventoryQueryProvider = StateProvider.autoDispose<_InventoryQuery>((ref) {
   return const _InventoryQuery(q: '', status: '', lowStock: false, from: '', to: '');
@@ -306,15 +318,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/inventory.pdf', token: token);
       final name = 'inventory_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Inventory Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -431,152 +436,221 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         items.fold<double>(0, (sum, p) => sum + (p.onHand.toDouble() * p.price));
                     final criticalCount = items.where((p) => p.onHand < 5 && p.status == 'active').length;
                     final activeSkuCount = items.where((p) => p.status == 'active').length;
+                    final outOfStockCount = items.where((p) => p.onHand <= 0).length;
 
                     return ListView(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       children: [
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            _MetricCard(
-                              title: 'Total store value',
-                              value: money.format(totalStoreValue),
-                              subtitle: 'Current stock value',
-                              icon: Icons.account_balance_wallet_outlined,
-                            ),
-                            _MetricCard(
-                              title: 'Critical stock alerts',
-                              value: '${number.format(criticalCount)} items',
-                              subtitle: 'Requires immediate reorder',
-                              icon: Icons.warning_amber_outlined,
-                            ),
-                            _MetricCard(
-                              title: 'Active SKU count',
-                              value: number.format(activeSkuCount),
-                              subtitle: 'Spread across ${number.format(1)} zone',
-                              icon: Icons.grid_view_outlined,
-                            ),
-                          ],
+                        // ── Edge-to-edge 4-up metric grid ──────────────────
+                        LayoutBuilder(
+                          builder: (context, c) {
+                            final tiles = <Widget>[
+                              _MetricCard(
+                                title: 'Total store value',
+                                value: money.format(totalStoreValue),
+                                subtitle: 'Current stock value',
+                                icon: Icons.account_balance_wallet_outlined,
+                                accent: theme.colorScheme.primary,
+                              ),
+                              _MetricCard(
+                                title: 'Critical stock alerts',
+                                value: '${number.format(criticalCount)} items',
+                                subtitle: 'Requires immediate reorder',
+                                icon: Icons.warning_amber_outlined,
+                                accent: const Color(0xFFF59E0B),
+                              ),
+                              _MetricCard(
+                                title: 'Active SKU count',
+                                value: number.format(activeSkuCount),
+                                subtitle: 'Spread across ${number.format(1)} zone',
+                                icon: Icons.grid_view_outlined,
+                                accent: theme.colorScheme.tertiary,
+                              ),
+                              _MetricCard(
+                                title: 'Out of stock SKUs',
+                                value: number.format(outOfStockCount),
+                                subtitle: 'Zero on-hand units',
+                                icon: Icons.remove_shopping_cart_outlined,
+                                accent: const Color(0xFFE06C6C),
+                              ),
+                            ];
+                            final cols = c.maxWidth >= 900
+                                ? 4
+                                : c.maxWidth >= 520
+                                    ? 2
+                                    : 1;
+                            const gap = 12.0;
+                            return Column(
+                              children: [
+                                for (var i = 0; i < tiles.length; i += cols)
+                                  Padding(
+                                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                                    child: IntrinsicHeight(
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [
+                                          for (var j = 0; j < cols; j++) ...[
+                                            if (j > 0) const SizedBox(width: gap),
+                                            Expanded(
+                                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 14),
+                        // ── Single-line filter strip (controls locked to 40px) ──
                         Card(
                           child: Padding(
                             padding: const EdgeInsets.all(12),
-                            child: Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 180,
-                                  child: DropdownButtonFormField<String>(
-                                    decoration: const InputDecoration(labelText: 'All types'),
-                                    initialValue: 'all',
-                                    items: const [
-                                      DropdownMenuItem(value: 'all', child: Text('All types')),
-                                    ],
-                                    onChanged: null,
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 190,
-                                  child: DropdownButtonFormField<String>(
-                                    key: ValueKey(query.status),
-                                    decoration: const InputDecoration(labelText: 'All Statuses'),
-                                    initialValue: query.status.isEmpty ? null : query.status,
-                                    items: const [
-                                      DropdownMenuItem(value: '', child: Text('All Statuses')),
-                                      DropdownMenuItem(value: 'active', child: Text('Active')),
-                                      DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
-                                    ],
-                                    onChanged: (v) {
-                                      ref.read(inventoryQueryProvider.notifier).state = query.copyWith(status: v ?? '');
+                            child: Builder(
+                              builder: (context) {
+                                final isDark = theme.brightness == Brightness.dark;
+                                Widget dateBtn(String fallback, String value, ValueChanged<DateTime> onPick) {
+                                  final isSet = value.trim().isNotEmpty;
+                                  final accent = theme.colorScheme.primary;
+                                  return SizedBox(
+                                    height: 40,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () async {
+                                        final parsed = DateTime.tryParse(value) ?? DateTime.now();
+                                        final picked = await showDatePicker(
+                                          context: context,
+                                          initialDate: parsed,
+                                          firstDate: DateTime(2000),
+                                          lastDate: DateTime(2100),
+                                        );
+                                        if (picked == null) return;
+                                        onPick(picked);
+                                      },
+                                      icon: Icon(Icons.calendar_today_outlined, size: 15,
+                                          color: isSet ? accent : theme.colorScheme.onSurfaceVariant),
+                                      label: Text(
+                                        isSet ? value.trim() : fallback,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12.5,
+                                          fontWeight: isSet ? FontWeight.w600 : FontWeight.w500,
+                                          color: isSet ? accent : theme.colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                                        side: BorderSide(
+                                          color: isSet
+                                              ? accent.withAlpha(95)
+                                              : (isDark ? Colors.white.withAlpha(33) : Colors.black.withAlpha(33)),
+                                          width: 1,
+                                        ),
+                                        backgroundColor: isSet ? accent.withAlpha(isDark ? 30 : 22) : Colors.transparent,
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                return Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 170,
+                                      height: 40,
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: 'all',
+                                        isDense: true,
+                                        isExpanded: true,
+                                        style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                        decoration: appDenseInputDecoration(context),
+                                        items: const [DropdownMenuItem(value: 'all', child: Text('All types'))],
+                                        onChanged: null,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 170,
+                                      height: 40,
+                                      child: DropdownButtonFormField<String>(
+                                        key: ValueKey(query.status),
+                                        initialValue: query.status.isEmpty ? '' : query.status,
+                                        isDense: true,
+                                        isExpanded: true,
+                                        style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                        decoration: appDenseInputDecoration(context),
+                                        items: const [
+                                          DropdownMenuItem(value: '', child: Text('All Statuses')),
+                                          DropdownMenuItem(value: 'active', child: Text('Active')),
+                                          DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
+                                        ],
+                                        onChanged: (v) {
+                                          ref.read(inventoryQueryProvider.notifier).state = query.copyWith(status: v ?? '');
+                                          ref.read(productsControllerProvider.notifier).load();
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 180,
+                                      height: 40,
+                                      child: DropdownButtonFormField<String>(
+                                        key: ValueKey(sort),
+                                        initialValue: sort,
+                                        isDense: true,
+                                        isExpanded: true,
+                                        style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                        decoration: appDenseInputDecoration(context),
+                                        items: const [
+                                          DropdownMenuItem(value: 'name_asc', child: Text('Name A-Z')),
+                                          DropdownMenuItem(value: 'name_desc', child: Text('Name Z-A')),
+                                          DropdownMenuItem(value: 'stock_desc', child: Text('Stock high-low')),
+                                          DropdownMenuItem(value: 'stock_asc', child: Text('Stock low-high')),
+                                        ],
+                                        onChanged: (v) =>
+                                            ref.read(inventorySortProvider.notifier).state = v ?? 'name_asc',
+                                      ),
+                                    ),
+                                    AppFilterPill(
+                                      label: 'Low stock (<5)',
+                                      icon: Icons.trending_down_rounded,
+                                      selected: query.lowStock,
+                                      accentOverride: const Color(0xFFF59E0B),
+                                      onTap: () {
+                                        ref.read(inventoryQueryProvider.notifier).state =
+                                            query.copyWith(lowStock: !query.lowStock);
+                                        ref.read(productsControllerProvider.notifier).load();
+                                      },
+                                    ),
+                                    dateBtn('From', query.from, (d) {
+                                      ref.read(inventoryQueryProvider.notifier).state =
+                                          query.copyWith(from: DateFormat('yyyy-MM-dd').format(d));
                                       ref.read(productsControllerProvider.notifier).load();
-                                    },
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 180,
-                                  child: DropdownButtonFormField<String>(
-                                    key: ValueKey(sort),
-                                    decoration: const InputDecoration(labelText: 'Sort'),
-                                    initialValue: sort,
-                                    items: const [
-                                      DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
-                                      DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
-                                      DropdownMenuItem(value: 'stock_desc', child: Text('Stock high–low')),
-                                      DropdownMenuItem(value: 'stock_asc', child: Text('Stock low–high')),
-                                    ],
-                                    onChanged: (v) =>
-                                        ref.read(inventorySortProvider.notifier).state = v ?? 'name_asc',
-                                  ),
-                                ),
-                                Text(
-                                  'Showing ${number.format(items.length)} of ${number.format(items.length)}',
-                                  style:
-                                      theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                                ),
-                                OutlinedButton(
-                                  onPressed: () {
-                                    ref.read(inventoryQueryProvider.notifier).state =
-                                        const _InventoryQuery(q: '', status: '', lowStock: false, from: '', to: '');
-                                    ref.read(productsControllerProvider.notifier).load();
-                                  },
-                                  child: const Text('Clear'),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () async {
-                                    DateTime initial = DateTime.now();
-                                    final parsed = DateTime.tryParse(query.from);
-                                    if (parsed != null) initial = parsed;
-                                    final picked = await showDatePicker(
-                                      context: context,
-                                      initialDate: initial,
-                                      firstDate: DateTime(2000),
-                                      lastDate: DateTime(2100),
-                                    );
-                                    if (picked == null) return;
-                                    ref.read(inventoryQueryProvider.notifier).state =
-                                        query.copyWith(from: DateFormat('yyyy-MM-dd').format(picked));
-                                    ref.read(productsControllerProvider.notifier).load();
-                                  },
-                                  icon: const Icon(Icons.date_range),
-                                  label: Text(query.from.trim().isEmpty ? 'From' : query.from.trim()),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () async {
-                                    DateTime initial = DateTime.now();
-                                    final parsed = DateTime.tryParse(query.to);
-                                    if (parsed != null) initial = parsed;
-                                    final picked = await showDatePicker(
-                                      context: context,
-                                      initialDate: initial,
-                                      firstDate: DateTime(2000),
-                                      lastDate: DateTime(2100),
-                                    );
-                                    if (picked == null) return;
-                                    ref.read(inventoryQueryProvider.notifier).state =
-                                        query.copyWith(to: DateFormat('yyyy-MM-dd').format(picked));
-                                    ref.read(productsControllerProvider.notifier).load();
-                                  },
-                                  icon: const Icon(Icons.date_range),
-                                  label: Text(query.to.trim().isEmpty ? 'To' : query.to.trim()),
-                                ),
-                                const SizedBox(width: 6),
-                                FilterChip(
-                                  label: const Text('Low stock (<5)'),
-                                  selected: query.lowStock,
-                                  onSelected: (v) {
-                                    ref.read(inventoryQueryProvider.notifier).state = query.copyWith(lowStock: v);
-                                    ref.read(productsControllerProvider.notifier).load();
-                                  },
-                                ),
-                                FilledButton(
-                                  onPressed: () => ref.read(productsControllerProvider.notifier).load(),
-                                  child: const Text('Apply'),
-                                ),
-                              ],
+                                    }),
+                                    dateBtn('To', query.to, (d) {
+                                      ref.read(inventoryQueryProvider.notifier).state =
+                                          query.copyWith(to: DateFormat('yyyy-MM-dd').format(d));
+                                      ref.read(productsControllerProvider.notifier).load();
+                                    }),
+                                    Text(
+                                      'Showing ${number.format(items.length)}',
+                                      style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                                    ),
+                                    AppFilterPill(
+                                      label: 'Clear',
+                                      icon: Icons.close_rounded,
+                                      selected: false,
+                                      onTap: () {
+                                        ref.read(inventoryQueryProvider.notifier).state =
+                                            const _InventoryQuery(q: '', status: '', lowStock: false, from: '', to: '');
+                                        _searchCtrl.clear();
+                                        ref.read(productsControllerProvider.notifier).load();
+                                      },
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ),
@@ -649,10 +723,32 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                             child: LayoutBuilder(
                               builder: (context, constraints) {
                                 if (constraints.maxWidth >= 900) {
+                                  final isDark = theme.brightness == Brightness.dark;
                                   return SingleChildScrollView(
                                     padding: const EdgeInsets.all(12),
                                     scrollDirection: Axis.horizontal,
-                                    child: DataTable(
+                                    // Scoped Theme: Inter typography + faint dividers.
+                                    child: Theme(
+                                      data: theme.copyWith(
+                                        dividerColor: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
+                                        dataTableTheme: DataTableThemeData(
+                                          dividerThickness: 1,
+                                          headingTextStyle: GoogleFonts.inter(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 0.3,
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                          dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                          headingRowColor: WidgetStatePropertyAll(
+                                            isDark ? Colors.white.withAlpha(8) : Colors.black.withAlpha(5),
+                                          ),
+                                        ),
+                                      ),
+                                      child: DataTable(
+                                      headingRowHeight: 48,
+                                      dataRowMinHeight: 52,
+                                      dataRowMaxHeight: 58,
                                       columns: const [
                                         DataColumn(label: Text('Name')),
                                         DataColumn(label: Text('SKU')),
@@ -671,51 +767,64 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                                 : null,
                                             cells: [
                                               DataCell(Text(p.name)),
-                                              DataCell(Text(p.sku ?? '-')),
-                                              DataCell(Text(number.format(p.price))),
-                                              DataCell(Text(p.onHand.toString())),
+                                              // SKU in tabular Inter for code alignment.
+                                              DataCell(Text(
+                                                p.sku ?? '-',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13,
+                                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                                  color: theme.colorScheme.onSurfaceVariant,
+                                                ),
+                                              )),
+                                              DataCell(Text(
+                                                number.format(p.price),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                                ),
+                                              )),
+                                              DataCell(Text(
+                                                p.onHand.toString(),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                                ),
+                                              )),
                                               DataCell(_StatusChip(status: p.status, onHand: p.onHand)),
                                               DataCell(
                                                 Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    IconButton(
+                                                    // Two high-frequency read actions exposed.
+                                                    AppTableActionButton(
+                                                      icon: Icons.visibility_outlined,
                                                       tooltip: 'View',
                                                       onPressed: () => _openViewProduct(context, p),
-                                                      icon: const Icon(Icons.visibility),
                                                     ),
-                                                    IconButton(
+                                                    const SizedBox(width: 2),
+                                                    AppTableActionButton(
+                                                      icon: Icons.edit_outlined,
                                                       tooltip: 'Edit',
                                                       onPressed: () => _openEditProduct(context, ref, p),
-                                                      icon: const Icon(Icons.edit_outlined),
                                                     ),
-                                                    IconButton(
-                                                      tooltip: 'Stock In/Out',
-                                                      onPressed: () => _openStockMove(context, ref, p),
-                                                      icon: const Icon(Icons.swap_vert),
+                                                    const SizedBox(width: 2),
+                                                    // The rest live in a clean overflow menu.
+                                                    _ProductActionsMenu(
+                                                      canDelete: canDelete,
+                                                      onStockMove: () => _openStockMove(context, ref, p),
+                                                      onSell: () => _openSellProduct(context, ref, p),
+                                                      onMovements: () => _openMovements(context, ref, p.id, p.name),
+                                                      onDelete: () => _confirmDeleteProduct(context, ref, p),
                                                     ),
-                                                    IconButton(
-                                                      tooltip: 'Sell',
-                                                      onPressed: () => _openSellProduct(context, ref, p),
-                                                      icon: const Icon(Icons.point_of_sale),
-                                                    ),
-                                                    IconButton(
-                                                      tooltip: 'Movements',
-                                                      onPressed: () => _openMovements(context, ref, p.id, p.name),
-                                                      icon: const Icon(Icons.history),
-                                                    ),
-                                                    if (canDelete)
-                                                      IconButton(
-                                                        tooltip: 'Deactivate',
-                                                        onPressed: () => _confirmDeleteProduct(context, ref, p),
-                                                        icon: const Icon(Icons.delete_outline),
-                                                      ),
                                                   ],
                                                 ),
                                               ),
                                             ],
                                           ),
                                       ],
+                                    ),
                                     ),
                                   );
                                 }
@@ -1408,20 +1517,52 @@ class _InventoryLogsTab extends ConsumerWidget {
             child: ListView.separated(
               padding: const EdgeInsets.all(12),
               itemCount: items.length,
-              separatorBuilder: (context, _) => const Divider(height: 1),
+              separatorBuilder: (context, _) => Divider(height: 1, color: AppTheme.borderSubtle),
               itemBuilder: (context, i) {
                 final m = items[i];
-                final sign = m.movementType == 'in' ? '+' : '-';
-                final color = m.movementType == 'in' ? theme.colorScheme.tertiary : theme.colorScheme.error;
+                final isIn = m.movementType == 'in';
+                final sign = isIn ? '+' : '-';
+                final color = isIn ? theme.colorScheme.tertiary : theme.colorScheme.error;
+                // Parse the raw DB timestamp into "15 May 2026 • 05:04 AM".
+                final when = _fmtLogTime(m.createdAt);
+                final reason = (m.reason == null || m.reason!.trim().isEmpty) ? null : m.reason!.trim();
                 return ListTile(
                   dense: true,
                   leading: CircleAvatar(
                     radius: 18,
-                    backgroundColor: color.withAlpha(24),
-                    child: Icon(m.movementType == 'in' ? Icons.call_received : Icons.call_made, color: color),
+                    backgroundColor: color.withAlpha(28),
+                    child: Icon(isIn ? Icons.south_west_rounded : Icons.north_east_rounded, color: color, size: 18),
                   ),
-                  title: Text('${m.productName} • $sign${number.format(m.qty)}'),
-                  subtitle: Text('${m.createdAt} ${m.reason == null ? '' : '• ${m.reason}'}'),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          m.productName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Signed quantity badge in tabular Inter.
+                      Text(
+                        '$sign${number.format(m.qty)}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      reason == null ? when : '$when • $reason',
+                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
                 );
               },
             ),
@@ -1439,28 +1580,144 @@ class _SuppliersTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: _EmptyState(
-        title: 'Suppliers',
-        subtitle: 'Suppliers module UI is ready. Supplier CRUD can be added next.',
-        icon: Icons.groups_outlined,
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 360),
+        child: AppDashedPanel(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    height: 56,
+                    width: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: theme.colorScheme.primary.withAlpha(26),
+                      border: Border.all(color: theme.colorScheme.primary.withAlpha(60), width: 0.8),
+                    ),
+                    child: Icon(Icons.local_shipping_outlined, size: 27, color: theme.colorScheme.primary),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'SUPPLIERS',
+                    style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Suppliers module UI is ready. Supplier CRUD can be added next.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
+/// Overflow menu for low-frequency product operations.
+/// Keeps the row clean: View + Edit stay exposed; Stock In/Out, Sell (POS),
+/// Ledger history, and Delete live behind a single more_vert button.
+class _ProductActionsMenu extends StatelessWidget {
+  const _ProductActionsMenu({
+    required this.canDelete,
+    required this.onStockMove,
+    required this.onSell,
+    required this.onMovements,
+    required this.onDelete,
+  });
+
+  final bool canDelete;
+  final VoidCallback onStockMove;
+  final VoidCallback onSell;
+  final VoidCallback onMovements;
+  final VoidCallback onDelete;
+
+  static const Color _mutedRed = Color(0xFFE06C6C);
+
+  PopupMenuItem<String> _item(BuildContext context, String value, IconData icon, String label, {bool danger = false}) {
+    final theme = Theme.of(context);
+    final color = danger ? _mutedRed : theme.colorScheme.onSurface;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 42,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: danger ? _mutedRed : theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 12),
+          Text(label, style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return PopupMenuButton<String>(
+      tooltip: 'More actions',
+      position: PopupMenuPosition.under,
+      elevation: 10,
+      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          width: 0.8,
+        ),
+      ),
+      icon: Icon(Icons.more_vert, size: 18, color: theme.colorScheme.onSurfaceVariant),
+      onSelected: (v) {
+        switch (v) {
+          case 'stock':
+            onStockMove();
+            break;
+          case 'sell':
+            onSell();
+            break;
+          case 'ledger':
+            onMovements();
+            break;
+          case 'delete':
+            onDelete();
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        _item(context, 'stock', Icons.swap_vert, 'Adjust stock'),
+        _item(context, 'sell', Icons.point_of_sale_outlined, 'POS sale'),
+        _item(context, 'ledger', Icons.history, 'Ledger history'),
+        if (canDelete) const PopupMenuDivider(),
+        if (canDelete) _item(context, 'delete', Icons.delete_outline, 'Deactivate', danger: true),
+      ],
+    );
+  }
+}
+
+/// Flex inventory metric tile — fills its parent (no fixed width) so 4 tiles
+/// span edge-to-edge. Figure rendered in Bebas Neue.
 class _MetricCard extends StatefulWidget {
   const _MetricCard({
     required this.title,
     required this.value,
     required this.subtitle,
+    required this.accent,
     this.icon,
   });
 
   final String title;
   final String value;
   final String subtitle;
+  final Color accent;
   final IconData? icon;
 
   @override
@@ -1473,65 +1730,77 @@ class _MetricCardState extends State<_MetricCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 260,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOut,
-          scale: _hover ? 1.015 : 1,
-          child: Card(
-            elevation: _hover ? 6 : 2,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: _hover
-                    ? [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withAlpha(28),
-                          blurRadius: 22,
-                          offset: const Offset(0, 12),
-                        )
-                      ]
-                    : const [],
+    final isDark = theme.brightness == Brightness.dark;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
+          border: Border.all(
+            color: _hover
+                ? widget.accent.withAlpha(90)
+                : (isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant),
+            width: _hover ? 1.0 : 0.8,
+          ),
+          boxShadow: _hover
+              ? [BoxShadow(color: widget.accent.withAlpha(40), blurRadius: 26, offset: const Offset(0, 12))]
+              : [BoxShadow(color: Colors.black.withAlpha(isDark ? 55 : 12), blurRadius: 14, offset: const Offset(0, 6))],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: widget.accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: widget.accent.withAlpha(60), width: 0.8),
+                ),
+                child: Icon(widget.icon ?? Icons.inventory_2_outlined, color: widget.accent, size: 22),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (widget.icon != null)
-                      Container(
-                        height: 40,
-                        width: 40,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(widget.icon, color: theme.colorScheme.onPrimaryContainer),
+                    Text(
+                      widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                    if (widget.icon != null) const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.title,
-                            style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(widget.value, style: theme.textTheme.headlineSmall),
-                          const SizedBox(height: 2),
-                          Text(widget.subtitle, style: theme.textTheme.bodySmall),
-                        ],
+                    ),
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        widget.value,
+                        maxLines: 1,
+                        style: theme.textTheme.headlineSmall?.copyWith(color: widget.accent),
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -1539,6 +1808,8 @@ class _MetricCardState extends State<_MetricCard> {
   }
 }
 
+/// Flat stock-status pill — Inter, colour-coded: low → amber, active →
+/// emerald, inactive → muted grey.
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status, required this.onHand});
 
@@ -1550,39 +1821,23 @@ class _StatusChip extends StatelessWidget {
     final theme = Theme.of(context);
     final low = onHand < 5;
     final isActive = status == 'active';
-    final glow = theme.colorScheme.primary;
-    final bg = low
-        ? glow.withValues(alpha: 0.18)
+    final accent = low
+        ? const Color(0xFFF59E0B)
         : isActive
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surfaceContainerHighest;
-    final fg = low
-        ? glow
-        : isActive
-            ? theme.colorScheme.onPrimaryContainer
+            ? theme.colorScheme.tertiary
             : theme.colorScheme.onSurfaceVariant;
     final label = low ? 'low' : status;
-    return DecoratedBox(
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
+        color: accent.withAlpha(28),
         borderRadius: BorderRadius.circular(999),
-        border: low ? Border.all(color: glow, width: 1.2) : null,
-        boxShadow: low
-            ? [
-                BoxShadow(
-                  color: glow.withValues(alpha: 0.28),
-                  blurRadius: 14,
-                  spreadRadius: 1,
-                ),
-              ]
-            : null,
+        border: Border.all(color: accent.withAlpha(low ? 110 : 70), width: low ? 1.0 : 0.8),
+        boxShadow: low ? AppTheme.neonGlow(accent, blur: 8) : const [],
       ),
-      child: Chip(
-        label: Text(label),
-        backgroundColor: bg,
-        labelStyle: theme.textTheme.labelMedium?.copyWith(color: fg),
-        visualDensity: VisualDensity.compact,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        side: BorderSide.none,
+      child: Text(
+        label,
+        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
       ),
     );
   }

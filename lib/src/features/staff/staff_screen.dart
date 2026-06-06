@@ -2,12 +2,15 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/ui_kit.dart';
+import '../../core/in_app_pdf.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -131,16 +134,8 @@ class StaffScreen extends ConsumerStatefulWidget {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/staff.pdf', token: token);
       final name = 'staff_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Staff Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -160,48 +155,61 @@ class StaffScreen extends ConsumerStatefulWidget {
     final active = itemsPreview.where((u) => u.status == 'active').length;
     final disabled = itemsPreview.where((u) => u.status != 'active').length;
     final admins = itemsPreview.where((u) => u.roles.contains('admin')).length;
-    final filteredPreview = state._applyStaffUiFilters(itemsPreview);
 
+    // Flex team metric tile — fills its parent (no fixed width) so 4 tiles
+    // span edge-to-edge. Count rendered in Bebas Neue.
     Widget metricCard({
       required String title,
       required String value,
       required String subtitle,
       required IconData icon,
+      required Color accent,
     }) {
-      return SizedBox(
-        width: 260,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 6),
-                      Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(value, style: theme.textTheme.headlineSmall?.copyWith(color: accent)),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -239,37 +247,70 @@ class StaffScreen extends ConsumerStatefulWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            metricCard(
-              title: 'Total users',
-              value: '$total',
-              subtitle: 'Team members',
-              icon: Icons.groups_outlined,
-            ),
-            metricCard(
-              title: 'Active',
-              value: '$active',
-              subtitle: 'Can login',
-              icon: Icons.verified_outlined,
-            ),
-            metricCard(
-              title: 'Disabled',
-              value: '$disabled',
-              subtitle: 'Blocked',
-              icon: Icons.block_outlined,
-            ),
-            metricCard(
-              title: 'Admins',
-              value: '$admins',
-              subtitle: 'Has admin role',
-              icon: Icons.admin_panel_settings_outlined,
-            ),
-          ],
+        // ── Edge-to-edge 4-up team metric grid ───────────────────────────
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = <Widget>[
+              metricCard(
+                title: 'Total users',
+                value: '$total',
+                subtitle: 'Team members',
+                icon: Icons.groups_outlined,
+                accent: theme.colorScheme.primary,
+              ),
+              metricCard(
+                title: 'Active',
+                value: '$active',
+                subtitle: 'Can login',
+                icon: Icons.verified_outlined,
+                accent: theme.colorScheme.tertiary,
+              ),
+              metricCard(
+                title: 'Disabled',
+                value: '$disabled',
+                subtitle: 'Blocked',
+                icon: Icons.block_outlined,
+                accent: const Color(0xFFE06C6C),
+              ),
+              metricCard(
+                title: 'Admins',
+                value: '$admins',
+                subtitle: 'Has admin role',
+                icon: Icons.admin_panel_settings_outlined,
+                accent: const Color(0xFF3B82F6),
+              ),
+            ];
+            final cols = c.maxWidth >= 900
+                ? 4
+                : c.maxWidth >= 520
+                    ? 2
+                    : 1;
+            const gap = 12.0;
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i += cols)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var j = 0; j < cols; j++) ...[
+                            if (j > 0) const SizedBox(width: gap),
+                            Expanded(
+                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
+        // ── Filter bar (40px controls; counter decoupled to table footer) ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -279,11 +320,15 @@ class StaffScreen extends ConsumerStatefulWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: 190,
+                  width: 180,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._statusFilter),
                     initialValue: state._statusFilter,
-                    decoration: const InputDecoration(labelText: 'Status'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'active', child: Text('Active')),
@@ -293,39 +338,42 @@ class StaffScreen extends ConsumerStatefulWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 180,
+                  width: 170,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._sort),
                     initialValue: state._sort,
-                    decoration: const InputDecoration(labelText: 'Sort'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
-                      DropdownMenuItem(value: 'name_asc', child: Text('Name A–Z')),
-                      DropdownMenuItem(value: 'name_desc', child: Text('Name Z–A')),
+                      DropdownMenuItem(value: 'name_asc', child: Text('Name A-Z')),
+                      DropdownMenuItem(value: 'name_desc', child: Text('Name Z-A')),
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                     ],
                     onChanged: (v) => state._setSort(v ?? 'name_asc'),
                   ),
                 ),
                 SizedBox(
-                  width: 360,
+                  width: 320,
+                  height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Search staff, role, status',
-                      prefixIcon: Icon(Icons.search),
+                    style: GoogleFonts.inter(fontSize: 13.5),
+                    decoration: appDenseInputDecoration(
+                      context,
+                      hint: 'Search staff, role, status',
+                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._touchFilters(),
                   ),
                 ),
-                Text(
-                  'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-                OutlinedButton(
-                  onPressed: () {
-                    state._clearFilters();
-                  },
-                  child: const Text('Clear'),
+                AppFilterPill(
+                  label: 'Clear',
+                  icon: Icons.close_rounded,
+                  selected: false,
+                  onTap: () => state._clearFilters(),
                 ),
               ],
             ),
@@ -353,50 +401,124 @@ class StaffScreen extends ConsumerStatefulWidget {
             return LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 900) {
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('Name')),
-                        DataColumn(label: Text('Email')),
-                        DataColumn(label: Text('Roles')),
-                        DataColumn(label: Text('Status')),
-                        DataColumn(label: Text('Created')),
-                        DataColumn(label: Text('Action')),
-                      ],
-                      rows: [
-                        for (final u in filtered)
-                          DataRow(
-                            cells: [
-                              DataCell(Text(u.fullName)),
-                              DataCell(Text(u.email)),
-                              DataCell(Wrap(spacing: 6, children: [for (final r in u.roles) _RoleChip(role: r)])),
-                              DataCell(_StatusChip(status: u.status)),
-                              DataCell(Text(fmtDate(u.createdAt))),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'View',
-                                      onPressed: () => _openView(context, u),
-                                      icon: const Icon(Icons.visibility),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Edit roles',
-                                      onPressed: () => _openRoles(context, ref, u),
-                                      icon: const Icon(Icons.manage_accounts),
-                                    ),
-                                    IconButton(
-                                      tooltip: u.status == 'active' ? 'Disable' : 'Enable',
-                                      onPressed: () => _confirmToggleStatus(context, ref, u),
-                                      icon: Icon(u.status == 'active' ? Icons.block : Icons.check_circle_outline),
-                                    ),
-                                  ],
+                  final isDark = theme.brightness == Brightness.dark;
+                  // Unified ledger panel: table on top, footer counter below.
+                  return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: theme.colorScheme.surface,
+                      border: Border.all(
+                        color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
+                        width: 0.8,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Theme(
+                            data: theme.copyWith(
+                              dividerColor: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
+                              dataTableTheme: DataTableThemeData(
+                                dividerThickness: 1,
+                                headingTextStyle: GoogleFonts.inter(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.3,
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
+                                dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                headingRowColor: WidgetStatePropertyAll(
+                                  isDark ? Colors.white.withAlpha(8) : Colors.black.withAlpha(5),
+                                ),
+                              ),
+                            ),
+                            child: DataTable(
+                              headingRowHeight: 48,
+                              dataRowMinHeight: 54,
+                              dataRowMaxHeight: 60,
+                              columns: const [
+                                DataColumn(label: Text('Name')),
+                                DataColumn(label: Text('Email')),
+                                DataColumn(label: Text('Roles')),
+                                DataColumn(label: Text('Status')),
+                                DataColumn(label: Text('Created')),
+                                DataColumn(label: Text('Action')),
+                              ],
+                              rows: [
+                                for (final u in filtered)
+                                  DataRow(
+                                    cells: [
+                                      DataCell(Text(
+                                        u.fullName,
+                                        style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                                      )),
+                                      // Email in Inter, muted, for a technical look.
+                                      DataCell(Text(
+                                        u.email,
+                                        style: GoogleFonts.inter(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+                                      )),
+                                      DataCell(Wrap(spacing: 6, children: [for (final r in u.roles) _RoleChip(role: r)])),
+                                      DataCell(_StatusChip(status: u.status)),
+                                      DataCell(Text(
+                                        fmtDate(u.createdAt),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          color: theme.colorScheme.onSurfaceVariant,
+                                          fontFeatures: const [FontFeature.tabularFigures()],
+                                        ),
+                                      )),
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            // Hover-circle actions with a wider gap to avoid misclicks.
+                                            AppTableActionButton(
+                                              icon: Icons.visibility_outlined,
+                                              tooltip: 'View',
+                                              onPressed: () => _openView(context, u),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            AppTableActionButton(
+                                              icon: Icons.manage_accounts_outlined,
+                                              tooltip: 'Manage roles',
+                                              onPressed: () => _openRoles(context, ref, u),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            AppTableActionButton(
+                                              icon: u.status == 'active' ? Icons.block : Icons.check_circle_outline,
+                                              tooltip: u.status == 'active' ? 'Disable' : 'Enable',
+                                              danger: u.status == 'active',
+                                              onPressed: () => _confirmToggleStatus(context, ref, u),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        // Decoupled footer counter, lower-right.
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              top: BorderSide(color: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Spacer(),
+                              Text(
+                                'Showing ${number.format(filtered.length)} of ${number.format(items.length)}',
+                                style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
+                        ),
                       ],
                     ),
                   );
@@ -767,6 +889,8 @@ class StaffScreen extends ConsumerStatefulWidget {
   }
 }
 
+/// Flat role pill — Inter, subtle tinted fill: owner → primary, admin →
+/// blue, staff/other → muted grey.
 class _RoleChip extends StatelessWidget {
   const _RoleChip({required this.role});
 
@@ -775,22 +899,22 @@ class _RoleChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bg = role == 'owner'
-        ? theme.colorScheme.primaryContainer
+    final accent = role == 'owner'
+        ? theme.colorScheme.primary
         : role == 'admin'
-            ? theme.colorScheme.tertiaryContainer
-            : theme.colorScheme.surfaceContainerHighest;
-    final fg = role == 'owner'
-        ? theme.colorScheme.onPrimaryContainer
-        : role == 'admin'
-            ? theme.colorScheme.onTertiaryContainer
+            ? const Color(0xFF3B82F6)
             : theme.colorScheme.onSurfaceVariant;
-    return Chip(
-      label: Text(role),
-      backgroundColor: bg,
-      labelStyle: theme.textTheme.labelMedium?.copyWith(color: fg),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: accent.withAlpha(26),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withAlpha(64), width: 0.8),
+      ),
+      child: Text(
+        role,
+        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+      ),
     );
   }
 }
@@ -856,6 +980,7 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 }
 
+/// Flat status pill — Inter, emerald for active, muted grey otherwise.
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
 
@@ -865,14 +990,18 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isActive = status == 'active';
-    final bg = isActive ? theme.colorScheme.primaryContainer : theme.colorScheme.surfaceContainerHighest;
-    final fg = isActive ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant;
-    return Chip(
-      label: Text(status),
-      backgroundColor: bg,
-      labelStyle: theme.textTheme.labelMedium?.copyWith(color: fg),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: accent.withAlpha(28),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+      ),
+      child: Text(
+        status,
+        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+      ),
     );
   }
 }

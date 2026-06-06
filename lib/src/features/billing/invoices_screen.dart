@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
+import '../../core/ui_kit.dart';
 import '../../core/whatsapp.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/in_app_pdf.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
 
@@ -185,6 +187,18 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 
   Widget _build(BuildContext context, WidgetRef ref, _InvoicesScreenState state) {
     final invoicesAsync = ref.watch(invoicesControllerProvider);
+    // Global "+" Quick Action → open Auto Invoice modal once on arrival.
+    final pendingAction = ref.watch(pendingQuickActionProvider);
+    if (pendingAction == null) {
+      state.quickActionHandled = false;
+    } else if (pendingAction == QuickAction.quickInvoice && !state.quickActionHandled) {
+      state.quickActionHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!state.mounted) return;
+        ref.read(pendingQuickActionProvider.notifier).state = null;
+        _openAutoInvoice(context, ref);
+      });
+    }
     final theme = Theme.of(context);
     final number = NumberFormat.decimalPattern();
     final dt = DateFormat('yyyy-MM-dd HH:mm');
@@ -193,55 +207,68 @@ class InvoicesScreen extends ConsumerStatefulWidget {
     final pagePreview = invoicesAsync.valueOrNull ?? const _InvoicesPage.empty();
     final itemsPreview = pagePreview.items;
     final total = pagePreview.total;
-    final loaded = itemsPreview.length;
     final paid = itemsPreview.where((i) => i.status == 'paid').length;
     final unpaid = itemsPreview.where((i) => i.status == 'unpaid').length;
     final voided = itemsPreview.where((i) => i.status == 'void').length;
-    final fromN = total == 0 ? 0 : pagePreview.offset + 1;
-    final toN = total == 0 ? 0 : min(pagePreview.offset + loaded, total);
-    final canPrev = pagePreview.offset > 0;
-    final canNext = pagePreview.offset + loaded < total;
+    // Pagination is computed page-locally inside the data branch (see footer).
 
+    // Flex ledger tile — no fixed width. The parent grid wraps each in an
+    // Expanded so 4 tiles span the container edge-to-edge.
     Widget metricCard({
       required String title,
       required String value,
       required String subtitle,
       required IconData icon,
+      required Color accent,
     }) {
-      return SizedBox(
-        width: 260,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 42,
+                width: 42,
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(icon, color: accent, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 6),
-                      Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: theme.textTheme.bodySmall),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(value, style: theme.textTheme.headlineSmall?.copyWith(color: accent)),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -279,37 +306,72 @@ class InvoicesScreen extends ConsumerStatefulWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            metricCard(
-              title: 'Total invoices',
-              value: '$total',
-              subtitle: 'Filtered total',
-              icon: Icons.receipt_long,
-            ),
-            metricCard(
-              title: 'Paid',
-              value: '$paid',
-              subtitle: 'This page',
-              icon: Icons.verified_outlined,
-            ),
-            metricCard(
-              title: 'Unpaid',
-              value: '$unpaid',
-              subtitle: 'This page',
-              icon: Icons.pending_actions_outlined,
-            ),
-            metricCard(
-              title: 'Voided',
-              value: '$voided',
-              subtitle: 'This page',
-              icon: Icons.block_outlined,
-            ),
-          ],
+        // ── Single-row 4-up ledger summary ───────────────────────────────
+        // 4 cols on desktop (span edge-to-edge via Expanded), 2 on tablet,
+        // 1 stacked on mobile. "Voided" never drops to an isolated row.
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = <Widget>[
+              metricCard(
+                title: 'Total invoices',
+                value: '$total',
+                subtitle: 'Filtered total',
+                icon: Icons.receipt_long,
+                accent: theme.colorScheme.primary,
+              ),
+              metricCard(
+                title: 'Paid',
+                value: '$paid',
+                subtitle: 'This page',
+                icon: Icons.verified_outlined,
+                accent: theme.colorScheme.tertiary,
+              ),
+              metricCard(
+                title: 'Unpaid',
+                value: '$unpaid',
+                subtitle: 'This page',
+                icon: Icons.pending_actions_outlined,
+                accent: const Color(0xFFF59E0B),
+              ),
+              metricCard(
+                title: 'Voided',
+                value: '$voided',
+                subtitle: 'This page',
+                icon: Icons.block_outlined,
+                accent: theme.colorScheme.onSurfaceVariant,
+              ),
+            ];
+            final cols = c.maxWidth >= 900
+                ? 4
+                : c.maxWidth >= 520
+                    ? 2
+                    : 1;
+            const gap = 12.0;
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i += cols)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var j = 0; j < cols; j++) ...[
+                            if (j > 0) const SizedBox(width: gap),
+                            Expanded(
+                              child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
+        // ── Filter deck (dense 40px controls; pagination decoupled below) ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -319,11 +381,15 @@ class InvoicesScreen extends ConsumerStatefulWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: 190,
+                  width: 180,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._statusFilter),
                     initialValue: state._statusFilter,
-                    decoration: const InputDecoration(labelText: 'Status'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
                       DropdownMenuItem(value: 'paid', child: Text('Paid')),
@@ -335,48 +401,41 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 ),
                 SizedBox(
                   width: 180,
+                  height: 40,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(state._sort),
                     initialValue: state._sort,
-                    decoration: const InputDecoration(labelText: 'Sort'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
                       DropdownMenuItem(value: 'oldest', child: Text('Oldest')),
-                      DropdownMenuItem(value: 'total_desc', child: Text('Total high–low')),
+                      DropdownMenuItem(value: 'total_desc', child: Text('Total high-low')),
                     ],
                     onChanged: (v) => state._setSort(v ?? 'newest'),
                   ),
                 ),
                 SizedBox(
-                  width: 360,
+                  width: 320,
+                  height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    decoration: InputDecoration(
-                      hintText: 'Search invoice, member, code',
-                      prefixIcon: Icon(Icons.search),
+                    style: GoogleFonts.inter(fontSize: 13.5),
+                    decoration: appDenseInputDecoration(
+                      context,
+                      hint: 'Search invoice, member, code',
+                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._scheduleApplyFilters(),
                   ),
                 ),
-                Text(
-                  total == 0
-                      ? '—'
-                      : 'Showing ${number.format(fromN)}–${number.format(toN)} of ${number.format(total)}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-                IconButton(
-                  tooltip: 'Previous',
-                  onPressed: canPrev ? () => ref.read(invoicesControllerProvider.notifier).prevPage() : null,
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                IconButton(
-                  tooltip: 'Next',
-                  onPressed: canNext ? () => ref.read(invoicesControllerProvider.notifier).nextPage() : null,
-                  icon: const Icon(Icons.chevron_right),
-                ),
-                OutlinedButton(
-                  onPressed: state._clearFilters,
-                  child: const Text('Clear'),
+                AppFilterPill(
+                  label: 'Clear',
+                  icon: Icons.close_rounded,
+                  selected: false,
+                  onTap: state._clearFilters,
                 ),
               ],
             ),
@@ -400,133 +459,212 @@ class InvoicesScreen extends ConsumerStatefulWidget {
               return dt.format(parsed);
             }
 
+            // Pagination values for the decoupled footer (uses live page data).
+            final fFromN = page.total == 0 ? 0 : page.offset + 1;
+            final fToN = min(page.offset + items.length, page.total);
+            final fCanPrev = page.offset > 0;
+            final fCanNext = page.offset + items.length < page.total;
+
+            // Footer bar attached seamlessly under the table pane.
+            Widget paginationFooter() {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(
+                      color: theme.brightness == Brightness.dark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      page.total == 0
+                          ? 'No invoices'
+                          : 'Showing ${number.format(fFromN)}-${number.format(fToN)} of ${number.format(page.total)}',
+                      style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Previous',
+                      onPressed: fCanPrev ? () => ref.read(invoicesControllerProvider.notifier).prevPage() : null,
+                      icon: const Icon(Icons.chevron_left),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Next',
+                      onPressed: fCanNext ? () => ref.read(invoicesControllerProvider.notifier).nextPage() : null,
+                      icon: const Icon(Icons.chevron_right),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              );
+            }
+
             return LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 900) {
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                          columns: const [
-                            DataColumn(label: Text('Invoice')),
-                            DataColumn(label: Text('Member')),
-                            DataColumn(label: Text('Total')),
-                            DataColumn(label: Text('Status')),
-                            DataColumn(label: Text('Created')),
-                            DataColumn(label: Text('Action')),
-                          ],
-                          rows: [
-                            for (final inv in items)
-                              DataRow(
-                                cells: [
-                                  DataCell(Text(inv.invoiceNo)),
-                                  DataCell(Text(inv.memberName)),
-                                  DataCell(Text(number.format(inv.total))),
-                                  DataCell(_StatusChip(status: inv.status)),
-                                  DataCell(Text(formatDate(inv.createdAt))),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        _CompactIconButton(
-                                          tooltip: 'View',
-                                          onPressed: () => _openInvoiceView(context, ref, inv.id),
-                                          icon: Icons.visibility,
-                                        ),
-                                        _CompactIconButton(
-                                          tooltip: 'Edit',
-                                          onPressed: inv.status == 'paid'
-                                              ? null
-                                              : () => _openInvoiceEdit(context, ref, inv.id),
-                                          icon: Icons.edit_outlined,
-                                        ),
-                                        _CompactIconButton(
-                                          tooltip: 'PDF',
-                                          onPressed: () => _openInvoicePdfActions(context, ref, inv),
-                                          icon: Icons.picture_as_pdf_outlined,
-                                        ),
-                                        if (canDelete)
-                                          _CompactIconButton(
-                                            tooltip: 'Void',
-                                            onPressed: inv.status == 'paid' ? null : () => _confirmVoid(context, ref, inv),
-                                            icon: Icons.delete_outline,
-                                          ),
-                                        if (inv.status == 'unpaid') ...[
-                                          const SizedBox(width: 6),
-                                          FilledButton(
-                                            style: FilledButton.styleFrom(
-                                              visualDensity: VisualDensity.compact,
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                              minimumSize: const Size(0, 32),
-                                            ),
-                                            onPressed: () => ref
-                                                .read(invoicesControllerProvider.notifier)
-                                                .markPaid(inv.id),
-                                            child: const Text('Paid'),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                  // Unified table panel: bordered window with the table on top
+                  // and the pagination footer seamlessly attached below.
+                  return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: theme.colorScheme.surface,
+                      border: Border.all(
+                        color: theme.brightness == Brightness.dark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
+                        width: 0.8,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          // Scoped Theme: Inter typography + faint dividers.
+                          child: Theme(
+                            data: theme.copyWith(
+                              dividerColor: theme.brightness == Brightness.dark
+                                  ? Colors.white.withAlpha(15)
+                                  : Colors.grey.shade200,
+                              dataTableTheme: DataTableThemeData(
+                                dividerThickness: 1,
+                                headingTextStyle: GoogleFonts.inter(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.3,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                headingRowColor: WidgetStatePropertyAll(
+                                  theme.brightness == Brightness.dark
+                                      ? Colors.white.withAlpha(8)
+                                      : Colors.black.withAlpha(5),
+                                ),
                               ),
-                          ],
+                            ),
+                            child: DataTable(
+                              headingRowHeight: 48,
+                              dataRowMinHeight: 52,
+                              dataRowMaxHeight: 58,
+                              columns: const [
+                                DataColumn(label: Text('Invoice')),
+                                DataColumn(label: Text('Member')),
+                                DataColumn(label: Text('Total')),
+                                DataColumn(label: Text('Status')),
+                                DataColumn(label: Text('Created')),
+                                DataColumn(label: Text('Action')),
+                              ],
+                              rows: [
+                                for (final inv in items)
+                                  DataRow(
+                                    cells: [
+                                      DataCell(Text(inv.invoiceNo)),
+                                      DataCell(Text(inv.memberName)),
+                                      // Monetary figure in tabular Inter.
+                                      DataCell(Text(
+                                        number.format(inv.total),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w600,
+                                          fontFeatures: const [FontFeature.tabularFigures()],
+                                        ),
+                                      )),
+                                      DataCell(_StatusChip(status: inv.status)),
+                                      DataCell(Text(formatDate(inv.createdAt))),
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            // High-frequency read actions stay exposed.
+                                            AppTableActionButton(
+                                              icon: Icons.visibility_outlined,
+                                              tooltip: 'View',
+                                              onPressed: () => _openInvoiceView(context, ref, inv.id),
+                                            ),
+                                            const SizedBox(width: 2),
+                                            AppTableActionButton(
+                                              icon: Icons.picture_as_pdf_outlined,
+                                              tooltip: 'Export PDF',
+                                              onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                                            ),
+                                            const SizedBox(width: 2),
+                                            // Status-altering workflows live in the overflow menu.
+                                            _InvoiceActionsMenu(
+                                              status: inv.status,
+                                              canDelete: canDelete,
+                                              onMarkPaid: () =>
+                                                  ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
+                                              onEdit: () => _openInvoiceEdit(context, ref, inv.id),
+                                              onVoid: () => _confirmVoid(context, ref, inv),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        paginationFooter(),
+                      ],
                     ),
                   );
                 }
 
-                return ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final inv = items[i];
-                    return ListTile(
-                        leading: const Icon(Icons.receipt_long),
-                        title: Text('${inv.invoiceNo} • ${inv.memberName}'),
-                        subtitle: Text('Total: ${number.format(inv.total)} • ${formatDate(inv.createdAt)}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _StatusChip(status: inv.status),
-                            const SizedBox(width: 6),
-                            _CompactIconButton(
-                              tooltip: 'View',
-                              onPressed: () => _openInvoiceView(context, ref, inv.id),
-                              icon: Icons.visibility,
-                            ),
-                            _CompactIconButton(
-                              tooltip: 'Edit',
-                              onPressed: inv.status == 'paid' ? null : () => _openInvoiceEdit(context, ref, inv.id),
-                              icon: Icons.edit_outlined,
-                            ),
-                            _CompactIconButton(
-                              tooltip: 'PDF',
-                              onPressed: () => _openInvoicePdfActions(context, ref, inv),
-                              icon: Icons.picture_as_pdf_outlined,
-                            ),
-                            if (canDelete)
-                              _CompactIconButton(
-                                tooltip: 'Void',
-                                onPressed: inv.status == 'paid' ? null : () => _confirmVoid(context, ref, inv),
-                                icon: Icons.delete_outline,
+                // Narrow: stacked list with the same footer attached below.
+                return Column(
+                  children: [
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: items.length,
+                      separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.borderSubtle),
+                      itemBuilder: (context, i) {
+                        final inv = items[i];
+                        return ListTile(
+                          leading: const Icon(Icons.receipt_long),
+                          title: Text(
+                            '${inv.invoiceNo} • ${inv.memberName}',
+                            style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            'Total: ${number.format(inv.total)} • ${formatDate(inv.createdAt)}',
+                            style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _StatusChip(status: inv.status),
+                              const SizedBox(width: 4),
+                              AppTableActionButton(
+                                icon: Icons.visibility_outlined,
+                                tooltip: 'View',
+                                onPressed: () => _openInvoiceView(context, ref, inv.id),
                               ),
-                            if (inv.status == 'unpaid') ...[
-                              const SizedBox(width: 6),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  minimumSize: const Size(0, 32),
-                                ),
-                                onPressed: () => ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
-                                child: const Text('Paid'),
+                              const SizedBox(width: 2),
+                              AppTableActionButton(
+                                icon: Icons.picture_as_pdf_outlined,
+                                tooltip: 'Export PDF',
+                                onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                              ),
+                              const SizedBox(width: 2),
+                              _InvoiceActionsMenu(
+                                status: inv.status,
+                                canDelete: canDelete,
+                                onMarkPaid: () => ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
+                                onEdit: () => _openInvoiceEdit(context, ref, inv.id),
+                                onVoid: () => _confirmVoid(context, ref, inv),
                               ),
                             ],
-                          ],
-                        ),
-                      );
-                  },
+                          ),
+                        );
+                      },
+                    ),
+                    paginationFooter(),
+                  ],
                 );
               },
             );
@@ -545,8 +683,12 @@ class InvoicesScreen extends ConsumerStatefulWidget {
   Future<void> _openAutoInvoice(BuildContext context, WidgetRef ref) async {
     final searchCtrl = TextEditingController();
     final taxCtrl = TextEditingController(text: '0');
+    final discountCtrl = TextEditingController(text: '0');
     Member? selectedMember;
     int? selectedPlanId;
+    String discountType = 'percentage';
+    String paymentMethod = 'cash';
+    String paymentStatus = 'paid';
 
     await showAppFormDialog<void>(
       context: context,
@@ -578,10 +720,24 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 }
               }
               final taxPercent = double.tryParse(taxCtrl.text.trim()) ?? 0;
+              final discountValue = double.tryParse(discountCtrl.text.trim()) ?? 0;
               final p = selectedPlan;
               final subtotal = p == null ? null : (p.price + p.admissionFee);
-              final tax = subtotal == null ? null : (subtotal * taxPercent / 100);
-              final total = (subtotal == null || tax == null) ? null : (subtotal + tax);
+              // Inline financial engine: Subtotal − Discount, then Tax on the
+              // discounted (taxable) amount, then Total.
+              double? discountAmount;
+              double? taxable;
+              double? tax;
+              double? total;
+              if (subtotal != null) {
+                discountAmount = discountType == 'percentage'
+                    ? subtotal * discountValue / 100
+                    : discountValue;
+                discountAmount = discountAmount.clamp(0, subtotal).toDouble();
+                taxable = subtotal - discountAmount;
+                tax = taxable * taxPercent / 100;
+                total = taxable + tax;
+              }
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -625,8 +781,12 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text('Plan & totals', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 10),
+                  const FormSectionLabel(
+                    'Plan & Billing',
+                    hint: 'Discount applies before tax. Totals recalculate live as you type.',
+                    icon: Icons.receipt_long_outlined,
+                  ),
+                  const SizedBox(height: 12),
                   plansAsync.when(
                     data: (plans) {
                       if (plans.isEmpty) return const Text('No plans found. Create a plan first.');
@@ -648,36 +808,79 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     error: (e, _) => Text(e.toString()),
                     loading: () => const LinearProgressIndicator(),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InputDecorator(
-                          decoration: const InputDecoration(labelText: 'Subtotal (auto)'),
-                          child: Text(subtotal == null ? '-' : subtotal.toStringAsFixed(2)),
-                        ),
+                  const SizedBox(height: 12),
+                  // Subtotal (auto) | Payment Method
+                  FormRow([
+                    InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Subtotal (auto)'),
+                      child: Text(subtotal == null ? '-' : subtotal.toStringAsFixed(2)),
+                    ),
+                    DropdownButtonFormField<String>(
+                      initialValue: paymentMethod,
+                      decoration: const InputDecoration(labelText: 'Payment Method'),
+                      items: const [
+                        DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                        DropdownMenuItem(value: 'card', child: Text('Card')),
+                        DropdownMenuItem(value: 'bank', child: Text('Bank Transfer')),
+                        DropdownMenuItem(value: 'online', child: Text('Online (JazzCash/EasyPaisa)')),
+                      ],
+                      onChanged: (v) => setModalState(() => paymentMethod = v ?? 'cash'),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  // Discount Type | Discount Value
+                  FormRow([
+                    FormSegmented<String>(
+                      label: 'Discount Type',
+                      value: discountType,
+                      onChanged: (v) => setModalState(() => discountType = v),
+                      segments: const [
+                        FormSegment('percentage', 'Percentage', icon: Icons.percent),
+                        FormSegment('fixed', 'Fixed', icon: Icons.payments_outlined),
+                      ],
+                    ),
+                    TextField(
+                      controller: discountCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Discount Value',
+                        hintText: discountType == 'percentage' ? 'e.g. 10 (%)' : 'e.g. 500 (flat)',
+                        suffixText: discountType == 'percentage' ? '%' : null,
                       ),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        width: 140,
-                        child: TextField(
-                          controller: taxCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Tax %'),
-                          onChanged: (_) => setModalState(() {}),
-                        ),
-                      ),
+                      onChanged: (_) => setModalState(() {}),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  // Tax % | Tax Amount (auto)
+                  FormRow([
+                    TextField(
+                      controller: taxCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Tax %', suffixText: '%'),
+                      onChanged: (_) => setModalState(() {}),
+                    ),
+                    InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Tax Amount (auto)'),
+                      child: Text(tax == null ? '-' : tax.toStringAsFixed(2)),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  FormSegmented<String>(
+                    label: 'Payment Status',
+                    value: paymentStatus,
+                    onChanged: (v) => setModalState(() => paymentStatus = v),
+                    segments: const [
+                      FormSegment('paid', 'Paid', icon: Icons.check_circle_outline, color: Color(0xFF10B981)),
+                      FormSegment('partial', 'Partially Paid', icon: Icons.timelapse, color: Color(0xFFF59E0B)),
+                      FormSegment('unpaid', 'Unpaid', icon: Icons.error_outline, color: Color(0xFFDC2626)),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Tax Amount (auto)'),
-                    child: Text(tax == null ? '-' : tax.toStringAsFixed(2)),
-                  ),
-                  const SizedBox(height: 10),
-                  InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Total Amount (auto)'),
-                    child: Text(total == null ? '-' : total.toStringAsFixed(2)),
+                  const SizedBox(height: 14),
+                  _InvoiceTotalsCard(
+                    subtotal: subtotal,
+                    discount: discountAmount,
+                    tax: tax,
+                    total: total,
                   ),
                 ],
               );
@@ -694,6 +897,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
         FilledButton(
           onPressed: () async {
             final taxPercent = double.tryParse(taxCtrl.text.trim()) ?? 0;
+            final discountValue = double.tryParse(discountCtrl.text.trim()) ?? 0;
             if (selectedMember == null) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a member')));
               return;
@@ -712,6 +916,10 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                   'memberId': selectedMember!.id,
                   'planId': selectedPlanId,
                   'taxPercent': taxPercent,
+                  'discountType': discountType,
+                  'discountValue': discountValue,
+                  'paymentMethod': paymentMethod,
+                  'paymentStatus': paymentStatus,
                 },
               );
               if (!context.mounted) return;
@@ -736,6 +944,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 
     searchCtrl.dispose();
     taxCtrl.dispose();
+    discountCtrl.dispose();
   }
 
   Future<void> _openInvoicePdfActions(BuildContext context, WidgetRef ref, Invoice inv) async {
@@ -777,17 +986,8 @@ class InvoicesScreen extends ConsumerStatefulWidget {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/invoices/${inv.id}/pdf', token: token);
       final name = '${inv.invoiceNo}.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
-
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Invoice ${inv.invoiceNo}');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -842,16 +1042,8 @@ class InvoicesScreen extends ConsumerStatefulWidget {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/invoices.pdf', token: token);
       final name = 'invoices_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Invoices Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -1095,6 +1287,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
   bool _hydratedFromRoute = false;
+  bool quickActionHandled = false;
   String _statusFilter = 'all';
   String _sort = 'newest';
 
@@ -1187,6 +1380,8 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Flat status pill — Inter, colour-coded: paid → emerald, unpaid → amber,
+/// void → muted grey.
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
 
@@ -1198,78 +1393,196 @@ class _StatusChip extends StatelessWidget {
     final isPaid = status == 'paid';
     final isUnpaid = status == 'unpaid';
     final accent = isPaid
-        ? const Color(0xFF36D27E)
+        ? const Color(0xFF10B981)
         : isUnpaid
-            ? const Color(0xFFFFC857)
-            : theme.colorScheme.primary;
-    final label = (status.isEmpty ? '—' : status).toUpperCase();
+            ? const Color(0xFFF59E0B)
+            : theme.colorScheme.onSurfaceVariant;
+    final label = (status.isEmpty ? '-' : status).toUpperCase();
 
-    final bgA = theme.colorScheme.surface.withAlpha(theme.brightness == Brightness.dark ? 72 : 140);
-    final bgB = theme.colorScheme.surfaceContainerHighest.withAlpha(theme.brightness == Brightness.dark ? 52 : 120);
-    final border = accent.withAlpha(theme.brightness == Brightness.dark ? 150 : 130);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(999),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                bgA,
-                bgB,
-              ],
-            ),
-            border: Border.all(color: border),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withAlpha(isPaid ? 46 : isUnpaid ? 44 : 24),
-                blurRadius: 16,
-                spreadRadius: 0,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.6,
-            ),
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: accent.withAlpha(28),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: accent,
+          letterSpacing: 0.5,
         ),
       ),
     );
   }
 }
 
-class _CompactIconButton extends StatelessWidget {
-  const _CompactIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
+/// Overflow menu for status-altering invoice workflows.
+/// Keeps the row clean: View + Export PDF stay exposed; Edit, Mark as Paid,
+/// and Void live behind a single more_vert button.
+class _InvoiceActionsMenu extends StatelessWidget {
+  const _InvoiceActionsMenu({
+    required this.status,
+    required this.canDelete,
+    required this.onMarkPaid,
+    required this.onEdit,
+    required this.onVoid,
   });
 
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
+  final String status;
+  final bool canDelete;
+  final VoidCallback onMarkPaid;
+  final VoidCallback onEdit;
+  final VoidCallback onVoid;
+
+  static const Color _mutedRed = Color(0xFFE06C6C);
+
+  PopupMenuItem<String> _item(
+    BuildContext context,
+    String value,
+    IconData icon,
+    String label, {
+    bool danger = false,
+    bool enabled = true,
+  }) {
+    final theme = Theme.of(context);
+    final color = !enabled
+        ? theme.colorScheme.onSurfaceVariant.withAlpha(110)
+        : danger
+            ? _mutedRed
+            : theme.colorScheme.onSurface;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 42,
+      enabled: enabled,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: !enabled ? color : (danger ? _mutedRed : theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(width: 12),
+          Text(label, style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-      color: theme.colorScheme.onSurfaceVariant,
+    final isDark = theme.brightness == Brightness.dark;
+    final isPaid = status == 'paid';
+
+    return PopupMenuButton<String>(
+      tooltip: 'More actions',
+      position: PopupMenuPosition.under,
+      elevation: 10,
+      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          width: 0.8,
+        ),
+      ),
+      icon: Icon(Icons.more_vert, size: 18, color: theme.colorScheme.onSurfaceVariant),
+      onSelected: (v) {
+        switch (v) {
+          case 'paid':
+            onMarkPaid();
+            break;
+          case 'edit':
+            onEdit();
+            break;
+          case 'void':
+            onVoid();
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        if (status == 'unpaid') _item(context, 'paid', Icons.check_circle_outline, 'Mark as paid'),
+        _item(context, 'edit', Icons.edit_outlined, 'Edit invoice', enabled: !isPaid),
+        if (canDelete) const PopupMenuDivider(),
+        if (canDelete) _item(context, 'void', Icons.block_outlined, 'Void invoice', danger: true, enabled: !isPaid),
+      ],
+    );
+  }
+}
+
+/// Live billing summary surfaced beneath the Auto Invoice inputs. Shows the
+/// Subtotal − Discount + Tax → Total breakdown computed in the form controller.
+class _InvoiceTotalsCard extends StatelessWidget {
+  const _InvoiceTotalsCard({
+    required this.subtotal,
+    required this.discount,
+    required this.tax,
+    required this.total,
+  });
+
+  final num? subtotal;
+  final num? discount;
+  final num? tax;
+  final num? total;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    String fmt(num? v) => v == null ? '-' : v.toStringAsFixed(2);
+
+    Widget line(String label, String value, {bool negative = false, Color? color}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+            Text(
+              negative && value != '-' ? '− $value' : value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: color ?? cs.onSurface,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: cs.surfaceContainerHighest.withAlpha(90),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: [
+          line('Subtotal', fmt(subtotal)),
+          line('Discount', fmt(discount), negative: true, color: const Color(0xFFDC2626)),
+          line('Tax', fmt(tax)),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Divider(height: 1, color: theme.dividerColor),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Total Due',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              Text(
+                fmt(total),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: cs.primary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

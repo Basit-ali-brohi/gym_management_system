@@ -1,9 +1,16 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
+import '../../core/branding.dart';
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/in_app_pdf.dart';
 import '../../core/web_image_picker_stub.dart' if (dart.library.html) '../../core/web_image_picker_web.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
@@ -62,7 +69,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final settingsAsync = ref.watch(settingsProvider);
     final mode = ref.watch(themeModeProvider);
     final isDark = mode == ThemeMode.dark;
-    final accent = ref.watch(accentProvider);
+    final accentColor = ref.watch(accentColorProvider);
+    // "Custom" = the live colour differs from the signature brand default.
+    final hasCustomAccent = accentColor != kDefaultAccentColor;
 
     final s = settingsAsync.valueOrNull;
     if (!_hydrated && s != null) {
@@ -85,6 +94,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _atRiskTemplateCtrl.text = s.atRiskWhatsAppTemplate ?? '';
         });
       });
+    }
+
+    // Compact config field — capped at 450px so text never stretches.
+    Widget cfgField(TextEditingController ctrl, String label, IconData icon, {TextInputType? keyboardType}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 450),
+          child: TextField(
+            controller: ctrl,
+            keyboardType: keyboardType,
+            style: GoogleFonts.inter(fontSize: 14),
+            decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 20)),
+          ),
+        ),
+      );
+    }
+
+    // 64x64 rounded logo thumbnail (image preview or minimalist icon).
+    Widget logoThumb() {
+      final raw = _logoUrlCtrl.text.trim();
+      final placeholder = Icon(Icons.image_outlined, color: theme.colorScheme.onSurfaceVariant, size: 24);
+      Widget content = Center(child: placeholder);
+      if (raw.isNotEmpty) {
+        if (raw.startsWith('data:image')) {
+          try {
+            final Uint8List bytes = base64Decode(raw.substring(raw.indexOf(',') + 1));
+            content = Image.memory(bytes, fit: BoxFit.cover, errorBuilder: (_, _, _) => Center(child: placeholder));
+          } catch (_) {
+            content = Center(child: placeholder);
+          }
+        } else {
+          content = Image.network(raw, fit: BoxFit.cover, errorBuilder: (_, _, _) => Center(child: placeholder));
+        }
+      }
+      return Container(
+        width: 64,
+        height: 64,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: isDark ? AppTheme.charcoalHigh : theme.colorScheme.surfaceContainerHighest,
+          border: Border.all(
+            color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
+            width: 0.8,
+          ),
+        ),
+        child: content,
+      );
     }
 
     return ListView(
@@ -111,29 +169,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _MetricCard(
-                    title: 'Theme',
-                    value: isDark ? 'Dark' : 'Light',
-                    subtitle: 'Active mode',
-                    icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-                  ),
-                  _MetricCard(
-                    title: 'Currency',
-                    value: _currencyCtrl.text.trim().isEmpty ? 'PKR' : _currencyCtrl.text.trim(),
-                    subtitle: 'Billing currency',
-                    icon: Icons.currency_exchange,
-                  ),
-                  _MetricCard(
-                    title: 'Tax %',
-                    value: _taxCtrl.text.trim().isEmpty ? '0' : _taxCtrl.text.trim(),
-                    subtitle: 'Default tax',
-                    icon: Icons.percent,
-                  ),
-                ],
+              // ── Edge-to-edge 3-up summary grid (matches Staff / app-wide) ──
+              LayoutBuilder(
+                builder: (context, c) {
+                  final tiles = <Widget>[
+                    _MetricCard(
+                      title: 'Theme',
+                      value: isDark ? 'Dark' : 'Light',
+                      subtitle: 'Active mode',
+                      icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+                      accent: theme.colorScheme.primary,
+                    ),
+                    _MetricCard(
+                      title: 'Currency',
+                      value: _currencyCtrl.text.trim().isEmpty ? 'PKR' : _currencyCtrl.text.trim(),
+                      subtitle: 'Billing currency',
+                      icon: Icons.currency_exchange_outlined,
+                      accent: theme.colorScheme.tertiary,
+                    ),
+                    _MetricCard(
+                      title: 'Tax %',
+                      value: _taxCtrl.text.trim().isEmpty ? '0' : _taxCtrl.text.trim(),
+                      subtitle: 'Default tax',
+                      icon: Icons.percent_outlined,
+                      accent: const Color(0xFFF59E0B),
+                    ),
+                  ];
+                  final cols = c.maxWidth >= 720 ? 3 : c.maxWidth >= 460 ? 2 : 1;
+                  const gap = 12.0;
+                  return Column(
+                    children: [
+                      for (var i = 0; i < tiles.length; i += cols)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: i + cols < tiles.length ? gap : 0),
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                for (var j = 0; j < cols; j++) ...[
+                                  if (j > 0) const SizedBox(width: gap),
+                                  Expanded(
+                                    child: (i + j) < tiles.length ? tiles[i + j] : const SizedBox.shrink(),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -156,132 +241,91 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Gym Profile', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _gymNameCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Gym Name',
-                          prefixIcon: Icon(Icons.fitness_center),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _currencyCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Currency',
-                          prefixIcon: Icon(Icons.currency_exchange),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _addressCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Address',
-                          prefixIcon: Icon(Icons.location_on_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      // ── Left column: Gym Profile + logo media ────────────
+                      final left = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: 520,
-                            child: TextField(
-                              controller: _logoUrlCtrl,
-                              decoration: const InputDecoration(
-                                labelText: 'Logo (URL or Upload)',
-                                prefixIcon: Icon(Icons.image_outlined),
+                          Text('GYM PROFILE', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+                          const SizedBox(height: 14),
+                          cfgField(_gymNameCtrl, 'Gym Name', Icons.fitness_center),
+                          cfgField(_currencyCtrl, 'Currency', Icons.currency_exchange),
+                          cfgField(_addressCtrl, 'Address', Icons.location_on_outlined),
+                          const SizedBox(height: 2),
+                          Text('Logo',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 8),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              logoThumb(),
+                              const SizedBox(width: 14),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      try {
+                                        final dataUrl = await pickImageDataUrl(maxBytes: 250000);
+                                        if (dataUrl == null) return;
+                                        if (!context.mounted) return;
+                                        setState(() => _logoUrlCtrl.text = dataUrl);
+                                      } catch (e) {
+                                        if (!context.mounted) return;
+                                        final msg = e.toString().contains('file_too_large')
+                                            ? 'Logo too large (max 250KB).'
+                                            : 'Logo upload failed.';
+                                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+                                      }
+                                    },
+                                    icon: const Icon(Icons.upload_file, size: 17),
+                                    label: const Text('Upload Logo'),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  if (_logoUrlCtrl.text.trim().isNotEmpty)
+                                    TextButton(
+                                      onPressed: () => setState(() => _logoUrlCtrl.clear()),
+                                      child: const Text('Remove'),
+                                    ),
+                                ],
                               ),
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              try {
-                                final dataUrl = await pickImageDataUrl(maxBytes: 250000);
-                                if (dataUrl == null) return;
-                                if (!context.mounted) return;
-                                setState(() => _logoUrlCtrl.text = dataUrl);
-                              } catch (e) {
-                                if (!context.mounted) return;
-                                final msg = e.toString().contains('file_too_large')
-                                    ? 'Logo too large (max 250KB).'
-                                    : 'Logo upload failed.';
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-                              }
-                            },
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('Upload Logo'),
-                          ),
-                          TextButton(
-                            onPressed: () => setState(() => _logoUrlCtrl.clear()),
-                            child: const Text('Clear'),
+                            ],
                           ),
                         ],
-                      ),
-                      if (_logoUrlCtrl.text.trim().isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              color: theme.colorScheme.surfaceContainerHighest,
-                              padding: const EdgeInsets.all(8),
-                              child: Image.network(
-                                _logoUrlCtrl.text.trim(),
-                                height: 56,
-                                width: 56,
-                                errorBuilder: (context, error, stackTrace) => const SizedBox(
-                                  height: 56,
-                                  width: 56,
-                                  child: Center(child: Icon(Icons.broken_image_outlined)),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 14),
-                      Text('Social Links', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _websiteCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Website',
-                          prefixIcon: Icon(Icons.public),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _facebookCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Facebook URL',
-                          prefixIcon: Icon(Icons.facebook),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _instagramCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Instagram URL',
-                          prefixIcon: Icon(Icons.camera_alt_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _whatsappCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp',
-                          prefixIcon: Icon(Icons.chat_outlined),
-                        ),
-                      ),
-                    ],
+                      );
+
+                      // ── Right column: Social Links ────────────────────────
+                      final right = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('SOCIAL LINKS', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+                          const SizedBox(height: 14),
+                          cfgField(_websiteCtrl, 'Website', Icons.public),
+                          cfgField(_facebookCtrl, 'Facebook URL', Icons.facebook),
+                          cfgField(_instagramCtrl, 'Instagram URL', Icons.camera_alt_outlined),
+                          cfgField(_whatsappCtrl, 'WhatsApp', Icons.chat_outlined),
+                        ],
+                      );
+
+                      // 50/50 split on wide; stacked on narrow.
+                      if (c.maxWidth >= 820) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: left),
+                            const SizedBox(width: 28),
+                            Expanded(child: right),
+                          ],
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [left, const SizedBox(height: 18), right],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -388,9 +432,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Accent Color', style: theme.textTheme.titleMedium),
+                                Text('Brand Color', style: theme.textTheme.titleMedium),
                                 Text(
-                                  'Choose a premium accent color',
+                                  'Pick any custom accent — applied across the app',
                                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                 ),
                               ],
@@ -398,19 +442,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final a in AppAccent.values)
-                            _AccentOption(
-                              label: a.label,
-                              color: a.color,
-                              selected: accent == a,
-                              onTap: () => ref.read(accentProvider.notifier).setAccent(a),
-                            ),
-                        ],
+                      const SizedBox(height: 16),
+                      _BrandColorPickerCard(
+                        color: accentColor,
+                        isCustom: hasCustomAccent,
+                        onTap: () => _openColorPicker(context, ref, accentColor),
+                        onReset: hasCustomAccent
+                            ? () => ref.read(accentColorProvider.notifier).state = kDefaultAccentColor
+                            : null,
                       ),
                     ],
                   ),
@@ -438,10 +477,84 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ],
                 ),
               ),
+              // ── Corporate signature, closing the workspace ───────────────
+              const PoweredByDeverosity(
+                underline: true,
+                padding: EdgeInsets.only(top: 20, bottom: 8),
+              ),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  /// Opens the full-spectrum colour wheel so the operator can pick ANY brand
+  /// colour. On apply, the colour is broadcast app-wide via [accentColorProvider].
+  Future<void> _openColorPicker(BuildContext context, WidgetRef ref, Color current) async {
+    Color picked = current;
+    final theme = Theme.of(context);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.large)),
+          titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 8),
+          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+          actionsPadding: const EdgeInsets.only(right: 16, bottom: 16, left: 16),
+          title: Row(
+            children: [
+              Icon(Icons.palette_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Select Custom Brand Color')),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: picked,
+              onColorChanged: (color) => picked = color,
+              pickerAreaHeightPercent: 0.8,
+              enableAlpha: false,
+              displayThumbColor: true,
+              paletteType: PaletteType.hsvWithHue,
+              labelTypes: const [ColorLabelType.hex, ColorLabelType.rgb],
+              pickerAreaBorderRadius: const BorderRadius.all(Radius.circular(12)),
+              // Dark/obsidian aesthetic for the hex & RGB input fields.
+              hexInputBar: true,
+              colorPickerWidth: 320,
+              portraitOnly: true,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              style: TextButton.styleFrom(
+                foregroundColor: theme.colorScheme.onSurfaceVariant,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.colorScheme.onPrimary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              onPressed: () {
+                ref.read(accentColorProvider.notifier).state = picked;
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text(
+                'APPLY CHANGES',
+                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -485,16 +598,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/settings.pdf', token: token);
       final name = 'settings_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Settings Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -540,127 +645,197 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
+/// Unified summary card — soft-tint outline-icon style matching every other
+/// section (Staff, Members, etc.). Flex width so the parent grid spans
+/// edge-to-edge; figure rendered in Bebas Neue.
 class _MetricCard extends StatelessWidget {
   const _MetricCard({
     required this.title,
     required this.value,
     required this.subtitle,
     required this.icon,
+    required this.accent,
   });
 
   final String title;
   final String value;
   final String subtitle;
   final IconData icon;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 260,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 40,
-                width: 40,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            // Soft semi-transparent tint of the accent — no heavy solid block.
+            Container(
+              height: 42,
+              width: 42,
+              decoration: BoxDecoration(
+                color: accent.withAlpha(28),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: accent.withAlpha(60), width: 0.8),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              child: Icon(icon, color: accent, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 6),
-                    Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
-                    Text(subtitle, style: theme.textTheme.bodySmall),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 4),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      style: theme.textTheme.headlineSmall?.copyWith(color: accent),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _AccentOption extends StatelessWidget {
-  const _AccentOption({
-    required this.label,
+/// Premium brand-colour preview card. Shows the active colour inside a glowing
+/// circular badge plus a "Customize Brand Color" call-to-action that opens the
+/// full colour wheel. Replaces the old fixed row of preset swatches.
+class _BrandColorPickerCard extends StatelessWidget {
+  const _BrandColorPickerCard({
     required this.color,
-    required this.selected,
+    required this.isCustom,
     required this.onTap,
+    this.onReset,
   });
 
-  final String label;
   final Color color;
-  final bool selected;
+  final bool isCustom;
   final VoidCallback onTap;
+  final VoidCallback? onReset;
+
+  String get _hex => '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark
+        ? AppTheme.charcoal
+        : theme.colorScheme.surfaceContainerHighest.withAlpha(70);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.large),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected ? color.withAlpha(220) : theme.colorScheme.outlineVariant,
-              width: selected ? 1.2 : 1,
-            ),
-            color: theme.colorScheme.surfaceContainerHighest.withAlpha(selected ? 120 : 70),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: color.withAlpha(46),
-                      blurRadius: 18,
-                      offset: const Offset(0, 10),
-                    ),
-                  ]
-                : const [],
+            borderRadius: BorderRadius.circular(AppRadius.large),
+            color: bg,
+            border: Border.all(color: color.withAlpha(120), width: 1),
+            boxShadow: [BoxShadow(color: color.withAlpha(40), blurRadius: 24, offset: const Offset(0, 12))],
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
+              // Active-colour badge — concentric ring + glowing core.
               Container(
-                height: 14,
-                width: 14,
+                height: 52,
+                width: 52,
                 decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(99),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withAlpha(70), width: 2),
+                ),
+                child: Center(
+                  child: Container(
+                    height: 36,
+                    width: 36,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withAlpha(50), width: 1.5),
+                      boxShadow: AppTheme.neonGlow(color, blur: 14),
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: selected ? color : theme.colorScheme.onSurface,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Click to Customize Brand Color',
+                          style: GoogleFonts.inter(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (isCustom)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withAlpha(28),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: color.withAlpha(80), width: 0.8),
+                            ),
+                            child: Text(
+                              'CUSTOM',
+                              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Active: $_hex  •  Full HSV spectrum',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
               ),
-              if (selected) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.check_circle, size: 18, color: color),
-              ],
+              if (onReset != null)
+                IconButton(
+                  tooltip: 'Reset to default',
+                  onPressed: onReset,
+                  icon: Icon(Icons.refresh, size: 20, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              Icon(Icons.tune, color: color),
             ],
           ),
         ),

@@ -171,17 +171,27 @@ class Invoice {
     required this.id,
     required this.invoiceNo,
     required this.total,
+    required this.amountPaid,
     required this.status,
     required this.createdAt,
     required this.memberName,
+    this.memberCode,
   });
 
   final int id;
   final String invoiceNo;
   final num total;
+
+  /// Sum of all payments already recorded against this invoice.
+  final num amountPaid;
+
+  /// Outstanding balance: total − amountPaid. Clamped to ≥ 0.
+  num get balance => (total - amountPaid).clamp(0, double.infinity);
+
   final String status;
   final String createdAt;
   final String memberName;
+  final String? memberCode;
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
     num parseNum(dynamic v) {
@@ -193,11 +203,13 @@ class Invoice {
 
     return Invoice(
       id: (json['id'] as num).toInt(),
-      invoiceNo: json['invoice_no']?.toString() ?? '',
+      invoiceNo: json['invoice_no']?.toString() ?? json['invoiceNo']?.toString() ?? '',
       total: parseNum(json['total']),
+      amountPaid: parseNum(json['amountPaid'] ?? json['amount_paid']),
       status: json['status']?.toString() ?? '',
-      createdAt: json['created_at']?.toString() ?? '',
-      memberName: json['full_name']?.toString() ?? '',
+      createdAt: json['created_at']?.toString() ?? json['createdAt']?.toString() ?? '',
+      memberName: json['full_name']?.toString() ?? json['memberName']?.toString() ?? '',
+      memberCode: json['memberCode']?.toString() ?? json['member_code']?.toString(),
     );
   }
 }
@@ -411,8 +423,10 @@ class Lead {
     required this.id,
     required this.fullName,
     required this.phone,
+    required this.email,
     required this.source,
     required this.interest,
+    required this.temperature,
     required this.nextContactDate,
     required this.status,
     required this.notes,
@@ -423,8 +437,10 @@ class Lead {
   final int id;
   final String fullName;
   final String? phone;
+  final String? email;
   final String? source;
   final String? interest;
+  final String? temperature;
   final String? nextContactDate;
   final String status;
   final String? notes;
@@ -436,8 +452,10 @@ class Lead {
       id: (json['id'] as num).toInt(),
       fullName: json['fullName']?.toString() ?? '',
       phone: json['phone']?.toString(),
+      email: json['email']?.toString(),
       source: json['source']?.toString(),
       interest: json['interest']?.toString(),
+      temperature: json['temperature']?.toString(),
       nextContactDate: json['nextContactDate']?.toString(),
       status: json['status']?.toString() ?? 'new',
       notes: json['notes']?.toString(),

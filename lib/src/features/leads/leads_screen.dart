@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
- 
+
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
-import '../../core/web_download_stub.dart' if (dart.library.html) '../../core/web_download_web.dart';
+import '../../core/in_app_pdf.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
  
@@ -67,8 +69,10 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
   Future<void> addLead({
     required String fullName,
     String? phone,
+    String? email,
     String? source,
     String? interest,
+    String? temperature,
     String? nextContactDate,
     required String status,
     String? notes,
@@ -76,14 +80,17 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
     final token = ref.read(authControllerProvider).token;
     if (token == null || token.isEmpty) throw ApiException('unauthorized');
     final api = ref.read(apiClientProvider);
+    String? clean(String? v) => (v == null || v.trim().isEmpty) ? null : v.trim();
     await api.postJson('/leads', token: token, body: {
       'fullName': fullName.trim(),
-      'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-      'source': source?.trim().isEmpty == true ? null : source?.trim(),
-      'interest': interest?.trim().isEmpty == true ? null : interest?.trim(),
-      'nextContactDate': nextContactDate?.trim().isEmpty == true ? null : nextContactDate?.trim(),
+      'phone': clean(phone),
+      'email': clean(email),
+      'source': clean(source),
+      'interest': clean(interest),
+      'temperature': clean(temperature),
+      'nextContactDate': clean(nextContactDate),
       'status': status,
-      'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
+      'notes': clean(notes),
     });
     await load();
   }
@@ -92,8 +99,10 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
     required int id,
     required String fullName,
     String? phone,
+    String? email,
     String? source,
     String? interest,
+    String? temperature,
     String? nextContactDate,
     required String status,
     String? notes,
@@ -101,14 +110,17 @@ class _LeadsController extends StateNotifier<AsyncValue<List<Lead>>> {
     final token = ref.read(authControllerProvider).token;
     if (token == null || token.isEmpty) throw ApiException('unauthorized');
     final api = ref.read(apiClientProvider);
+    String? clean(String? v) => (v == null || v.trim().isEmpty) ? null : v.trim();
     await api.patchJson('/leads/$id', token: token, body: {
       'fullName': fullName.trim(),
-      'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-      'source': source?.trim().isEmpty == true ? null : source?.trim(),
-      'interest': interest?.trim().isEmpty == true ? null : interest?.trim(),
-      'nextContactDate': nextContactDate?.trim().isEmpty == true ? null : nextContactDate?.trim(),
+      'phone': clean(phone),
+      'email': clean(email),
+      'source': clean(source),
+      'interest': clean(interest),
+      'temperature': clean(temperature),
+      'nextContactDate': clean(nextContactDate),
       'status': status,
-      'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
+      'notes': clean(notes),
     });
     await load();
   }
@@ -138,6 +150,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
   String _interestFilter = 'all';
   String _nextContactFilter = 'all';
   bool _hydratedFromRoute = false;
+  bool _quickActionHandled = false;
 
   ({int level, int currentXp, int nextXp, int totalXp}) _computeManagerLevel(int totalConverted) {
     var level = 1;
@@ -172,16 +185,54 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
   }
 
   Widget _statusBadge(BuildContext context, String status) {
-    final theme = Theme.of(context);
     final c = _statusColor(context, status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
         color: c.withAlpha(28),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(color: c.withAlpha(70), width: 0.8),
       ),
-      child: Text(status, style: theme.textTheme.labelMedium?.copyWith(color: c)),
+      child: Text(
+        status,
+        style: GoogleFonts.inter(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: c,
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+
+  /// Compact, fixed-height input decoration shared by the search box and every
+  /// dropdown. Identical decoration => identical rendered height (40px), which
+  /// is what guarantees the filter bar controls line up perfectly.
+  InputDecoration _denseDecoration(BuildContext context, {String? hint, Widget? prefixIcon}) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(
+        color: isDark ? Colors.white.withAlpha(28) : Colors.black.withAlpha(28),
+        width: 0.8,
+      ),
+    );
+    return InputDecoration(
+      isDense: true,
+      hintText: hint,
+      hintStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurfaceVariant),
+      prefixIcon: prefixIcon,
+      prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+      filled: true,
+      fillColor: isDark ? Colors.white.withAlpha(10) : Colors.black.withAlpha(6),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.2),
+      ),
     );
   }
 
@@ -226,15 +277,8 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
       final api = ref.read(apiClientProvider);
       final bytes = await api.getBytes('/pdf/leads.pdf', token: token);
       final name = 'leads_$today.pdf';
-      final savedPath = preview
-          ? previewBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf')
-          : downloadBytes(fileName: name, bytes: bytes, mimeType: 'application/pdf');
       if (!context.mounted) return;
-      if (savedPath != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: $savedPath')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(preview ? 'Opening PDF…' : 'Download started')));
-      }
+      await presentPdf(context, preview: preview, bytes: bytes, fileName: name, title: 'Leads Report Preview');
     } on ApiException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -248,8 +292,22 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     final isEdit = lead != null;
     final nameCtrl = TextEditingController(text: lead?.fullName ?? '');
     final phoneCtrl = TextEditingController(text: lead?.phone ?? '');
+    final emailCtrl = TextEditingController(text: lead?.email ?? '');
     final notesCtrl = TextEditingController(text: lead?.notes ?? '');
     String status = lead?.status ?? 'new';
+    String temperature = (lead?.temperature ?? 'warm').toLowerCase();
+    const goalOptions = <String>[
+      'Weight Loss',
+      'Muscle Gain',
+      'Endurance',
+      'Strength',
+      'General Fitness',
+      'Rehab',
+    ];
+    final fitnessGoals = <String>{
+      for (final g in (lead?.interest ?? '').split(',').map((e) => e.trim()))
+        if (g.isNotEmpty) g,
+    };
     final leads = ref.read(leadsControllerProvider).valueOrNull ?? const <Lead>[];
     final commonSources = <String>[
       'Walk-in',
@@ -261,29 +319,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
       'Call',
       'Other',
     ];
-    final commonInterests = <String>[
-      'Weight loss',
-      'Strength training',
-      'Personal training',
-      'Fat loss + cardio',
-      'Muscle gain',
-      'Fitness',
-      'Rehab',
-    ];
     final sourceOptions = <String>{
       ...commonSources,
       for (final l in leads)
         if ((l.source ?? '').trim().isNotEmpty) l.source!.trim(),
     }.toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    final interestOptions = <String>{
-      ...commonInterests,
-      for (final l in leads)
-        if ((l.interest ?? '').trim().isNotEmpty) l.interest!.trim(),
-    }.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     TextEditingController? sourceAutoCtrl;
-    TextEditingController? interestAutoCtrl;
     DateTime? nextContact =
         (lead?.nextContactDate != null && lead!.nextContactDate!.trim().isNotEmpty) ? DateTime.tryParse(lead.nextContactDate!) : null;
     if (!isEdit && nextContact == null) {
@@ -304,54 +346,97 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
           return Form(
             key: formKey,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextFormField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Full name'),
-                  validator: (v) => (v == null || v.trim().length < 2) ? 'Enter name' : null,
+                const FormSectionLabel(
+                  'Lead Profile',
+                  hint: 'Capture contact details to power automated email nurture sequences.',
+                  icon: Icons.badge_outlined,
                 ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: phoneCtrl,
-                  decoration: const InputDecoration(labelText: 'Phone'),
+                const SizedBox(height: 16),
+                FormRow([
+                  TextFormField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Full Name',
+                      hintText: 'e.g. Ayesha Khan',
+                    ),
+                    validator: (v) => (v == null || v.trim().length < 2) ? 'Enter name' : null,
+                  ),
+                  TextFormField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone',
+                      hintText: 'Primary contact number',
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 16),
+                FormRow([
+                  TextFormField(
+                    controller: emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Email Address',
+                      hintText: 'For automated marketing sequences',
+                    ),
+                    validator: (v) {
+                      final s = v?.trim() ?? '';
+                      if (s.isEmpty) return null;
+                      return s.contains('@') ? null : 'Invalid email';
+                    },
+                  ),
+                  Autocomplete<String>(
+                    initialValue: TextEditingValue(text: lead?.source ?? ''),
+                    optionsBuilder: (value) {
+                      final q = value.text.trim().toLowerCase();
+                      if (q.isEmpty) return sourceOptions.take(8);
+                      return sourceOptions.where((o) => o.toLowerCase().contains(q)).take(8);
+                    },
+                    onSelected: (v) => sourceAutoCtrl?.text = v,
+                    fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                      sourceAutoCtrl ??= textEditingController;
+                      return TextFormField(
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          labelText: 'Referral Source',
+                          hintText: 'Instagram, Walk-in, Member Referral...',
+                        ),
+                      );
+                    },
+                  ),
+                ]),
+                const SizedBox(height: 16),
+                FormMultiChips(
+                  label: 'Fitness Goals',
+                  hint: 'Select all that apply — personalises nurture messaging.',
+                  options: goalOptions,
+                  selected: fitnessGoals,
+                  accent: const Color(0xFF10B981),
+                  onToggle: (g) => setModalState(() {
+                    if (fitnessGoals.contains(g)) {
+                      fitnessGoals.remove(g);
+                    } else {
+                      fitnessGoals.add(g);
+                    }
+                  }),
                 ),
-                const SizedBox(height: 10),
-                Autocomplete<String>(
-                  initialValue: TextEditingValue(text: lead?.source ?? ''),
-                  optionsBuilder: (value) {
-                    final q = value.text.trim().toLowerCase();
-                    if (q.isEmpty) return sourceOptions.take(8);
-                    return sourceOptions.where((o) => o.toLowerCase().contains(q)).take(8);
-                  },
-                  onSelected: (v) => sourceAutoCtrl?.text = v,
-                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                    sourceAutoCtrl ??= textEditingController;
-                    return TextFormField(
-                      controller: textEditingController,
-                      focusNode: focusNode,
-                      decoration: const InputDecoration(labelText: 'Source', hintText: 'Walk-in, Facebook, Referral...'),
-                    );
-                  },
+                const SizedBox(height: 16),
+                FormSegmented<String>(
+                  label: 'Lead Temperature',
+                  value: temperature,
+                  onChanged: (v) => setModalState(() => temperature = v),
+                  segments: const [
+                    FormSegment('cold', 'Cold', icon: Icons.ac_unit, color: Color(0xFF2563EB)),
+                    FormSegment('warm', 'Warm', icon: Icons.wb_sunny_outlined, color: Color(0xFFF59E0B)),
+                    FormSegment('hot', 'Hot', icon: Icons.local_fire_department_outlined, color: Color(0xFFDC2626)),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                Autocomplete<String>(
-                  initialValue: TextEditingValue(text: lead?.interest ?? ''),
-                  optionsBuilder: (value) {
-                    final q = value.text.trim().toLowerCase();
-                    if (q.isEmpty) return interestOptions.take(8);
-                    return interestOptions.where((o) => o.toLowerCase().contains(q)).take(8);
-                  },
-                  onSelected: (v) => interestAutoCtrl?.text = v,
-                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                    interestAutoCtrl ??= textEditingController;
-                    return TextFormField(
-                      controller: textEditingController,
-                      focusNode: focusNode,
-                      decoration: const InputDecoration(labelText: 'Interest', hintText: 'Weight loss, Strength...'),
-                    );
-                  },
-                ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 18),
+                const FormSectionLabel('Follow-up', icon: Icons.event_available_outlined),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -382,41 +467,46 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () async {
-                    final initial = nextContact ?? DateTime.now();
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: initial,
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked == null) return;
-                    setModalState(() => nextContact = picked);
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Next Contact Date'),
-                    child: Text(nextContact == null ? '-' : pretty.format(nextContact!)),
+                const SizedBox(height: 16),
+                FormRow([
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () async {
+                      final initial = nextContact ?? DateTime.now();
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: initial,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked == null) return;
+                      setModalState(() => nextContact = picked);
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Next Contact Date'),
+                      child: Text(nextContact == null ? '-' : pretty.format(nextContact!)),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: status,
-                  decoration: const InputDecoration(labelText: 'Status'),
-                  items: const [
-                    DropdownMenuItem(value: 'new', child: Text('New')),
-                    DropdownMenuItem(value: 'trial', child: Text('Trial')),
-                    DropdownMenuItem(value: 'converted', child: Text('Converted')),
-                    DropdownMenuItem(value: 'lost', child: Text('Lost')),
-                  ],
-                  onChanged: (v) => setModalState(() => status = v ?? 'new'),
-                ),
-                const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: status,
+                    decoration: const InputDecoration(labelText: 'Status'),
+                    items: const [
+                      DropdownMenuItem(value: 'new', child: Text('New')),
+                      DropdownMenuItem(value: 'trial', child: Text('Trial')),
+                      DropdownMenuItem(value: 'converted', child: Text('Converted')),
+                      DropdownMenuItem(value: 'lost', child: Text('Lost')),
+                    ],
+                    onChanged: (v) => setModalState(() => status = v ?? 'new'),
+                  ),
+                ]),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'Notes'),
+                  decoration: const InputDecoration(
+                    labelText: 'Notes',
+                    hintText: 'Add preferred timings, budget, objections, or any context for the sales team.',
+                    alignLabelWithHint: true,
+                  ),
                   maxLines: 3,
                 ),
               ],
@@ -431,14 +521,16 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
             if (!(formKey.currentState?.validate() ?? false)) return;
             final controller = ref.read(leadsControllerProvider.notifier);
             final source = sourceAutoCtrl?.text.trim() ?? '';
-            final interest = interestAutoCtrl?.text.trim() ?? '';
+            final interest = fitnessGoals.join(', ');
             if (isEdit) {
               await controller.updateLead(
                 id: lead.id,
                 fullName: nameCtrl.text,
                 phone: phoneCtrl.text,
+                email: emailCtrl.text,
                 source: source,
                 interest: interest,
+                temperature: temperature,
                 nextContactDate: nextContact == null ? null : date.format(nextContact!),
                 status: status,
                 notes: notesCtrl.text,
@@ -447,8 +539,10 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               await controller.addLead(
                 fullName: nameCtrl.text,
                 phone: phoneCtrl.text,
+                email: emailCtrl.text,
                 source: source,
                 interest: interest,
+                temperature: temperature,
                 nextContactDate: nextContact == null ? null : date.format(nextContact!),
                 status: status,
                 notes: notesCtrl.text,
@@ -462,6 +556,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     ).whenComplete(() {
       nameCtrl.dispose();
       phoneCtrl.dispose();
+      emailCtrl.dispose();
       notesCtrl.dispose();
     });
   }
@@ -559,8 +654,10 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                 id: l.id,
                                 fullName: l.fullName,
                                 phone: l.phone,
+                                email: l.email,
                                 source: l.source,
                                 interest: l.interest,
+                                temperature: l.temperature,
                                 nextContactDate: l.nextContactDate,
                                 status: 'new',
                                 notes: l.notes,
@@ -576,8 +673,10 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                 id: l.id,
                                 fullName: l.fullName,
                                 phone: l.phone,
+                                email: l.email,
                                 source: l.source,
                                 interest: l.interest,
+                                temperature: l.temperature,
                                 nextContactDate: l.nextContactDate,
                                 status: 'trial',
                                 notes: l.notes,
@@ -594,8 +693,10 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                 id: l.id,
                                 fullName: l.fullName,
                                 phone: l.phone,
+                                email: l.email,
                                 source: l.source,
                                 interest: l.interest,
+                                temperature: l.temperature,
                                 nextContactDate: l.nextContactDate,
                                 status: 'converted',
                                 notes: l.notes,
@@ -612,8 +713,10 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                 id: l.id,
                                 fullName: l.fullName,
                                 phone: l.phone,
+                                email: l.email,
                                 source: l.source,
                                 interest: l.interest,
+                                temperature: l.temperature,
                                 nextContactDate: l.nextContactDate,
                                 status: 'lost',
                                 notes: l.notes,
@@ -728,6 +831,18 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
         _applyQuery(q: qpQ, status: 'all');
       });
     }
+    // Global "+" Quick Action → open Add Lead modal once on arrival.
+    final pendingAction = ref.watch(pendingQuickActionProvider);
+    if (pendingAction == null) {
+      _quickActionHandled = false;
+    } else if (pendingAction == QuickAction.addLead && !_quickActionHandled) {
+      _quickActionHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        ref.read(pendingQuickActionProvider.notifier).state = null;
+        await _openLeadForm(context);
+      });
+    }
     final itemsPreview = async.valueOrNull ?? const <Lead>[];
     final sources = <String>{
       for (final l in itemsPreview)
@@ -765,18 +880,23 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // ── Aligned filter controls bar ─────────────────────────────────
+            // Every control shares _denseDecoration => identical 40px heights,
+            // wrapped in _LabeledFilter so captions sit on one baseline.
             Wrap(
               spacing: 12,
               runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                SizedBox(
-                  width: 520,
+                _LabeledFilter(
+                  label: 'Search',
+                  width: 340,
                   child: TextField(
                     controller: _searchCtrl,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      labelText: 'Search (name / phone / source)',
+                    style: GoogleFonts.inter(fontSize: 13.5),
+                    decoration: _denseDecoration(
+                      context,
+                      hint: 'Name / phone / source',
+                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (v) {
                       _debounce?.cancel();
@@ -787,12 +907,16 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     onSubmitted: (v) => _applyQuery(q: v),
                   ),
                 ),
-                SizedBox(
-                  width: 220,
+                _LabeledFilter(
+                  label: 'Status',
+                  width: 170,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey<String>(q.status),
                     initialValue: q.status,
-                    decoration: const InputDecoration(labelText: 'Status'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: _denseDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All')),
                       DropdownMenuItem(value: 'new', child: Text('New')),
@@ -803,39 +927,116 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     onChanged: (v) => _applyQuery(status: v ?? 'all'),
                   ),
                 ),
-                SizedBox(
-                  width: 220,
+                _LabeledFilter(
+                  label: 'Source',
+                  width: 190,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(_sourceFilter),
                     initialValue: _sourceFilter,
-                    decoration: const InputDecoration(labelText: 'Source'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: _denseDecoration(context),
                     items: [
-                      const DropdownMenuItem(value: 'all', child: Text('All Sources')),
+                      const DropdownMenuItem(value: 'all', child: Text('All sources')),
                       for (final s in sources) DropdownMenuItem(value: s, child: Text(s)),
                     ],
                     onChanged: (v) => setState(() => _sourceFilter = v ?? 'all'),
                   ),
                 ),
-                SizedBox(
-                  width: 240,
+                _LabeledFilter(
+                  label: 'Interest',
+                  width: 200,
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(_interestFilter),
                     initialValue: _interestFilter,
-                    decoration: const InputDecoration(labelText: 'Interest'),
+                    isDense: true,
+                    isExpanded: true,
+                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    decoration: _denseDecoration(context),
                     items: [
-                      const DropdownMenuItem(value: 'all', child: Text('All Interests')),
+                      const DropdownMenuItem(value: 'all', child: Text('All interests')),
                       for (final s in interests) DropdownMenuItem(value: s, child: Text(s)),
                     ],
                     onChanged: (v) => setState(() => _interestFilter = v ?? 'all'),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Refresh',
-                  onPressed: () => ref.read(leadsControllerProvider.notifier).load(),
-                  icon: const Icon(Icons.refresh),
+                // Trailing actions — empty caption keeps them on the field baseline.
+                _LabeledFilter(
+                  label: '',
+                  width: 150,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => ref.read(leadsControllerProvider.notifier).load(),
+                          icon: const Icon(Icons.refresh, size: 17),
+                          label: const Text('Refresh'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            side: BorderSide(
+                              color: theme.brightness == Brightness.dark
+                                  ? Colors.white.withAlpha(28)
+                                  : Colors.black.withAlpha(28),
+                              width: 0.8,
+                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                OutlinedButton(
-                  onPressed: () {
+              ],
+            ),
+            const SizedBox(height: 12),
+            // ── Low-profile filter tags ─────────────────────────────────────
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _FilterPill(
+                  label: 'Overdue',
+                  icon: Icons.warning_amber_rounded,
+                  selected: _overdueOnly,
+                  // Amber, not red — it is a warning filter, not an emergency block.
+                  accentOverride: const Color(0xFFF59E0B),
+                  onTap: () => setState(() => _overdueOnly = !_overdueOnly),
+                ),
+                _FilterPill(
+                  label: 'Sort by Next Contact',
+                  icon: Icons.sort_rounded,
+                  selected: _sortByNextContact,
+                  onTap: () => setState(() => _sortByNextContact = !_sortByNextContact),
+                ),
+                _FilterPill(
+                  label: 'Any date',
+                  selected: _nextContactFilter == 'all',
+                  onTap: () => setState(() => _nextContactFilter = 'all'),
+                ),
+                _FilterPill(
+                  label: 'Today',
+                  selected: _nextContactFilter == 'today',
+                  onTap: () => setState(() => _nextContactFilter = 'today'),
+                ),
+                _FilterPill(
+                  label: 'Tomorrow',
+                  selected: _nextContactFilter == 'tomorrow',
+                  onTap: () => setState(() => _nextContactFilter = 'tomorrow'),
+                ),
+                _FilterPill(
+                  label: 'Next 7 days',
+                  selected: _nextContactFilter == 'next7',
+                  onTap: () => setState(() => _nextContactFilter = 'next7'),
+                ),
+                const SizedBox(width: 4),
+                // Inline "Clear all" text action — replaces the old Clear button.
+                _FilterPill(
+                  label: 'Clear',
+                  icon: Icons.close_rounded,
+                  selected: false,
+                  onTap: () {
                     _searchCtrl.clear();
                     setState(() {
                       _overdueOnly = false;
@@ -846,46 +1047,6 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     });
                     _applyQuery(q: '', status: 'all');
                   },
-                  child: const Text('Clear'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilterChip(
-                  selected: _overdueOnly,
-                  onSelected: (v) => setState(() => _overdueOnly = v),
-                  label: const Text('Overdue'),
-                  avatar: const Icon(Icons.warning_amber_outlined, size: 18),
-                ),
-                FilterChip(
-                  selected: _sortByNextContact,
-                  onSelected: (v) => setState(() => _sortByNextContact = v),
-                  label: const Text('Sort by Next Contact'),
-                  avatar: const Icon(Icons.sort_outlined, size: 18),
-                ),
-                ChoiceChip(
-                  label: const Text('Any date'),
-                  selected: _nextContactFilter == 'all',
-                  onSelected: (_) => setState(() => _nextContactFilter = 'all'),
-                ),
-                ChoiceChip(
-                  label: const Text('Today'),
-                  selected: _nextContactFilter == 'today',
-                  onSelected: (_) => setState(() => _nextContactFilter = 'today'),
-                ),
-                ChoiceChip(
-                  label: const Text('Tomorrow'),
-                  selected: _nextContactFilter == 'tomorrow',
-                  onSelected: (_) => setState(() => _nextContactFilter = 'tomorrow'),
-                ),
-                ChoiceChip(
-                  label: const Text('Next 7 days'),
-                  selected: _nextContactFilter == 'next7',
-                  onSelected: (_) => setState(() => _nextContactFilter = 'next7'),
                 ),
               ],
             ),
@@ -1001,17 +1162,52 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                       ),
                     );
                   }
+                  // Faint divider tint — grey.shade200 in light, faint white in dark.
+                  final dividerTint = theme.brightness == Brightness.dark
+                      ? Colors.white.withAlpha(15)
+                      : Colors.grey.shade200;
+                  // Inter typography for all table cells — crisp tabular alignment.
+                  final headingStyle = GoogleFonts.inter(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  );
+                  final cellStyle = GoogleFonts.inter(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w400,
+                    color: theme.colorScheme.onSurface,
+                  );
                   return Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                      border: Border.all(color: dividerTint, width: 1),
                       color: theme.colorScheme.surface,
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                      child: Theme(
+                        // Scope the faint-divider + Inter overrides to this table only.
+                        data: theme.copyWith(
+                          dividerColor: dividerTint,
+                          dataTableTheme: DataTableThemeData(
+                            dividerThickness: 1,
+                            headingTextStyle: headingStyle,
+                            dataTextStyle: cellStyle,
+                            headingRowColor: WidgetStatePropertyAll(
+                              theme.brightness == Brightness.dark
+                                  ? Colors.white.withAlpha(8)
+                                  : Colors.black.withAlpha(5),
+                            ),
+                          ),
+                        ),
+                        child: DataTable(
                         columnSpacing: 18,
                         horizontalMargin: 16,
+                        headingRowHeight: 46,
+                        dataRowMinHeight: 52,
+                        dataRowMaxHeight: 58,
                         columns: const [
                           DataColumn(label: Text('Name')),
                           DataColumn(label: Text('Phone')),
@@ -1040,8 +1236,9 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      IconButton(
+                                      _TableActionButton(
                                         tooltip: 'Convert to Member',
+                                        icon: Icons.person_add_alt_1_outlined,
                                         onPressed: () {
                                           final uri = Uri(
                                             path: '/members',
@@ -1054,15 +1251,18 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                           );
                                           context.go(uri.toString());
                                         },
-                                        icon: const Icon(Icons.person_add_alt_1_outlined),
                                       ),
-                                      IconButton(
+                                      const SizedBox(width: 2),
+                                      _TableActionButton(
                                         tooltip: 'Edit',
+                                        icon: Icons.edit_outlined,
                                         onPressed: () => _openLeadForm(context, lead: l),
-                                        icon: const Icon(Icons.edit_outlined),
                                       ),
-                                      IconButton(
+                                      const SizedBox(width: 2),
+                                      _TableActionButton(
                                         tooltip: 'Delete',
+                                        icon: Icons.delete_outline,
+                                        danger: true,
                                         onPressed: () async {
                                           final ok = await showAppConfirmDialog(
                                             context: context,
@@ -1074,7 +1274,6 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                           if (!ok) return;
                                           await ref.read(leadsControllerProvider.notifier).deleteLead(l.id);
                                         },
-                                        icon: const Icon(Icons.delete_outline),
                                       ),
                                     ],
                                   ),
@@ -1083,6 +1282,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                             ),
                         ],
                       ),
+                    ),
                     ),
                   );
                 },
@@ -1096,6 +1296,202 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               ),
             ),
           ],
+      ),
+    );
+  }
+}
+
+/// A filter control with a small caption above and a fixed 40px-tall field.
+/// All filter controls share this wrapper so their field heights are identical
+/// and their captions sit on one baseline — the "aligned filter bar" look.
+class _LabeledFilter extends StatelessWidget {
+  const _LabeledFilter({
+    required this.label,
+    required this.width,
+    required this.child,
+  });
+
+  final String label;
+  final double width;
+  final Widget child;
+
+  /// Shared field height for every filter control. Single source of truth.
+  static const double fieldHeight = 40;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: width,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            child: Text(
+              // Non-breaking space keeps the caption row height for unlabeled
+              // trailing controls (Refresh / Clear) so they align with fields.
+              label.isEmpty ? ' ' : label.toUpperCase(),
+              style: AppTypography.uiLabel(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 11,
+                weight: FontWeight.w600,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          SizedBox(height: fieldHeight, child: child),
+        ],
+      ),
+    );
+  }
+}
+
+/// Flat, low-profile filter tag (HubSpot / Retool style).
+/// Selected → subtle accent tint + accent border + accent text.
+/// Unselected → transparent fill + faint hairline border + muted text.
+/// No full-bleed red blocks — accent stays a signal, not a background.
+class _FilterPill extends StatefulWidget {
+  const _FilterPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.accentOverride,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  /// Optional accent (e.g. amber for the "Overdue" warning filter).
+  final Color? accentOverride;
+
+  @override
+  State<_FilterPill> createState() => _FilterPillState();
+}
+
+class _FilterPillState extends State<_FilterPill> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = widget.accentOverride ?? theme.colorScheme.primary;
+
+    late final Color bg;
+    late final Color border;
+    late final Color fg;
+    if (widget.selected) {
+      bg = accent.withAlpha(isDark ? 30 : 22);
+      border = accent.withAlpha(isDark ? 130 : 95);
+      fg = accent;
+    } else {
+      bg = _hover
+          ? (isDark ? Colors.white.withAlpha(12) : Colors.black.withAlpha(8))
+          : Colors.transparent;
+      // Subtle hairline — grey.shade300 equivalent, theme-adaptive.
+      border = isDark ? Colors.white.withAlpha(33) : Colors.black.withAlpha(33);
+      fg = theme.colorScheme.onSurfaceVariant;
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: border, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon, size: 15, color: fg),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                widget.label,
+                style: AppTypography.uiLabel(
+                  color: fg,
+                  fontSize: 12.5,
+                  weight: widget.selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Table row action icon with a translucent circular backdrop on hover.
+/// `danger` variant fades to a soft muted red only while hovered.
+class _TableActionButton extends StatefulWidget {
+  const _TableActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool danger;
+
+  @override
+  State<_TableActionButton> createState() => _TableActionButtonState();
+}
+
+class _TableActionButtonState extends State<_TableActionButton> {
+  bool _hover = false;
+
+  // Soft muted red — not the harsh error red. Only shown on delete-hover.
+  static const Color _mutedRed = Color(0xFFE06C6C);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final Color fg = _hover
+        ? (widget.danger ? _mutedRed : theme.colorScheme.onSurface)
+        : theme.colorScheme.onSurfaceVariant;
+
+    final Color bg = !_hover
+        ? Colors.transparent
+        : widget.danger
+            ? _mutedRed.withAlpha(28)
+            : (isDark ? Colors.white.withAlpha(20) : Colors.black.withAlpha(12));
+
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+            child: Icon(widget.icon, size: 18, color: fg),
+          ),
+        ),
       ),
     );
   }

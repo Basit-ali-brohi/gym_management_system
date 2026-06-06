@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
+import 'core/app_theme.dart';
 import 'core/providers.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/auth/auth_controller.dart';
@@ -126,6 +128,51 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dual-font text theme
+//
+// Strategy — two-pass construction:
+//   Pass 1: GoogleFonts.interTextTheme(base) — Inter owns every slot.
+//   Pass 2: .copyWith() — Bebas Neue replaces the display / headline / title
+//           roles that carry KPI numbers and section labels.
+//
+// Why Bebas Neue for headlineSmall?
+//   The KPI metric values (revenue, check-ins) use headlineSmall in widget
+//   code. Bebas Neue at that size with 2.0 tracking reads as a scoreboard
+//   digit — immediately scannable from across a room, matching the gym brand.
+//
+// Why Inter for everything else?
+//   Inter is a humanist sans designed for sub-16px legibility on screens.
+//   Member names, dates, table rows, and form fields all stay readable in
+//   the dark theme at their small sizes because Inter was built for it.
+// ─────────────────────────────────────────────────────────────────────────────
+TextTheme _buildMixedTextTheme(TextTheme base) {
+  // Pass 1: Inter base — all slots get the screen-optimised humanist face.
+  final inter = GoogleFonts.interTextTheme(base);
+
+  // Pass 2: Bebas Neue overlay on heading and KPI-display slots only.
+  return inter.copyWith(
+    // ── Large display (hero numbers, future full-screen KPIs) ───────────────
+    displayLarge:  GoogleFonts.bebasNeue(textStyle: inter.displayLarge,  letterSpacing: 2.0),
+    displayMedium: GoogleFonts.bebasNeue(textStyle: inter.displayMedium, letterSpacing: 2.0),
+    displaySmall:  GoogleFonts.bebasNeue(textStyle: inter.displaySmall,  letterSpacing: 1.8),
+    // ── Headline (KPI values — revenue, member counts, check-ins) ───────────
+    headlineLarge:  GoogleFonts.bebasNeue(textStyle: inter.headlineLarge,  letterSpacing: 2.0),
+    headlineMedium: GoogleFonts.bebasNeue(textStyle: inter.headlineMedium, letterSpacing: 2.0),
+    headlineSmall:  GoogleFonts.bebasNeue(textStyle: inter.headlineSmall,  letterSpacing: 2.0, height: 1.05),
+    // ── Title (section labels and sidebar brand) ─────────────────────────────
+    // titleLarge  → sidebar "GYM MANAGEMENT" lockup + chart primary headers
+    titleLarge:  GoogleFonts.bebasNeue(textStyle: inter.titleLarge,  letterSpacing: 3.0),
+    // titleMedium → section titles ("QUICK ACTIONS", "AT-RISK MEMBERS")
+    titleMedium: GoogleFonts.bebasNeue(textStyle: inter.titleMedium, letterSpacing: 2.5),
+    // titleSmall stays Inter — used for member names and list row titles
+    // where legibility at 14 px matters more than brand presence.
+    // ── Inter data labels (keep light weight contrast for hierarchy) ─────────
+    labelLarge:  inter.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+    labelMedium: inter.labelMedium?.copyWith(fontWeight: FontWeight.w500),
+  );
+}
+
 class RouterNotifier extends ChangeNotifier {
   RouterNotifier(this.ref) {
     ref.listen<AuthState>(authControllerProvider, (prev, next) {
@@ -145,13 +192,13 @@ class GymSaasApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final accent = ref.watch(accentProvider).color;
+    final accent = ref.watch(accentColorProvider);
     final isAccentDark = ThemeData.estimateBrightnessForColor(accent) == Brightness.dark;
     final onAccentDark = isAccentDark ? Colors.white : const Color(0xFF0B0F14);
     final onAccentLight = isAccentDark ? Colors.white : const Color(0xFF121212);
-    const obsidian = Color(0xFF0B0F14);
-    const surface = Color(0xFF101722);
-
+    const obsidian = Color(0xFF0B0B0C);   // deep obsidian black canvas
+    const surface = Color(0xFF16161A);    // rich charcoal container surface
+  
     final darkScheme = ColorScheme(
       brightness: Brightness.dark,
       primary: accent,
@@ -162,17 +209,17 @@ class GymSaasApp extends ConsumerWidget {
       onError: Color(0xFF0B0F14),
       surface: surface,
       onSurface: Color(0xFFEAECEF),
-      surfaceContainerHighest: Color(0xFF121B28),
-      onSurfaceVariant: Color(0xFFCBD5E1),
-      outline: Color(0xFF3A465A),
-      outlineVariant: Color(0xFF2B3648),
+      surfaceContainerHighest: Color(0xFF1E1E24),
+      onSurfaceVariant: Color(0xFFAAB4C8),
+      outline: Color(0xFF2F2F3D),
+      outlineVariant: Color(0xFF252530),
       shadow: Colors.black,
       scrim: Colors.black,
       inverseSurface: Color(0xFFEAECEF),
-      onInverseSurface: Color(0xFF0B0F14),
+      onInverseSurface: Color(0xFF0B0B0C),
       inversePrimary: accent,
-      tertiary: Color(0xFF0F766E),
-      onTertiary: Color(0xFFE7FFF9),
+      tertiary: Color(0xFF10B981),      // electric emerald — health/active metrics
+      onTertiary: Color(0xFF071F16),
     );
 
     final lightScheme = ColorScheme(
@@ -198,22 +245,16 @@ class GymSaasApp extends ConsumerWidget {
       onTertiary: Colors.white,
     );
 
-    final lightText = ThemeData(useMaterial3: true, colorScheme: lightScheme).textTheme;
-    final darkText = ThemeData(useMaterial3: true, colorScheme: darkScheme).textTheme;
-    final tunedLightText = lightText.copyWith(
-      headlineSmall: lightText.headlineSmall?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.2),
-      titleLarge: lightText.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-      titleMedium: lightText.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-      labelLarge: lightText.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    // Dual-font text themes: Bebas Neue for display/headline/title,
+    // Inter for body/label/data. See _buildMixedTextTheme() above.
+    final tunedLightText = _buildMixedTextTheme(
+      ThemeData(useMaterial3: true, colorScheme: lightScheme).textTheme,
     );
-    final tunedDarkText = darkText.copyWith(
-      headlineSmall: darkText.headlineSmall?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.2),
-      titleLarge: darkText.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-      titleMedium: darkText.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-      labelLarge: darkText.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    final tunedDarkText = _buildMixedTextTheme(
+      ThemeData(useMaterial3: true, colorScheme: darkScheme).textTheme,
     );
 
-    final darkCardColor = darkScheme.surfaceContainerHighest.withAlpha(77);
+    const darkCardColor = Color(0xFF16161A); // solid charcoal — opaque above obsidian canvas
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
@@ -233,7 +274,7 @@ class GymSaasApp extends ConsumerWidget {
           elevation: 2,
           color: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: AppRadius.largeAll,
             side: BorderSide(color: lightScheme.outlineVariant),
           ),
           clipBehavior: Clip.antiAlias,
@@ -242,7 +283,7 @@ class GymSaasApp extends ConsumerWidget {
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: AppRadius.largeAll,
             side: BorderSide(color: lightScheme.outlineVariant),
           ),
         ),
@@ -251,15 +292,15 @@ class GymSaasApp extends ConsumerWidget {
           filled: true,
           fillColor: const Color(0xFFF1F2F4),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppRadius.mediumAll,
             borderSide: BorderSide(color: lightScheme.outlineVariant),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppRadius.mediumAll,
             borderSide: BorderSide(color: lightScheme.outlineVariant),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppRadius.mediumAll,
             borderSide: BorderSide(color: accent, width: 1.2),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -296,42 +337,44 @@ class GymSaasApp extends ConsumerWidget {
         useMaterial3: true,
         colorScheme: darkScheme,
         textTheme: tunedDarkText,
-        scaffoldBackgroundColor: const Color(0xFF0A0E14),
+        scaffoldBackgroundColor: obsidian,
         canvasColor: obsidian,
         highlightColor: Colors.transparent,
         splashColor: Colors.transparent,
         appBarTheme: const AppBarTheme(centerTitle: false),
         cardTheme: CardThemeData(
-          elevation: 2,
+          elevation: 0,
           color: darkCardColor,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: darkScheme.outlineVariant),
+            borderRadius: AppRadius.largeAll,
+            // 5 % white border — gives shape without adding colour noise.
+            side: const BorderSide(color: Color(0x0DFFFFFF), width: 0.8),
           ),
           clipBehavior: Clip.antiAlias,
         ),
-        shadowColor: Colors.black.withAlpha(120),
+        shadowColor: Colors.black.withAlpha(140),
         dialogTheme: DialogThemeData(
           backgroundColor: surface.withAlpha(235),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: darkScheme.outlineVariant),
+            borderRadius: AppRadius.largeAll,
+            side: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
           ),
         ),
-        dividerTheme: DividerThemeData(color: darkScheme.outlineVariant, thickness: 1, space: 1),
+        dividerTheme: const DividerThemeData(color: Color(0x0DFFFFFF), thickness: 1, space: 1),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0x2AFFFFFF),
+          fillColor: const Color(0x18FFFFFF),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: darkScheme.outlineVariant),
+            borderRadius: AppRadius.mediumAll,
+            borderSide: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: darkScheme.outlineVariant),
+            borderRadius: AppRadius.mediumAll,
+            borderSide: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppRadius.mediumAll,
             borderSide: BorderSide(color: accent, width: 1.2),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -354,8 +397,8 @@ class GymSaasApp extends ConsumerWidget {
           headingRowHeight: 44,
           dataRowMinHeight: 48,
           dataRowMaxHeight: 56,
-          headingRowColor: WidgetStatePropertyAll(darkScheme.surfaceContainerHighest.withAlpha(220)),
-          dividerThickness: 0.8,
+          headingRowColor: const WidgetStatePropertyAll(Color(0xFF1E1E24)),
+          dividerThickness: 0.6,
           headingTextStyle: tunedDarkText.labelLarge?.copyWith(color: darkScheme.onSurfaceVariant),
           dataTextStyle: tunedDarkText.bodyMedium?.copyWith(color: darkScheme.onSurface),
         ),
@@ -364,8 +407,8 @@ class GymSaasApp extends ConsumerWidget {
         ),
         chipTheme: ChipThemeData(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-          backgroundColor: darkScheme.surfaceContainerHighest.withAlpha(180),
-          side: BorderSide(color: darkScheme.outlineVariant),
+          backgroundColor: const Color(0xFF1E1E24),
+          side: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
           labelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
           secondaryLabelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
         ),
