@@ -555,40 +555,68 @@ class PlansScreen extends ConsumerStatefulWidget {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: filtered.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
                     final p = filtered[i];
-                    return ListTile(
-                      leading: const Icon(Icons.card_membership),
-                      title: Text(_titleCase(p.name)),
-                      subtitle: Text(
-                        '${p.durationDays} days • Price: ${number.format(p.price)} • Admission: ${number.format(p.admissionFee)}',
+                    final theme = Theme.of(context);
+                    return Container(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withAlpha(40),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: theme.dividerColor),
                       ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          canManage
-                              ? _StatusToggleButton(
-                                  status: p.status,
-                                  onPressed: () => toggleStatus(p),
-                                )
-                              : _StatusChip(status: p.status),
-                          IconButton(
-                            tooltip: 'View',
-                            onPressed: () => _openViewPlan(context, p),
-                            icon: const Icon(Icons.visibility),
+                          Row(
+                            children: [
+                              Icon(Icons.card_membership, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _titleCase(p.name),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              canManage
+                                  ? _StatusToggleButton(status: p.status, onPressed: () => toggleStatus(p))
+                                  : _StatusChip(status: p.status),
+                            ],
                           ),
-                          IconButton(
-                            tooltip: 'Edit',
-                            onPressed: () => _openEditPlan(context, ref, p),
-                            icon: const Icon(Icons.edit_outlined),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${p.durationDays} days  •  Price ${number.format(p.price)}  •  Admission ${number.format(p.admissionFee)}',
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                           ),
-                          if (canManage)
-                            IconButton(
-                              tooltip: 'Delete',
-                              onPressed: () => _confirmDelete(context, ref, p),
-                              icon: const Icon(Icons.delete_outline),
-                            ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              AppTableActionButton(
+                                icon: Icons.visibility_outlined,
+                                tooltip: 'View',
+                                onPressed: () => _openViewPlan(context, p),
+                              ),
+                              const SizedBox(width: 2),
+                              AppTableActionButton(
+                                icon: Icons.edit_outlined,
+                                tooltip: 'Edit',
+                                onPressed: () => _openEditPlan(context, ref, p),
+                              ),
+                              if (canManage) ...[
+                                const Spacer(),
+                                AppTableActionButton(
+                                  icon: Icons.delete_outline,
+                                  tooltip: 'Delete',
+                                  danger: true,
+                                  onPressed: () => _confirmDelete(context, ref, p),
+                                ),
+                              ],
+                            ],
+                          ),
                         ],
                       ),
                     );

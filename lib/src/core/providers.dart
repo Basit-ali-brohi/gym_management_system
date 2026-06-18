@@ -5,10 +5,24 @@ import 'package:flutter/material.dart';
 import 'api_client.dart';
 import 'token_store.dart';
 
+/// ── PRODUCTION BACKEND URL ───────────────────────────────────────────────
+/// Set this ONCE to your publicly-hosted backend, e.g.
+///   const kProductionApiUrl = 'https://gym-api.onrender.com';
+/// After that, every RELEASE APK connects automatically — whoever installs it
+/// does nothing, no "Server settings", it just works anywhere with internet.
+/// Leave empty for local development (uses the localhost fallbacks below).
+const kProductionApiUrl = '';
+
+/// Optional compile-time override: flutter build apk --dart-define=API_BASE_URL=...
 const _apiBaseUrlOverride = String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
 String get apiBaseUrl {
+  // 1) Explicit build-time override always wins.
   if (_apiBaseUrlOverride.isNotEmpty) return _apiBaseUrlOverride;
+  // 2) Release builds point at the hosted production server, so any APK you
+  //    share works with zero setup.
+  if (!kDebugMode && kProductionApiUrl.isNotEmpty) return kProductionApiUrl;
+  // 3) Local-development fallbacks (debug builds / before deploy).
   if (kIsWeb) {
     final host = Uri.base.host.isEmpty ? '127.0.0.1' : Uri.base.host;
     return 'http://$host:8081';
@@ -29,7 +43,55 @@ final pendingQuickActionProvider = StateProvider<QuickAction?>((ref) => null);
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(baseUrl: apiBaseUrl));
+/// The live backend base URL. Defaults to the platform default ([apiBaseUrl])
+/// but can be overridden in-app (Login screen → Server settings) and persisted,
+/// so a release APK can point at any server IP without a rebuild.
+final serverUrlProvider = StateNotifierProvider<ServerUrlController, String>((ref) {
+  final store = ref.read(tokenStoreProvider);
+  return ServerUrlController(store);
+});
+
+class ServerUrlController extends StateNotifier<String> {
+  ServerUrlController(this._store) : super(apiBaseUrl) {
+    _bootstrap();
+  }
+
+  final TokenStore _store;
+
+  /// The compiled-in platform default, used as the "reset" target.
+  String get defaultUrl => apiBaseUrl;
+
+  Future<void> _bootstrap() async {
+    final saved = normalize(await _store.getServerUrl());
+    if (!mounted || saved == null) return;
+    state = saved;
+  }
+
+  /// Persist + apply a custom server URL. Pass null/empty to reset to default.
+  Future<void> setUrl(String? raw) async {
+    final normalized = normalize(raw);
+    state = normalized ?? apiBaseUrl;
+    await _store.setServerUrl(normalized);
+  }
+
+  /// Cleans user input: trims, adds http:// if no scheme, strips trailing slash.
+  static String? normalize(String? raw) {
+    var v = (raw ?? '').trim();
+    if (v.isEmpty) return null;
+    if (!v.startsWith('http://') && !v.startsWith('https://')) {
+      v = 'http://$v';
+    }
+    while (v.endsWith('/')) {
+      v = v.substring(0, v.length - 1);
+    }
+    return v;
+  }
+}
+
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final base = ref.watch(serverUrlProvider);
+  return ApiClient(baseUrl: base);
+});
 
 final themeModeProvider = StateNotifierProvider<ThemeModeController, ThemeMode>((ref) {
   final store = ref.read(tokenStoreProvider);

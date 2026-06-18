@@ -620,7 +620,25 @@ class AppShell extends ConsumerWidget {
             if (!useRail) {
               return Scaffold(
                 appBar: AppBar(
-                  title: Text('$tenantLabel — $pageTitle'),
+                  // Just the page name (gym name lives in the drawer). FittedBox
+                  // scales the title down to fit instead of ever truncating with
+                  // an ellipsis on narrow phones.
+                  titleSpacing: 4,
+                  title: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        pageTitle,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                  // Compact action density so 5 controls fit without overflow.
+                  actionsIconTheme: const IconThemeData(size: 22),
                   actions: [
                     _IconBadgeButton(
                       tooltip: 'Notifications',
@@ -629,11 +647,13 @@ class AppShell extends ConsumerWidget {
                       onPressed: openExpiringDialog,
                     ),
                     IconButton(
+                      visualDensity: VisualDensity.compact,
                       tooltip: isDark ? 'Light theme' : 'Dark theme',
                       onPressed: toggleTheme,
                       icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
                     ),
                     IconButton(
+                      visualDensity: VisualDensity.compact,
                       tooltip: 'Search',
                       onPressed: openGlobalSearch,
                       icon: const Icon(Icons.search),
@@ -660,9 +680,9 @@ class AppShell extends ConsumerWidget {
                         const PopupMenuItem(value: 'logout', child: Text('Logout')),
                       ],
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
                         child: CircleAvatar(
-                          radius: 16,
+                          radius: 15,
                           backgroundColor: theme.colorScheme.primaryContainer,
                           foregroundColor: theme.colorScheme.onPrimaryContainer,
                           child: Text(initials),

@@ -746,6 +746,10 @@ class ExpensesScreen extends ConsumerWidget {
         const SizedBox(width: 8),
         FilledButton(
           onPressed: () async {
+            // Close any open Autocomplete overlay / keyboard before the dialog
+            // pops, so the options overlay disposes cleanly (prevents the
+            // framework "_dependents.isEmpty" assertion on dismiss).
+            FocusScope.of(context).unfocus();
             final category = categoryAutoCtrl?.text.trim() ?? '';
             final date = dateCtrl.text.trim();
             if (category.isEmpty) {
@@ -938,6 +942,7 @@ class ExpensesScreen extends ConsumerWidget {
         const SizedBox(width: 8),
         FilledButton(
           onPressed: () async {
+            FocusScope.of(context).unfocus();
             final category = categoryAutoCtrl?.text.trim() ?? '';
             if (category.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Category required')));

@@ -4,8 +4,56 @@
 // inline on the Leads screen. New screens (Members, etc.) should import from
 // here; the Leads screen can adopt these in a later dedupe pass.
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+/// A single swipe-scrollable horizontal strip for filter chips / pills / date
+/// fields. Replaces multi-row [Wrap] stacking on narrow screens with one clean
+/// line (flex row, nowrap, overflow-x auto). The scrollbar is hidden and touch
+/// inertia scrolling is preserved.
+class AppHScroll extends StatelessWidget {
+  const AppHScroll({
+    super.key,
+    required this.children,
+    this.spacing = 8,
+    this.padding = EdgeInsets.zero,
+  });
+
+  final List<Widget> children;
+  final double spacing;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        scrollbars: false,
+        overscroll: false,
+        dragDevices: const {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.trackpad,
+          PointerDeviceKind.stylus,
+        },
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: padding,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) SizedBox(width: spacing),
+              children[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// Compact, fixed-height input decoration for filter bars.
 /// Identical decoration across controls => identical rendered height, which is

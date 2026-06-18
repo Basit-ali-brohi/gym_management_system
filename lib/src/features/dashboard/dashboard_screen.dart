@@ -312,14 +312,11 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                   // 3-column Quick Actions grid below.
                   // Card WIDTH (not column count) changes when the drawer opens
                   // or closes — the TweenAnimationBuilder handles that smoothly.
-                  final int cols;
-                  if (box.maxWidth >= 480) {
-                    cols = 3;
-                  } else if (box.maxWidth >= 320) {
-                    cols = 2;
-                  } else {
-                    cols = 1;
-                  }
+                  // Desktop (content area ≥ 480) keeps the premium 3-up grid,
+                  // unchanged. Narrow phones drop straight to a single
+                  // full-width column so card text ("Total Revenue") fits on one
+                  // line instead of wrapping mid-word in a cramped 2-col squeeze.
+                  final int cols = box.maxWidth >= 480 ? 3 : 1;
 
                   const double gap = 12;
 
@@ -665,14 +662,9 @@ class _QuickActionsSection extends StatelessWidget {
             // Matches the KPI card grid above: identical breakpoints so both
             // grids always have the same column count and shared vertical edges.
             // Width (not column count) adapts when the drawer opens / closes.
-            final int cols;
-            if (box.maxWidth >= 480) {
-              cols = 3;
-            } else if (box.maxWidth >= 320) {
-              cols = 2;
-            } else {
-              cols = 1;
-            }
+            // Desktop keeps the 3-up grid; phones (< 480) use one full-width
+            // column so action labels don't wrap mid-word.
+            final int cols = box.maxWidth >= 480 ? 3 : 1;
 
             const double gap = 12;
 
@@ -858,13 +850,14 @@ class _AtRiskMembersCard extends ConsumerWidget {
     }
 
     Widget header({required int days, required int count}) {
-      const amber = AppTheme.alertAmber;
+      // Follow the live brand accent chosen in Settings (was a fixed amber).
+      final accent = theme.colorScheme.primary;
       return Row(
         children: [
           Container(
             height: 40, width: 40,
-            decoration: AppTheme.iconBox(color: amber),
-            child: const Center(child: Icon(Icons.warning_amber_rounded, color: amber, size: 20)),
+            decoration: AppTheme.iconBox(color: accent),
+            child: Center(child: Icon(Icons.warning_amber_rounded, color: accent, size: 20)),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -936,19 +929,19 @@ class _AtRiskMembersCard extends ConsumerWidget {
                         final m = payload.items[i];
                         final msg = buildMessage(m);
                         final phoneOk = normalizeWhatsAppPhone(m.phone).isNotEmpty;
-                        const amber = AppTheme.alertAmber;
+                        final accent = theme.colorScheme.primary;
                         final initials = m.fullName.trim().isEmpty ? '?' : m.fullName.trim().substring(0, 1).toUpperCase();
                         return Container(
-                          decoration: const BoxDecoration(border: Border(left: BorderSide(color: amber, width: 3))),
+                          decoration: BoxDecoration(border: Border(left: BorderSide(color: accent, width: 3))),
                           child: ListTile(
                             dense: true,
                             leading: CircleAvatar(
                               radius: 16,
-                              backgroundColor: amber.withAlpha(28),
-                              child: Text(initials, style: theme.textTheme.labelMedium?.copyWith(color: amber, fontWeight: FontWeight.w700)),
+                              backgroundColor: accent.withAlpha(28),
+                              child: Text(initials, style: theme.textTheme.labelMedium?.copyWith(color: accent, fontWeight: FontWeight.w700)),
                             ),
-                            title: Text('${m.fullName} (${m.memberCode})', maxLines: 1, overflow: TextOverflow.ellipsis),
-                            subtitle: Text('Last visit: ${fmtDate(m.lastCheckinAt)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                            title: Text('${m.fullName} (${m.memberCode})', maxLines: 2, overflow: TextOverflow.ellipsis),
+                            subtitle: Text('Last visit: ${fmtDate(m.lastCheckinAt)}', maxLines: 2, overflow: TextOverflow.ellipsis),
                             trailing: IconButton(
                               tooltip: phoneOk ? 'Send WhatsApp' : 'Phone missing',
                               onPressed: phoneOk ? () => openWhatsApp(phone: m.phone, message: msg) : null,
@@ -1112,8 +1105,8 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
                     foregroundColor: chipColor,
                     child: Icon(icon, size: 17),
                   ),
-                  title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(a.subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: Text(fmtTime(a.at), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                   onTap: () => context.go(route),
                 ),
@@ -1343,112 +1336,144 @@ class _HeroBanner extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.all(20),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          Text(
-                            '$greeting  $today',
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              color: greetingColor,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.3,
+                child: Builder(
+                  builder: (context) {
+                    final narrow = MediaQuery.sizeOf(context).width < 600;
+
+                    final heroActionsRow = Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Refresh',
+                          onPressed: onRefresh,
+                          icon: Icon(Icons.refresh, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
+                        ),
+                        IconButton(
+                          tooltip: 'PDF',
+                          onPressed: onExportPdf,
+                          icon: Icon(Icons.picture_as_pdf_outlined, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    );
+
+                    final dumbbell = isDark
+                        ? Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              color: AppTheme.charcoal.withAlpha(180),
+                              border: Border.all(color: gold.withAlpha(80)),
+                              boxShadow: AppTheme.neonGlow(gold, blur: 22),
                             ),
+                            child: Icon(Icons.fitness_center_rounded, size: 44, color: gold),
+                          )
+                        : Container(
+                            height: 72,
+                            width: 72,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.grey.shade100,
+                              border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1),
+                            ),
+                            child: Icon(Icons.fitness_center_rounded, size: 34, color: Colors.grey.shade400),
+                          );
+
+                    final content = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$greeting  $today',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: greetingColor,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            gymName.isEmpty ? 'GYM DASHBOARD' : gymName.toUpperCase(),
-                            style: theme.textTheme.headlineSmall?.copyWith(color: headingColor),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            tenantSlug.trim().isEmpty
-                                ? 'Performance overview'
-                                : 'Gym: $tenantSlug  •  Performance overview',
-                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                          const SizedBox(height: 14),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              const _TagChip(label: 'Members'),
-                              const _TagChip(label: 'Attendance'),
-                              if (canSeeRevenue) const _TagChip(label: 'Billing'),
-                              const _TagChip(label: 'CRM'),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          gymName.isEmpty ? 'GYM DASHBOARD' : gymName.toUpperCase(),
+                          style: theme.textTheme.headlineSmall?.copyWith(color: headingColor),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          tenantSlug.trim().isEmpty
+                              ? 'Performance overview'
+                              : 'Gym: $tenantSlug  •  Performance overview',
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            const _TagChip(label: 'Members'),
+                            const _TagChip(label: 'Attendance'),
+                            if (canSeeRevenue) const _TagChip(label: 'Billing'),
+                            const _TagChip(label: 'CRM'),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        LayoutBuilder(
+                          builder: (context, c) {
+                            final heroActions = <Widget>[
                               FilledButton.icon(
                                 onPressed: () => context.go('/members'),
                                 icon: const Icon(Icons.person_add_alt_1_outlined),
-                                label: const Text('Add member'),
+                                label: const Text('Add member', maxLines: 1, overflow: TextOverflow.ellipsis),
                               ),
                               _HeroBorderButton(label: 'Check-in', icon: Icons.qr_code_scanner, accent: gold, onTap: () => context.go('/attendance')),
                               if (canSeeRevenue)
                                 _HeroBorderButton(label: 'Invoices', icon: Icons.receipt_long_outlined, accent: gold, onTap: () => context.go('/invoices')),
                               _HeroBorderButton(label: 'Leads', icon: Icons.person_search_outlined, accent: theme.colorScheme.tertiary, onTap: () => context.go('/leads')),
-                            ],
-                          ),
+                            ];
+                            // Mobile: clean 2-up grid (each button half-width).
+                            if (c.maxWidth < 600) {
+                              final half = (c.maxWidth - 8) / 2;
+                              return Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final a in heroActions) SizedBox(width: half, child: a),
+                                ],
+                              );
+                            }
+                            return Wrap(spacing: 8, runSpacing: 8, children: heroActions);
+                          },
+                        ),
+                      ],
+                    );
+
+                    // Mobile: actions pinned top-right, content full-width, no
+                    // decorative dumbbell (so the 2×2 button grid has real room).
+                    if (narrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Align(alignment: Alignment.centerRight, child: heroActionsRow),
+                          content,
                         ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisAlignment: MainAxisAlignment.start,
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
+                        Expanded(child: content),
+                        const SizedBox(width: 12),
+                        Column(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.start,
                           children: [
-                            IconButton(
-                              tooltip: 'Refresh',
-                              onPressed: onRefresh,
-                              icon: Icon(Icons.refresh, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
-                            ),
-                            IconButton(
-                              tooltip: 'PDF',
-                              onPressed: onExportPdf,
-                              icon: Icon(Icons.picture_as_pdf_outlined, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
-                            ),
+                            heroActionsRow,
+                            const SizedBox(height: 10),
+                            dumbbell,
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        // Branding asset — bold gold tile (dark) vs desaturated
-                        // soft-grey circle (light) that blends with the canvas.
-                        isDark
-                            ? Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  color: AppTheme.charcoal.withAlpha(180),
-                                  border: Border.all(color: gold.withAlpha(80)),
-                                  boxShadow: AppTheme.neonGlow(gold, blur: 22),
-                                ),
-                                child: Icon(Icons.fitness_center_rounded, size: 44, color: gold),
-                              )
-                            : Container(
-                                height: 72,
-                                width: 72,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.grey.shade100,
-                                  border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1),
-                                ),
-                                child: Icon(Icons.fitness_center_rounded, size: 34, color: Colors.grey.shade400),
-                              ),
                       ],
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -1528,7 +1553,14 @@ class _HeroBorderButtonState extends State<_HeroBorderButton> {
               children: [
                 Icon(widget.icon, size: 18, color: widget.accent),
                 const SizedBox(width: 8),
-                Text(widget.label, style: theme.textTheme.labelLarge?.copyWith(color: widget.accent, fontWeight: FontWeight.w700)),
+                Flexible(
+                  child: Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge?.copyWith(color: widget.accent, fontWeight: FontWeight.w700),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1798,11 +1830,20 @@ class _Revenue7dCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+            // Equal-width centered cells so every day label (Thu, Fri, …) stays
+            // fully visible and aligned under its data point on any width.
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 for (final p in normalized.take(7))
-                  Text(labelFor(p.date), style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  Expanded(
+                    child: Text(
+                      labelFor(p.date),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.visible,
+                      style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
               ],
             ),
             if (maxValue <= 0) ...[

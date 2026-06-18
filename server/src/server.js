@@ -207,6 +207,10 @@ const ensureOperationalTables = async () => {
        ADD INDEX IF NOT EXISTS ix_inv_tenant_created (tenant_id, status, created_at)`
     );
   } catch {}
+  // Optional transaction/reference id captured by the manual Record Payment form.
+  try {
+    await execute('ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(120) NULL');
+  } catch {}
 
   await execute(
     `CREATE TABLE IF NOT EXISTS attendance_events (
@@ -4331,8 +4335,19 @@ app.get('/invoices', authMiddleware, requireRole('owner', 'admin'), async (req, 
     params.q = `%${q}%`;
   }
   if (status?.length && status !== 'all') {
-    where.push('i.status = :status');
-    params.status = status;
+    // Support comma-separated statuses, e.g. "unpaid,partial" from the Record
+    // Payment picker. A single value still uses equality.
+    const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) {
+      where.push('i.status = :status');
+      params.status = statuses[0];
+    } else if (statuses.length > 1) {
+      const placeholders = statuses.map((_, idx) => `:status${idx}`);
+      where.push(`i.status IN (${placeholders.join(', ')})`);
+      statuses.forEach((s, idx) => {
+        params[`status${idx}`] = s;
+      });
+    }
   }
   if (from?.length) {
     where.push('DATE(i.created_at) >= :from');
@@ -4360,7 +4375,9 @@ app.get('/invoices', authMiddleware, requireRole('owner', 'admin'), async (req, 
   const total = Number(countRow?.c ?? 0);
 
   const rows = await queryMany(
-    `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at, m.full_name, m.member_code, m.phone
+    `SELECT i.id, i.invoice_no, i.total, i.status, i.created_at, m.full_name, m.member_code, m.phone,
+            COALESCE((SELECT SUM(p.amount) FROM payments p
+                      WHERE p.invoice_id = i.id AND p.tenant_id = i.tenant_id), 0) AS amount_paid
      FROM invoices i
      INNER JOIN members m ON m.id = i.member_id
      WHERE ${where.join(' AND ')}
@@ -6149,6 +6166,90 @@ app.post('/invoices/mark-paid', authMiddleware, requireRole('owner', 'admin'), a
   } catch {
     await conn.rollback();
     return res.status(400).json({ error: 'mark_paid_failed' });
+  } finally {
+    conn.release();
+  }
+});
+
+// Manual payment recording with ledger re-evaluation.
+//   • Inserts a payment row against an open invoice.
+//   • If the cumulative paid amount covers the total → invoice becomes 'paid'.
+//   • Otherwise the invoice stays open (partially paid) and the balance shrinks.
+app.post('/payments/record', authMiddleware, requireRole('owner', 'admin'), async (req, res) => {
+  const bodySchema = z.object({
+    invoiceId: z.number().int().positive(),
+    amount: z.number().positive(),
+    method: z.enum(['cash', 'card', 'bank', 'online']).optional().default('cash'),
+    reference: z.string().trim().max(120).optional().nullable()
+  });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+
+  const tenantId = req.user.tenantId;
+  const { invoiceId, amount, method } = parsed.data;
+  const reference = parsed.data.reference?.length ? parsed.data.reference : null;
+
+  const invoice = await queryOne(
+    'SELECT id, invoice_no, member_id, total, status FROM invoices WHERE id = :id AND tenant_id = :tenantId',
+    { id: invoiceId, tenantId }
+  );
+  if (!invoice) return res.status(404).json({ error: 'invoice_not_found' });
+  if (invoice.status === 'paid') return res.status(400).json({ error: 'invoice_already_paid' });
+  if (invoice.status === 'void') return res.status(400).json({ error: 'invoice_voided' });
+
+  const total = Number(invoice.total);
+  const paidRow = await queryOne(
+    'SELECT COALESCE(SUM(amount), 0) AS s FROM payments WHERE tenant_id = :tenantId AND invoice_id = :invoiceId',
+    { tenantId, invoiceId }
+  );
+  const paidSoFar = Number(paidRow?.s ?? 0);
+  const balance = Math.max(0, total - paidSoFar);
+  // Never record more than what is outstanding.
+  const applied = Math.min(amount, balance > 0 ? balance : amount);
+  if (applied <= 0) return res.status(400).json({ error: 'invoice_already_settled' });
+
+  const newPaid = paidSoFar + applied;
+  const fullyPaid = newPaid + 0.009 >= total; // float tolerance
+  const newStatus = fullyPaid ? 'paid' : 'unpaid'; // stays open until covered
+
+  const connPool = await getPool();
+  const conn = await connPool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `INSERT INTO payments (tenant_id, invoice_id, amount, method, reference, paid_at)
+       VALUES (:tenantId, :invoiceId, :amount, :method, :reference, :paidAt)`,
+      { tenantId, invoiceId, amount: applied, method, reference, paidAt: toMysqlDateTime(new Date()) }
+    );
+    if (newStatus !== invoice.status) {
+      await conn.execute(
+        'UPDATE invoices SET status = :status WHERE id = :id AND tenant_id = :tenantId',
+        { status: newStatus, id: invoiceId, tenantId }
+      );
+    }
+    if (fullyPaid) {
+      await triggerAutomation(
+        {
+          tenantId,
+          event: 'payment_received',
+          memberId: Number(invoice.member_id),
+          invoiceId,
+          payload: { invoiceNo: invoice.invoice_no, amount: applied, method }
+        },
+        conn
+      );
+    }
+    await conn.commit();
+    return res.json({
+      ok: true,
+      status: newStatus,
+      applied,
+      paid: newPaid,
+      balance: Math.max(0, total - newPaid)
+    });
+  } catch {
+    await conn.rollback();
+    return res.status(400).json({ error: 'record_payment_failed' });
   } finally {
     conn.release();
   }

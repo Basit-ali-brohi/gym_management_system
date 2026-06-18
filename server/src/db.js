@@ -19,7 +19,10 @@ const createPoolWithHostAndPort = async (host, port) => {
     database: requiredEnv('DB_NAME', 'gym_saas'),
     waitForConnections: true,
     connectionLimit: Number(requiredEnv('DB_POOL_SIZE', '10')),
-    namedPlaceholders: true
+    namedPlaceholders: true,
+    // Managed cloud MySQL (Railway, Aiven, PlanetScale, etc.) usually needs SSL.
+    // Set DB_SSL=true in the host's env vars to enable it.
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
   });
   const conn = await pool.getConnection();
   try {

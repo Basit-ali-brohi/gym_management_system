@@ -564,40 +564,34 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               },
             );
 
-            final actions = Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _HoverScaleButton(
-                  child: OutlinedButton.icon(
-                    onPressed: items.isEmpty ? null : () => _exportMembersCsv(context, items),
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Export'),
-                  ),
+            final actionButtons = <Widget>[
+              _HoverScaleButton(
+                child: OutlinedButton.icon(
+                  onPressed: items.isEmpty ? null : () => _exportMembersCsv(context, items),
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Export'),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'PDF',
-                  onPressed: () => _openMembersPdfActions(context),
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
+              ),
+              IconButton(
+                tooltip: 'PDF',
+                onPressed: () => _openMembersPdfActions(context),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+              ),
+              _HoverScaleButton(
+                child: FilledButton.icon(
+                  onPressed: () => _openAddMember(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Member'),
                 ),
-                const SizedBox(width: 6),
-                _HoverScaleButton(
-                  child: FilledButton.icon(
-                    onPressed: () => _openAddMember(context),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Member'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'Refresh',
-                    onPressed: () => ref
-                        .read(membersControllerProvider.notifier)
-                        .load(q: _searchCtrl.text.trim(), status: statusStr, from: fromStr, to: toStr),
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            );
+              ),
+              IconButton(
+                tooltip: 'Refresh',
+                onPressed: () => ref
+                    .read(membersControllerProvider.notifier)
+                    .load(q: _searchCtrl.text.trim(), status: statusStr, from: fromStr, to: toStr),
+                icon: const Icon(Icons.refresh),
+              ),
+            ];
 
             final headerRow = stacked
                 ? Column(
@@ -605,13 +599,22 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     children: [
                       Text('Members', style: theme.textTheme.headlineSmall),
                       const SizedBox(height: 12),
-                      Align(alignment: Alignment.centerRight, child: actions),
+                      // Wrap so buttons flow to a second line instead of overflowing.
+                      Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actionButtons),
                     ],
                   )
                 : Row(
                     children: [
                       Expanded(child: Text('Members', style: theme.textTheme.headlineSmall)),
-                      actions,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var k = 0; k < actionButtons.length; k++) ...[
+                            if (k > 0) const SizedBox(width: 8),
+                            actionButtons[k],
+                          ],
+                        ],
+                      ),
                     ],
                   );
 
@@ -1114,45 +1117,93 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                   );
                 }
 
+                // ── Mobile: stacked card per member (no cramped trailing row) ──
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: filtered.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
                     final m = filtered[i];
-                    return ListTile(
-                      title: Text('${m.fullName} (${m.memberCode})'),
-                      subtitle: Text([
-                        'ID: ${m.id}',
-                        if (m.phone != null && m.phone!.isNotEmpty) m.phone!,
-                        if (m.branchName != null && m.branchName!.isNotEmpty) m.branchName!,
-                      ].join(' • ')),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    final theme = Theme.of(context);
+                    final daysLeft = _daysLeft(m.membershipEndDate);
+                    final meta = <String>[
+                      m.memberCode,
+                      'ID ${m.id}',
+                      if (m.phone != null && m.phone!.trim().isNotEmpty) m.phone!.trim(),
+                      if (m.branchName != null && m.branchName!.trim().isNotEmpty) m.branchName!.trim(),
+                    ].join('  •  ');
+                    final planLine = <String>[
+                      if (m.membershipPlanName?.trim().isNotEmpty == true) m.membershipPlanName!.trim(),
+                      if (m.membershipEndDate?.trim().isNotEmpty == true)
+                        'Expiry ${_formatDate(m.membershipEndDate!)}'
+                            '${daysLeft != null ? ' (${daysLeft <= 0 ? 'today' : '${daysLeft}d'})' : ''}',
+                    ].join('  •  ');
+                    return Container(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withAlpha(40),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _StatusChip(status: m.status),
-                          IconButton(
-                            tooltip: 'View',
-                            onPressed: () => _openMemberDetail(context, m),
-                            icon: const Icon(Icons.visibility),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  m.fullName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _StatusChip(status: m.status, frozen: _isFrozenUntil(m.frozenUntil)),
+                            ],
                           ),
-                          IconButton(
-                            tooltip: 'Edit',
-                            onPressed: () => _openEditMember(context, m),
-                            icon: const Icon(Icons.edit_outlined),
+                          const SizedBox(height: 4),
+                          Text(
+                            meta,
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                           ),
-                          IconButton(
-                            tooltip: 'QR',
-                            onPressed: () => _openMemberQrDialog(context, memberCode: m.memberCode, fullName: m.fullName),
-                            icon: const Icon(Icons.qr_code_2),
-                          ),
-                          if (canDelete)
-                            IconButton(
-                              tooltip: 'Delete',
-                              onPressed: () => _confirmDelete(context, m),
-                              icon: const Icon(Icons.delete_outline),
+                          if (planLine.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              planLine,
+                              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                             ),
+                          ],
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              AppTableActionButton(
+                                icon: Icons.visibility_outlined,
+                                tooltip: 'View',
+                                onPressed: () => _openMemberDetail(context, m),
+                              ),
+                              const SizedBox(width: 2),
+                              AppTableActionButton(
+                                icon: Icons.edit_outlined,
+                                tooltip: 'Edit',
+                                onPressed: () => _openEditMember(context, m),
+                              ),
+                              const Spacer(),
+                              _MemberActionsMenu(
+                                frozen: _isFrozenUntil(m.frozenUntil),
+                                hasPlan: (m.membershipPlanName?.trim().isNotEmpty ?? false) ||
+                                    (m.membershipEndDate?.trim().isNotEmpty ?? false),
+                                canManageMembership: canManageMembership,
+                                canDelete: canDelete,
+                                onRenew: () => _openRenewMembership(context, m),
+                                onToggleFreeze: () => _toggleFreeze(context, m),
+                                onRemovePlan: () => _removeMembership(context, m),
+                                onQr: () => _openMemberQrDialog(context, memberCode: m.memberCode, fullName: m.fullName),
+                                onDelete: () => _confirmDelete(context, m),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     );

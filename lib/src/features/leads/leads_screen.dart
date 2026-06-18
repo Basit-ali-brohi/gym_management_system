@@ -11,6 +11,7 @@ import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
 import '../../core/providers.dart';
 import '../../core/in_app_pdf.dart';
+import '../../core/ui_kit.dart';
 import '../../models/models.dart';
 import '../auth/auth_controller.dart';
  
@@ -991,10 +992,8 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // ── Low-profile filter tags ─────────────────────────────────────
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            // ── Low-profile filter tags — single swipe-scrollable line ──────
+            AppHScroll(
               children: [
                 _FilterPill(
                   label: 'Overdue',

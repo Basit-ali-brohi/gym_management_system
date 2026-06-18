@@ -24,14 +24,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _tenantCtrl = TextEditingController(text: kDebugMode ? 'demo' : '');
   final _emailCtrl = TextEditingController(text: kDebugMode ? 'admin@demo.com' : '');
   final _passCtrl = TextEditingController(text: kDebugMode ? 'admin123' : '');
+  final _serverCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscure = true;
+  bool _showServer = false;
 
   @override
   void dispose() {
     _tenantCtrl.dispose();
     _emailCtrl.dispose();
     _passCtrl.dispose();
+    _serverCtrl.dispose();
     super.dispose();
   }
 
@@ -57,7 +60,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       null => null,
       'invalid_credentials' => 'Invalid tenant, email, or password',
       'unauthorized' => 'Login unauthorized',
-      'login_failed' => 'Cannot connect to server ($apiBaseUrl). Check the API URL/port and ensure the backend is running.',
+      'login_failed' =>
+        'Cannot connect to server (${ref.watch(serverUrlProvider)}). Tap "Server settings" below to set the correct IP, and ensure the backend is running.',
       _ => auth.error,
     };
 
@@ -219,6 +223,81 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 6),
+                  // ── Server settings: point the APK at any backend IP without
+                  //    a rebuild. Subtle, collapsed by default. ──────────────
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: auth.isLoading
+                          ? null
+                          : () => setState(() {
+                                _showServer = !_showServer;
+                                if (_showServer && _serverCtrl.text.trim().isEmpty) {
+                                  _serverCtrl.text = ref.read(serverUrlProvider);
+                                }
+                              }),
+                      icon: Icon(_showServer ? Icons.expand_less : Icons.dns_outlined, size: 18),
+                      label: const Text('Server settings'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: theme.colorScheme.onSurfaceVariant,
+                        textStyle: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      ),
+                    ),
+                  ),
+                  if (_showServer) ...[
+                    const SizedBox(height: 6),
+                    _GlowField(
+                      child: TextFormField(
+                        controller: _serverCtrl,
+                        style: GoogleFonts.inter(fontSize: 14),
+                        decoration: deco('Server URL', Icons.dns_outlined),
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        enabled: !auth.isLoading,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: auth.isLoading
+                                ? null
+                                : () async {
+                                    await ref.read(serverUrlProvider.notifier).setUrl(_serverCtrl.text);
+                                    if (!context.mounted) return;
+                                    final applied = ref.read(serverUrlProvider);
+                                    _serverCtrl.text = applied;
+                                    setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Server set to $applied')),
+                                    );
+                                  },
+                            child: const Text('Apply'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: auth.isLoading
+                              ? null
+                              : () async {
+                                  await ref.read(serverUrlProvider.notifier).setUrl(null);
+                                  if (!context.mounted) return;
+                                  _serverCtrl.text = ref.read(serverUrlProvider);
+                                  setState(() {});
+                                },
+                          child: const Text('Default'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Current: ${ref.watch(serverUrlProvider)}',
+                      style: GoogleFonts.inter(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                   const SizedBox(height: 18),
                   SizedBox(
                     height: 46,
@@ -374,7 +453,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               fit: StackFit.expand,
               children: [
                 DecoratedBox(decoration: BoxDecoration(gradient: smoky)),
-                Center(child: Padding(padding: const EdgeInsets.all(20), child: formCard())),
+                // Scrollable so the card never overflows when the keyboard opens
+                // or "Server settings" is expanded; still centered when there's room.
+                SafeArea(
+                  child: SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: c.maxHeight),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Center(child: formCard()),
+                      ),
+                    ),
+                  ),
+                ),
                 // Global theme utility — top-right.
                 const Positioned(top: 24, right: 24, child: _ThemeToggle()),
               ],

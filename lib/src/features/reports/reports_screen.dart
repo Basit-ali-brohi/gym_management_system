@@ -593,26 +593,42 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Expense vs Revenue (Profit Margin)',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                    OutlinedButton.icon(
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final titleWidget = Text(
+                      'Expense vs Revenue (Profit Margin)',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    );
+                    final monthBtn = OutlinedButton.icon(
                       onPressed: () => _pickMonth(context),
                       icon: const Icon(Icons.date_range),
                       label: Text(monthLabel),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
+                    );
+                    final refreshBtn = IconButton(
                       tooltip: 'Refresh',
                       onPressed: () => ref.invalidate(profitSeriesProvider(monthLabel)),
                       icon: const Icon(Icons.refresh),
-                    ),
-                  ],
+                    );
+                    // Mobile: title gets the full width (wraps cleanly), controls below.
+                    if (c.maxWidth < 480) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          titleWidget,
+                          const SizedBox(height: 8),
+                          Row(children: [Expanded(child: monthBtn), const SizedBox(width: 8), refreshBtn]),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: titleWidget),
+                        monthBtn,
+                        const SizedBox(width: 8),
+                        refreshBtn,
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 10),
                 profitAsync.when(
@@ -894,18 +910,28 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               );
             }
 
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final d in visible)
-                  _ReportTile(
-                    title: d.title,
-                    subtitle: d.subtitle,
-                    icon: d.icon,
-                    trailing: d.trailing,
-                  ),
-              ],
+            return LayoutBuilder(
+              builder: (context, c) {
+                // Two-up on wide screens, full-width single column on mobile.
+                final twoUp = c.maxWidth >= 760;
+                final cardW = twoUp ? (c.maxWidth - 12) / 2 : c.maxWidth;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    for (final d in visible)
+                      SizedBox(
+                        width: cardW,
+                        child: _ReportTile(
+                          title: d.title,
+                          subtitle: d.subtitle,
+                          icon: d.icon,
+                          trailing: d.trailing,
+                        ),
+                      ),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -1178,36 +1204,55 @@ class _ReportTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 520,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+    final header = Row(
+      children: [
+        CircleAvatar(
+          backgroundColor: theme.colorScheme.primaryContainer,
+          foregroundColor: theme.colorScheme.onPrimaryContainer,
+          child: Icon(icon),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                backgroundColor: theme.colorScheme.primaryContainer,
-                foregroundColor: theme.colorScheme.onPrimaryContainer,
-                child: Icon(icon),
+              Text(title, style: theme.textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              trailing,
             ],
           ),
+        ),
+      ],
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            // Narrow: stack the action buttons below the header (no squeeze).
+            if (c.maxWidth < 440) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  header,
+                  const SizedBox(height: 12),
+                  Align(alignment: Alignment.centerRight, child: trailing),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: header),
+                const SizedBox(width: 12),
+                trailing,
+              ],
+            );
+          },
         ),
       ),
     );

@@ -277,33 +277,50 @@ class InvoicesScreen extends ConsumerStatefulWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Row(
-          children: [
-            Expanded(child: Text('Invoices', style: theme.textTheme.headlineSmall)),
-            FilledButton.icon(
-              onPressed: () => _openAutoInvoice(context, ref),
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('Generate'),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: () => _sendAllInvoiceReminders(context, ref),
-              icon: const Icon(Icons.done_all),
-              label: const Text('Send All'),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: 'PDF',
-              onPressed: () => _openInvoicesListPdfActions(context, ref),
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-            ),
-            const SizedBox(width: 6),
-            IconButton(
-              tooltip: 'Refresh',
-              onPressed: () => ref.read(invoicesControllerProvider.notifier).load(),
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, c) {
+            final actionList = <Widget>[
+              FilledButton.icon(
+                onPressed: () => _openAutoInvoice(context, ref),
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Generate'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _sendAllInvoiceReminders(context, ref),
+                icon: const Icon(Icons.done_all),
+                label: const Text('Send All'),
+              ),
+              IconButton(
+                tooltip: 'PDF',
+                onPressed: () => _openInvoicesListPdfActions(context, ref),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+              ),
+              IconButton(
+                tooltip: 'Refresh',
+                onPressed: () => ref.read(invoicesControllerProvider.notifier).load(),
+                icon: const Icon(Icons.refresh),
+              ),
+            ];
+            if (c.maxWidth < 600) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Invoices', style: theme.textTheme.headlineSmall),
+                  const SizedBox(height: 12),
+                  Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actionList),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: Text('Invoices', style: theme.textTheme.headlineSmall)),
+                for (var k = 0; k < actionList.length; k++) ...[
+                  if (k > 0) const SizedBox(width: 8),
+                  actionList[k],
+                ],
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         // ── Single-row 4-up ledger summary ───────────────────────────────
@@ -621,42 +638,63 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: items.length,
-                      separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.borderSubtle),
+                      separatorBuilder: (context, index) => const SizedBox(height: 10),
                       itemBuilder: (context, i) {
                         final inv = items[i];
-                        return ListTile(
-                          leading: const Icon(Icons.receipt_long),
-                          title: Text(
-                            '${inv.invoiceNo} • ${inv.memberName}',
-                            style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        return Container(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest.withAlpha(40),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: theme.dividerColor),
                           ),
-                          subtitle: Text(
-                            'Total: ${number.format(inv.total)} • ${formatDate(inv.createdAt)}',
-                            style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _StatusChip(status: inv.status),
-                              const SizedBox(width: 4),
-                              AppTableActionButton(
-                                icon: Icons.visibility_outlined,
-                                tooltip: 'View',
-                                onPressed: () => _openInvoiceView(context, ref, inv.id),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      inv.invoiceNo,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _StatusChip(status: inv.status),
+                                ],
                               ),
-                              const SizedBox(width: 2),
-                              AppTableActionButton(
-                                icon: Icons.picture_as_pdf_outlined,
-                                tooltip: 'Export PDF',
-                                onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${inv.memberName}  •  ${number.format(inv.total)}  •  ${formatDate(inv.createdAt)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                               ),
-                              const SizedBox(width: 2),
-                              _InvoiceActionsMenu(
-                                status: inv.status,
-                                canDelete: canDelete,
-                                onMarkPaid: () => ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
-                                onEdit: () => _openInvoiceEdit(context, ref, inv.id),
-                                onVoid: () => _confirmVoid(context, ref, inv),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  AppTableActionButton(
+                                    icon: Icons.visibility_outlined,
+                                    tooltip: 'View',
+                                    onPressed: () => _openInvoiceView(context, ref, inv.id),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  AppTableActionButton(
+                                    icon: Icons.picture_as_pdf_outlined,
+                                    tooltip: 'Export PDF',
+                                    onPressed: () => _openInvoicePdfActions(context, ref, inv),
+                                  ),
+                                  const Spacer(),
+                                  _InvoiceActionsMenu(
+                                    status: inv.status,
+                                    canDelete: canDelete,
+                                    onMarkPaid: () => ref.read(invoicesControllerProvider.notifier).markPaid(inv.id),
+                                    onEdit: () => _openInvoiceEdit(context, ref, inv.id),
+                                    onVoid: () => _confirmVoid(context, ref, inv),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

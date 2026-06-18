@@ -797,12 +797,16 @@ class _BrandColorPickerCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          'Click to Customize Brand Color',
-                          style: GoogleFonts.inter(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w700,
-                            color: theme.colorScheme.onSurface,
+                        Flexible(
+                          child: Text(
+                            'Click to Customize Brand Color',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.onSurface,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -824,6 +828,8 @@ class _BrandColorPickerCard extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       'Active: $_hex  •  Full HSV spectrum',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],

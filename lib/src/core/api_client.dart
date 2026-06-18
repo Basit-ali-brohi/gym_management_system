@@ -97,6 +97,9 @@ class ApiClient {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      // Skip ngrok's free-tier browser-warning interstitial on API calls.
+      // Harmless on any other host (unknown headers are ignored).
+      'ngrok-skip-browser-warning': 'true',
     };
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';

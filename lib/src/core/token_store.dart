@@ -6,6 +6,7 @@ class TokenStore {
   static const _kThemeMode = 'theme_mode';
   static const _kAccent = 'accent_color';
   static const _kCustomAccent = 'custom_primary_color';
+  static const _kServerUrl = 'server_url';
 
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -82,6 +83,22 @@ class TokenStore {
       await prefs.remove(_kCustomAccent);
     } else {
       await prefs.setInt(_kCustomAccent, argb);
+    }
+  }
+
+  /// Custom backend base URL (e.g. http://192.168.100.11:8081) set in-app, so
+  /// the APK can point at the server without a rebuild. Empty/null = default.
+  Future<String?> getServerUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kServerUrl);
+  }
+
+  Future<void> setServerUrl(String? url) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (url == null || url.trim().isEmpty) {
+      await prefs.remove(_kServerUrl);
+    } else {
+      await prefs.setString(_kServerUrl, url.trim());
     }
   }
 }

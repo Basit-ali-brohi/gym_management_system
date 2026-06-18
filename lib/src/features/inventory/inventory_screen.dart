@@ -359,47 +359,57 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Inventory', style: theme.textTheme.headlineSmall),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Manage products, supplements, and stock',
-                                style:
-                                    theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(
-                          width: 360,
-                          child: TextField(
-                            controller: _searchCtrl,
-                            focusNode: _searchFocus,
-                            decoration: const InputDecoration(
-                              hintText: 'Search product, SKU, ...',
-                              prefixIcon: Icon(Icons.search),
+                    LayoutBuilder(
+                      builder: (context, c) {
+                        final titleBlock = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Inventory', style: theme.textTheme.headlineSmall),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Manage products, supplements, and stock',
+                              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                             ),
-                            onChanged: (v) {
-                              ref.read(inventoryQueryProvider.notifier).state = query.copyWith(q: v);
-                              _searchDebounce?.cancel();
-                              _searchDebounce = Timer(const Duration(milliseconds: 350), () {
-                                if (!mounted) return;
-                                ref.read(productsControllerProvider.notifier).load();
-                              });
-                            },
-                            onSubmitted: (_) {
-                              _searchDebounce?.cancel();
-                              ref.read(productsControllerProvider.notifier).load();
-                            },
+                          ],
+                        );
+                        final searchField = TextField(
+                          controller: _searchCtrl,
+                          focusNode: _searchFocus,
+                          decoration: const InputDecoration(
+                            hintText: 'Search product, SKU, ...',
+                            prefixIcon: Icon(Icons.search),
                           ),
-                        ),
-                      ],
+                          onChanged: (v) {
+                            ref.read(inventoryQueryProvider.notifier).state = query.copyWith(q: v);
+                            _searchDebounce?.cancel();
+                            _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+                              if (!mounted) return;
+                              ref.read(productsControllerProvider.notifier).load();
+                            });
+                          },
+                          onSubmitted: (_) {
+                            _searchDebounce?.cancel();
+                            ref.read(productsControllerProvider.notifier).load();
+                          },
+                        );
+                        if (c.maxWidth < 600) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              titleBlock,
+                              const SizedBox(height: 12),
+                              searchField,
+                            ],
+                          );
+                        }
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: titleBlock),
+                            SizedBox(width: 360, child: searchField),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 14),
                     TabBar(
@@ -655,37 +665,54 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(child: Text('Products', style: theme.textTheme.titleLarge)),
-                            _HoverScaleButton(
-                              child: OutlinedButton.icon(
-                                onPressed: items.isEmpty ? null : () => _exportProductsCsv(context, items),
-                                icon: const Icon(Icons.download_outlined),
-                                label: const Text('Export'),
+                        LayoutBuilder(
+                          builder: (context, c) {
+                            final productActions = <Widget>[
+                              _HoverScaleButton(
+                                child: OutlinedButton.icon(
+                                  onPressed: items.isEmpty ? null : () => _exportProductsCsv(context, items),
+                                  icon: const Icon(Icons.download_outlined),
+                                  label: const Text('Export'),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            IconButton(
-                              tooltip: 'PDF',
-                              onPressed: () => _openInventoryPdfActions(context),
-                              icon: const Icon(Icons.picture_as_pdf_outlined),
-                            ),
-                            const SizedBox(width: 6),
-                            _HoverScaleButton(
-                              child: FilledButton.icon(
-                                onPressed: () => _openAddProduct(context, ref),
-                                icon: const Icon(Icons.add),
-                                label: const Text('Add Product'),
+                              IconButton(
+                                tooltip: 'PDF',
+                                onPressed: () => _openInventoryPdfActions(context),
+                                icon: const Icon(Icons.picture_as_pdf_outlined),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              tooltip: 'Refresh',
-                              onPressed: () => ref.read(productsControllerProvider.notifier).load(),
-                              icon: const Icon(Icons.refresh),
-                            ),
-                          ],
+                              _HoverScaleButton(
+                                child: FilledButton.icon(
+                                  onPressed: () => _openAddProduct(context, ref),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Add Product'),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Refresh',
+                                onPressed: () => ref.read(productsControllerProvider.notifier).load(),
+                                icon: const Icon(Icons.refresh),
+                              ),
+                            ];
+                            if (c.maxWidth < 560) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Text('Products', style: theme.textTheme.titleLarge),
+                                  const SizedBox(height: 10),
+                                  Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: productActions),
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(child: Text('Products', style: theme.textTheme.titleLarge)),
+                                for (var k = 0; k < productActions.length; k++) ...[
+                                  if (k > 0) const SizedBox(width: 8),
+                                  productActions[k],
+                                ],
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 12),
                         if (items.isEmpty)
@@ -854,32 +881,54 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                       ),
                                       child: Card(
                                         margin: EdgeInsets.zero,
-                                        child: ListTile(
-                                          leading: const Icon(Icons.inventory_2_outlined),
-                                          title: Text(p.name),
-                                          subtitle: Text('On-hand: ${p.onHand} • Price: ${number.format(p.price)}'),
-                                          trailing: Row(
-                                            mainAxisSize: MainAxisSize.min,
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(14, 10, 4, 2),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              _StatusChip(status: p.status, onHand: p.onHand),
-                                              IconButton(
-                                                tooltip: 'Sell',
-                                                onPressed: () => _openSellProduct(context, ref, p),
-                                                icon: const Icon(Icons.point_of_sale),
+                                              Row(
+                                                children: [
+                                                  Icon(Icons.inventory_2_outlined, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      p.name,
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _StatusChip(status: p.status, onHand: p.onHand),
+                                                ],
                                               ),
-                                              IconButton(
-                                                tooltip: 'View',
-                                                onPressed: () => _openViewProduct(context, p),
-                                                icon: const Icon(Icons.visibility),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'On-hand: ${p.onHand}  •  Price ${number.format(p.price)}',
+                                                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                               ),
-                                              IconButton(
-                                                tooltip: 'Edit',
-                                                onPressed: () => _openEditProduct(context, ref, p),
-                                                icon: const Icon(Icons.edit_outlined),
+                                              Row(
+                                                children: [
+                                                  IconButton(
+                                                    tooltip: 'Sell',
+                                                    onPressed: () => _openSellProduct(context, ref, p),
+                                                    icon: const Icon(Icons.point_of_sale),
+                                                  ),
+                                                  IconButton(
+                                                    tooltip: 'View',
+                                                    onPressed: () => _openViewProduct(context, p),
+                                                    icon: const Icon(Icons.visibility),
+                                                  ),
+                                                  const Spacer(),
+                                                  IconButton(
+                                                    tooltip: 'Edit',
+                                                    onPressed: () => _openEditProduct(context, ref, p),
+                                                    icon: const Icon(Icons.edit_outlined),
+                                                  ),
+                                                ],
                                               ),
                                             ],
                                           ),
-                                          onTap: () => _openViewProduct(context, p),
                                         ),
                                       ),
                                     );

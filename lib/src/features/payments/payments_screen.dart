@@ -452,11 +452,11 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       controller: amountCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
-                        labelText: 'Amount Received',
+                        labelText: 'Amount Received (Rs)',
                         hintText: selectedInvoice == null
                             ? 'Select an invoice first'
                             : 'Balance due: ${selectedInvoice!.balance.toStringAsFixed(2)}',
-                        prefixIcon: const Icon(Icons.currency_rupee),
+                        prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
                       ),
                       validator: (v) {
                         if (selectedInvoice == null) return 'Select an invoice first';
@@ -785,6 +785,88 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                   ),
                 ),
               ),
+            );
+          }
+
+          // ── Mobile: stacked card per payment (no horizontal-scroll table) ──
+          if (MediaQuery.sizeOf(context).width < 700) {
+            return Column(
+              children: [
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: items.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) {
+                    final p = items[i];
+                    return Container(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withAlpha(40),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  p.invoiceNo,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _MethodChip(method: p.method),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${p.memberName} (${p.memberCode})',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${number.format(p.amount)}  •  ${fmtDateTime(p.paidAt)}',
+                            style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              AppTableActionButton(
+                                icon: Icons.visibility_outlined,
+                                tooltip: 'View',
+                                onPressed: () => _openView(context, p),
+                              ),
+                              const SizedBox(width: 2),
+                              AppTableActionButton(
+                                icon: Icons.edit_outlined,
+                                tooltip: 'Edit',
+                                onPressed: () => openEdit(p),
+                              ),
+                              if (canDelete) ...[
+                                const Spacer(),
+                                AppTableActionButton(
+                                  icon: Icons.delete_outline,
+                                  tooltip: 'Delete',
+                                  danger: true,
+                                  onPressed: () => confirmDelete(p),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                paginationFooter(page),
+              ],
             );
           }
 
