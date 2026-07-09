@@ -437,8 +437,15 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
               ),
             );
           }
-          return ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 320),
+          // Fixed height (not just maxHeight) — the split panel above uses
+          // IntrinsicHeight to size the row and stretch the divider to match
+          // the taller side, but a ListView reports an unreliable intrinsic
+          // height even inside a maxHeight-only ConstrainedBox. That made
+          // IntrinsicHeight size the row too short, clipping these results
+          // against the panel's rounded-clip edge. A SizedBox has a
+          // well-defined intrinsic height, so IntrinsicHeight sizes correctly.
+          return SizedBox(
+            height: 320,
             child: ListView.separated(
               shrinkWrap: true,
               padding: EdgeInsets.zero,
