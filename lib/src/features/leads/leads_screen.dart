@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,6 +10,7 @@ import 'package:intl/intl.dart';
 import '../../core/api_client.dart';
 import '../../core/app_theme.dart';
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // AppPageTitle
 import '../../core/providers.dart';
 import '../../core/in_app_pdf.dart';
 import '../../core/ui_kit.dart';
@@ -172,36 +174,31 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     super.dispose();
   }
 
-  Color _statusColor(BuildContext context, String status) {
+  // Same category system as every other page: converted = membership
+  // (positive outcome), lost = at-risk (negative outcome), everything else
+  // (trial/new/contacted) = neutral operational.
+  StatCategory _statusCategory(String status) {
     switch (status) {
-      case 'trial':
-        return const Color(0xFF2563EB);
-      case 'lost':
-        return const Color(0xFFDC2626);
       case 'converted':
-        return const Color(0xFF0F766E);
+        return StatCategory.membership;
+      case 'lost':
+        return StatCategory.atRisk;
       default:
-        return Theme.of(context).colorScheme.primary;
+        return StatCategory.operational;
     }
   }
 
   Widget _statusBadge(BuildContext context, String status) {
-    final c = _statusColor(context, status);
+    final category = _statusCategory(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: c.withAlpha(28),
-        border: Border.all(color: c.withAlpha(70), width: 0.8),
+        borderRadius: AppRadius.smallAll,
+        color: category.soft,
       ),
       child: Text(
-        status,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: c,
-          letterSpacing: 0.1,
-        ),
+        status.toUpperCase(),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }
@@ -222,7 +219,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     return InputDecoration(
       isDense: true,
       hintText: hint,
-      hintStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurfaceVariant),
+      hintStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurfaceVariant),
       prefixIcon: prefixIcon,
       prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
       filled: true,
@@ -252,7 +249,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 Navigator.of(context).pop();
                 await _runLeadsPdf(context, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -260,7 +257,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 Navigator.of(context).pop();
                 await _runLeadsPdf(context, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -339,7 +336,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
  
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.person_add_alt_1,
+      icon: PhosphorIconsRegular.userPlus,
       title: isEdit ? 'Edit Lead' : 'Add Lead',
       subtitle: 'Potential member / enquiry',
       body: StatefulBuilder(
@@ -352,7 +349,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 const FormSectionLabel(
                   'Lead Profile',
                   hint: 'Capture contact details to power automated email nurture sequences.',
-                  icon: Icons.badge_outlined,
+                  icon: PhosphorIconsRegular.identificationBadge,
                 ),
                 const SizedBox(height: 16),
                 FormRow([
@@ -430,13 +427,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                   value: temperature,
                   onChanged: (v) => setModalState(() => temperature = v),
                   segments: const [
-                    FormSegment('cold', 'Cold', icon: Icons.ac_unit, color: Color(0xFF2563EB)),
-                    FormSegment('warm', 'Warm', icon: Icons.wb_sunny_outlined, color: Color(0xFFF59E0B)),
-                    FormSegment('hot', 'Hot', icon: Icons.local_fire_department_outlined, color: Color(0xFFDC2626)),
+                    FormSegment('cold', 'Cold', icon: PhosphorIconsRegular.snowflake, color: Color(0xFF2563EB)),
+                    FormSegment('warm', 'Warm', icon: PhosphorIconsRegular.sun, color: Color(0xFFF59E0B)),
+                    FormSegment('hot', 'Hot', icon: PhosphorIconsRegular.fire, color: Color(0xFFDC2626)),
                   ],
                 ),
                 const SizedBox(height: 18),
-                const FormSectionLabel('Follow-up', icon: Icons.event_available_outlined),
+                const FormSectionLabel('Follow-up', icon: PhosphorIconsRegular.calendarCheck),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -447,7 +444,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                         final t = DateTime.now();
                         setModalState(() => nextContact = DateTime(t.year, t.month, t.day));
                       },
-                      icon: const Icon(Icons.today_outlined),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: const Text('Today'),
                     ),
                     OutlinedButton.icon(
@@ -455,7 +452,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                         final t = DateTime.now();
                         setModalState(() => nextContact = DateTime(t.year, t.month, t.day).add(const Duration(days: 1)));
                       },
-                      icon: const Icon(Icons.event_outlined),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: const Text('Tomorrow'),
                     ),
                     OutlinedButton.icon(
@@ -463,7 +460,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                         final t = DateTime.now();
                         setModalState(() => nextContact = DateTime(t.year, t.month, t.day).add(const Duration(days: 7)));
                       },
-                      icon: const Icon(Icons.date_range_outlined),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: const Text('Next week'),
                     ),
                   ],
@@ -609,11 +606,11 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _InfoRow(label: 'Phone', value: (l.phone ?? '-').trim().isEmpty ? '-' : l.phone!.trim(), icon: Icons.call_outlined),
+                _InfoRow(label: 'Phone', value: (l.phone ?? '-').trim().isEmpty ? '-' : l.phone!.trim(), icon: PhosphorIconsRegular.phone),
                 const SizedBox(height: 10),
-                _InfoRow(label: 'Source', value: (l.source ?? '-').trim().isEmpty ? '-' : l.source!.trim(), icon: Icons.public_outlined),
+                _InfoRow(label: 'Source', value: (l.source ?? '-').trim().isEmpty ? '-' : l.source!.trim(), icon: PhosphorIconsRegular.globeSimple),
                 const SizedBox(height: 10),
-                _InfoRow(label: 'Interest', value: (l.interest ?? '-').trim().isEmpty ? '-' : l.interest!.trim(), icon: Icons.bolt_outlined),
+                _InfoRow(label: 'Interest', value: (l.interest ?? '-').trim().isEmpty ? '-' : l.interest!.trim(), icon: PhosphorIconsRegular.lightning),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -624,7 +621,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(overdue ? Icons.warning_amber_outlined : Icons.event_outlined, color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant),
+                      Icon(overdue ? PhosphorIconsRegular.warning : PhosphorIconsRegular.calendarBlank, color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -762,7 +759,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 );
                 context.go(uri.toString());
               },
-              icon: const Icon(Icons.person_add_alt_1_outlined),
+              icon: const Icon(PhosphorIconsRegular.userPlus),
               label: const Text('Convert'),
             ),
             OutlinedButton.icon(
@@ -770,7 +767,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 Navigator.of(context).pop();
                 _openLeadForm(context, lead: l);
               },
-              icon: const Icon(Icons.edit_outlined),
+              icon: const Icon(PhosphorIconsRegular.pencilSimple),
               label: const Text('Edit'),
             ),
             FilledButton.icon(
@@ -788,7 +785,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 Navigator.of(context).pop();
                 await ref.read(leadsControllerProvider.notifier).deleteLead(l.id);
               },
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(PhosphorIconsRegular.trash),
               label: const Text('Delete'),
             ),
           ],
@@ -866,16 +863,16 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
         children: [
             Row(
               children: [
-                Text('Leads', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                const AppPageTitle('Leads'),
                 const Spacer(),
                 IconButton(
                   tooltip: 'PDF',
                   onPressed: () => _openLeadsPdfActions(context),
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  icon: const Icon(PhosphorIconsRegular.filePdf),
                 ),
                 FilledButton.icon(
                   onPressed: () => _openLeadForm(context),
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(PhosphorIconsRegular.plus),
                   label: const Text('Add Lead'),
                 ),
               ],
@@ -893,11 +890,11 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                   width: 340,
                   child: TextField(
                     controller: _searchCtrl,
-                    style: GoogleFonts.inter(fontSize: 13.5),
+                    style: GoogleFonts.archivo(fontSize: 13.5),
                     decoration: _denseDecoration(
                       context,
                       hint: 'Name / phone / source',
-                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (v) {
                       _debounce?.cancel();
@@ -916,7 +913,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     initialValue: q.status,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: _denseDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All')),
@@ -936,7 +933,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     initialValue: _sourceFilter,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: _denseDecoration(context),
                     items: [
                       const DropdownMenuItem(value: 'all', child: Text('All sources')),
@@ -953,7 +950,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     initialValue: _interestFilter,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: _denseDecoration(context),
                     items: [
                       const DropdownMenuItem(value: 'all', child: Text('All interests')),
@@ -971,7 +968,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () => ref.read(leadsControllerProvider.notifier).load(),
-                          icon: const Icon(Icons.refresh, size: 17),
+                          icon: const Icon(PhosphorIconsRegular.arrowClockwise, size: 17),
                           label: const Text('Refresh'),
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size(0, 40),
@@ -997,15 +994,16 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
               children: [
                 _FilterPill(
                   label: 'Overdue',
-                  icon: Icons.warning_amber_rounded,
+                  icon: PhosphorIconsRegular.warning,
                   selected: _overdueOnly,
-                  // Amber, not red — it is a warning filter, not an emergency block.
-                  accentOverride: const Color(0xFFF59E0B),
+                  // "Overdue" is the at-risk category everywhere else in the
+                  // app (same alert-red meaning as expired/unpaid).
+                  accentOverride: StatCategory.atRisk.color,
                   onTap: () => setState(() => _overdueOnly = !_overdueOnly),
                 ),
                 _FilterPill(
                   label: 'Sort by Next Contact',
-                  icon: Icons.sort_rounded,
+                  icon: PhosphorIconsRegular.arrowsDownUp,
                   selected: _sortByNextContact,
                   onTap: () => setState(() => _sortByNextContact = !_sortByNextContact),
                 ),
@@ -1033,7 +1031,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 // Inline "Clear all" text action — replaces the old Clear button.
                 _FilterPill(
                   label: 'Clear',
-                  icon: Icons.close_rounded,
+                  icon: PhosphorIconsRegular.x,
                   selected: false,
                   onTap: () {
                     _searchCtrl.clear();
@@ -1057,7 +1055,9 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                 final level = _computeManagerLevel(converted);
                 final progress = level.nextXp <= 0 ? 0.0 : (level.currentXp / level.nextXp).clamp(0.0, 1.0);
                 final nextIn = (level.nextXp - level.currentXp).clamp(0, 999999);
-                final accent = theme.colorScheme.primary;
+                // Operational category (iron) — a performance/engagement
+                // metric, not financial/membership/at-risk data.
+                final barColor = StatCategory.operational.color;
                 return Card(
                   child: Padding(
                     padding: const EdgeInsets.all(14),
@@ -1066,22 +1066,28 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                       children: [
                         Row(
                           children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: accent.withValues(alpha: 0.12),
-                              child: Icon(Icons.auto_graph, color: accent),
+                            Container(
+                              height: 36,
+                              width: 36,
+                              decoration: AppTheme.iconBox(color: barColor),
+                              child: Icon(PhosphorIconsRegular.chartLineUp, color: barColor, size: 18),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Manager Level ${level.level}',
-                                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                                    textBaseline: TextBaseline.alphabetic,
+                                    children: [
+                                      Text('MANAGER LEVEL', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface, fontSize: 13)),
+                                      const SizedBox(width: 6),
+                                      Text('${level.level}', style: AppTypography.mono(color: barColor, fontSize: 16, weight: FontWeight.w700)),
+                                    ],
                                   ),
                                   Text(
-                                    'Converted $converted of $total leads • Next level in $nextIn conversions',
+                                    'Converted $converted of $total leads · Next level in $nextIn conversions',
                                     style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                                   ),
                                 ],
@@ -1090,25 +1096,24 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(999),
-                                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
-                                border: Border.all(color: theme.colorScheme.outlineVariant),
+                                borderRadius: AppRadius.smallAll,
+                                color: StatCategory.operational.soft,
                               ),
                               child: Text(
                                 'XP ${level.currentXp}/${level.nextXp}',
-                                style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
+                                style: AppTypography.mono(color: barColor, fontSize: 12, weight: FontWeight.w700),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 10),
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: AppRadius.smallAll,
                           child: LinearProgressIndicator(
                             value: progress,
-                            minHeight: 10,
+                            minHeight: 8,
                             backgroundColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                            valueColor: AlwaysStoppedAnimation<Color>(accent),
+                            valueColor: AlwaysStoppedAnimation<Color>(barColor),
                           ),
                         ),
                       ],
@@ -1146,7 +1151,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.person_search_outlined, size: 44, color: theme.colorScheme.onSurfaceVariant),
+                          Icon(PhosphorIconsRegular.userList, size: 44, color: theme.colorScheme.onSurfaceVariant),
                           const SizedBox(height: 10),
                           Text('No leads found', style: theme.textTheme.titleMedium),
                           const SizedBox(height: 4),
@@ -1154,7 +1159,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                           const SizedBox(height: 12),
                           OutlinedButton.icon(
                             onPressed: () => _openLeadForm(context),
-                            icon: const Icon(Icons.add),
+                            icon: const Icon(PhosphorIconsRegular.plus),
                             label: const Text('Add Lead'),
                           ),
                         ],
@@ -1166,13 +1171,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                       ? Colors.white.withAlpha(15)
                       : Colors.grey.shade200;
                   // Inter typography for all table cells — crisp tabular alignment.
-                  final headingStyle = GoogleFonts.inter(
+                  final headingStyle = GoogleFonts.archivo(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.3,
                     color: theme.colorScheme.onSurfaceVariant,
                   );
-                  final cellStyle = GoogleFonts.inter(
+                  final cellStyle = GoogleFonts.archivo(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w400,
                     color: theme.colorScheme.onSurface,
@@ -1237,7 +1242,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                     children: [
                                       _TableActionButton(
                                         tooltip: 'Convert to Member',
-                                        icon: Icons.person_add_alt_1_outlined,
+                                        icon: PhosphorIconsRegular.userPlus,
                                         onPressed: () {
                                           final uri = Uri(
                                             path: '/members',
@@ -1254,13 +1259,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                                       const SizedBox(width: 2),
                                       _TableActionButton(
                                         tooltip: 'Edit',
-                                        icon: Icons.edit_outlined,
+                                        icon: PhosphorIconsRegular.pencilSimple,
                                         onPressed: () => _openLeadForm(context, lead: l),
                                       ),
                                       const SizedBox(width: 2),
                                       _TableActionButton(
                                         tooltip: 'Delete',
-                                        icon: Icons.delete_outline,
+                                        icon: PhosphorIconsRegular.trash,
                                         danger: true,
                                         onPressed: () async {
                                           final ok = await showAppConfirmDialog(

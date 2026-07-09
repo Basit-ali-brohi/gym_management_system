@@ -2,13 +2,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/branding.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
+import '../../core/motion.dart';
 import '../../core/providers.dart';
 import '../../core/in_app_pdf.dart';
 import '../../core/web_image_picker_stub.dart' if (dart.library.html) '../../core/web_image_picker_web.dart';
@@ -84,6 +87,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _taxCtrl.text = s.defaultTaxPercent.toStringAsFixed(0);
           _enableSound = s.enableSounds;
           _enableAnimations = s.enableAnimations;
+          ref.read(animationsEnabledProvider.notifier).state = s.enableAnimations;
           _addressCtrl.text = s.address ?? '';
           _logoUrlCtrl.text = s.logoUrl ?? '';
           _websiteCtrl.text = s.websiteUrl ?? '';
@@ -105,7 +109,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           child: TextField(
             controller: ctrl,
             keyboardType: keyboardType,
-            style: GoogleFonts.inter(fontSize: 14),
+            style: GoogleFonts.archivo(fontSize: 14),
             decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 20)),
           ),
         ),
@@ -115,7 +119,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // 64x64 rounded logo thumbnail (image preview or minimalist icon).
     Widget logoThumb() {
       final raw = _logoUrlCtrl.text.trim();
-      final placeholder = Icon(Icons.image_outlined, color: theme.colorScheme.onSurfaceVariant, size: 24);
+      final placeholder = Icon(PhosphorIconsRegular.image, color: theme.colorScheme.onSurfaceVariant, size: 24);
       Widget content = Center(child: placeholder);
       if (raw.isNotEmpty) {
         if (raw.startsWith('data:image')) {
@@ -134,7 +138,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         height: 64,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppRadius.smallAll,
           color: isDark ? AppTheme.charcoalHigh : theme.colorScheme.surfaceContainerHighest,
           border: Border.all(
             color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
@@ -154,17 +158,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text('Settings', style: theme.textTheme.headlineSmall)),
+                  const Expanded(child: AppPageTitle('Settings')),
                   FilledButton.icon(
                     onPressed: () => _save(context),
-                    icon: const Icon(Icons.save),
+                    icon: const Icon(PhosphorIconsRegular.floppyDisk),
                     label: const Text('Save'),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
                     tooltip: 'PDF',
                     onPressed: () => _openSettingsPdfActions(context),
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    icon: const Icon(PhosphorIconsRegular.filePdf),
                   ),
                 ],
               ),
@@ -173,26 +177,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               LayoutBuilder(
                 builder: (context, c) {
                   final tiles = <Widget>[
-                    _MetricCard(
-                      title: 'Theme',
+                    CategoryStatCard(
+                      category: StatCategory.operational,
+                      label: 'Theme',
                       value: isDark ? 'Dark' : 'Light',
-                      subtitle: 'Active mode',
-                      icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-                      accent: theme.colorScheme.primary,
+                      footnote: 'ACTIVE MODE',
                     ),
-                    _MetricCard(
-                      title: 'Currency',
+                    CategoryStatCard(
+                      category: StatCategory.financial,
+                      label: 'Currency',
                       value: _currencyCtrl.text.trim().isEmpty ? 'PKR' : _currencyCtrl.text.trim(),
-                      subtitle: 'Billing currency',
-                      icon: Icons.currency_exchange_outlined,
-                      accent: theme.colorScheme.tertiary,
+                      footnote: 'BILLING CURRENCY',
                     ),
-                    _MetricCard(
-                      title: 'Tax %',
+                    CategoryStatCard(
+                      category: StatCategory.financial,
+                      label: 'Tax %',
                       value: _taxCtrl.text.trim().isEmpty ? '0' : _taxCtrl.text.trim(),
-                      subtitle: 'Default tax',
-                      icon: Icons.percent_outlined,
-                      accent: const Color(0xFFF59E0B),
+                      footnote: 'DEFAULT TAX',
                     ),
                   ];
                   final cols = c.maxWidth >= 720 ? 3 : c.maxWidth >= 460 ? 2 : 1;
@@ -249,12 +250,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         children: [
                           Text('GYM PROFILE', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
                           const SizedBox(height: 14),
-                          cfgField(_gymNameCtrl, 'Gym Name', Icons.fitness_center),
-                          cfgField(_currencyCtrl, 'Currency', Icons.currency_exchange),
-                          cfgField(_addressCtrl, 'Address', Icons.location_on_outlined),
+                          cfgField(_gymNameCtrl, 'Gym Name', PhosphorIconsRegular.barbell),
+                          cfgField(_currencyCtrl, 'Currency', PhosphorIconsRegular.coins),
+                          cfgField(_addressCtrl, 'Address', PhosphorIconsRegular.mapPin),
                           const SizedBox(height: 2),
                           Text('Logo',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.archivo(
                                   fontSize: 12, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurfaceVariant)),
                           const SizedBox(height: 8),
                           Row(
@@ -281,7 +282,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
                                       }
                                     },
-                                    icon: const Icon(Icons.upload_file, size: 17),
+                                    icon: const Icon(PhosphorIconsRegular.uploadSimple, size: 17),
                                     label: const Text('Upload Logo'),
                                   ),
                                   const SizedBox(height: 4),
@@ -303,10 +304,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         children: [
                           Text('SOCIAL LINKS', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
                           const SizedBox(height: 14),
-                          cfgField(_websiteCtrl, 'Website', Icons.public),
-                          cfgField(_facebookCtrl, 'Facebook URL', Icons.facebook),
-                          cfgField(_instagramCtrl, 'Instagram URL', Icons.camera_alt_outlined),
-                          cfgField(_whatsappCtrl, 'WhatsApp', Icons.chat_outlined),
+                          cfgField(_websiteCtrl, 'Website', PhosphorIconsRegular.globeSimple),
+                          cfgField(_facebookCtrl, 'Facebook URL', PhosphorIconsRegular.facebookLogo),
+                          cfgField(_instagramCtrl, 'Instagram URL', PhosphorIconsRegular.camera),
+                          cfgField(_whatsappCtrl, 'WhatsApp', PhosphorIconsRegular.chatCircle),
                         ],
                       );
 
@@ -343,7 +344,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Default Tax %',
-                          prefixIcon: Icon(Icons.percent),
+                          prefixIcon: Icon(PhosphorIconsRegular.percent),
                         ),
                       ),
                     ],
@@ -370,7 +371,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
                                 labelText: 'At-Risk Days',
-                                prefixIcon: Icon(Icons.warning_amber_outlined),
+                                prefixIcon: Icon(PhosphorIconsRegular.warning),
                               ),
                             ),
                           ),
@@ -383,7 +384,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               decoration: const InputDecoration(
                                 labelText: 'WhatsApp Template',
                                 helperText: 'Use {name}, {days}, {gym}, {code}',
-                                prefixIcon: Icon(Icons.text_snippet_outlined),
+                                prefixIcon: Icon(PhosphorIconsRegular.fileText),
                               ),
                             ),
                           ),
@@ -404,7 +405,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       },
                       title: const Text('Dark Theme'),
                       subtitle: const Text('Toggle between Obsidian and White theme'),
-                      secondary: const Icon(Icons.dark_mode),
+                      secondary: const Icon(PhosphorIconsRegular.moon),
                     ),
                   ],
                 ),
@@ -423,9 +424,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             width: 40,
                             decoration: BoxDecoration(
                               color: theme.colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: AppRadius.smallAll,
                             ),
-                            child: Icon(Icons.palette_outlined, color: theme.colorScheme.onPrimaryContainer),
+                            child: Icon(PhosphorIconsRegular.palette, color: theme.colorScheme.onPrimaryContainer),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -464,15 +465,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       onChanged: (v) => setState(() => _enableSound = v),
                       title: const Text('Enable Sounds'),
                       subtitle: const Text('Access denied / success sounds'),
-                      secondary: const Icon(Icons.volume_up),
+                      secondary: const Icon(PhosphorIconsRegular.speakerHigh),
                     ),
                     const Divider(height: 1),
                     SwitchListTile(
                       value: _enableAnimations,
-                      onChanged: (v) => setState(() => _enableAnimations = v),
+                      onChanged: (v) {
+                        setState(() => _enableAnimations = v);
+                        ref.read(animationsEnabledProvider.notifier).state = v;
+                      },
                       title: const Text('Enable Animations'),
                       subtitle: const Text('Smooth fade transitions'),
-                      secondary: const Icon(Icons.animation),
+                      secondary: const Icon(PhosphorIconsRegular.sparkle),
                     ),
                   ],
                 ),
@@ -505,7 +509,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           actionsPadding: const EdgeInsets.only(right: 16, bottom: 16, left: 16),
           title: Row(
             children: [
-              Icon(Icons.palette_outlined, color: theme.colorScheme.primary),
+              Icon(PhosphorIconsRegular.palette, color: theme.colorScheme.primary),
               const SizedBox(width: 10),
               const Expanded(child: Text('Select Custom Brand Color')),
             ],
@@ -574,7 +578,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Navigator.of(context).pop();
                 await _runSettingsPdf(context, preview: true, today: date);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -582,7 +586,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Navigator.of(context).pop();
                 await _runSettingsPdf(context, preview: false, today: date);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -645,87 +649,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-/// Unified summary card — soft-tint outline-icon style matching every other
-/// section (Staff, Members, etc.). Flex width so the parent grid spans
-/// edge-to-edge; figure rendered in Bebas Neue.
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.accent,
-  });
-
-  final String title;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            // Soft semi-transparent tint of the accent — no heavy solid block.
-            Container(
-              height: 42,
-              width: 42,
-              decoration: BoxDecoration(
-                color: accent.withAlpha(28),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: accent.withAlpha(60), width: 0.8),
-              ),
-              child: Icon(icon, color: accent, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      maxLines: 1,
-                      style: theme.textTheme.headlineSmall?.copyWith(color: accent),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Premium brand-colour preview card. Shows the active colour inside a glowing
 /// circular badge plus a "Customize Brand Color" call-to-action that opens the
 /// full colour wheel. Replaces the old fixed row of preset swatches.
@@ -765,28 +688,19 @@ class _BrandColorPickerCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadius.large),
             color: bg,
             border: Border.all(color: color.withAlpha(120), width: 1),
-            boxShadow: [BoxShadow(color: color.withAlpha(40), blurRadius: 24, offset: const Offset(0, 12))],
           ),
           child: Row(
             children: [
-              // Active-colour badge — concentric ring + glowing core.
+              // Active-colour badge — flat rounded-square, no glow.
               Container(
                 height: 52,
                 width: 52,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: color.withAlpha(70), width: 2),
-                ),
+                decoration: BoxDecoration(borderRadius: AppRadius.smallAll, border: Border.all(color: color.withAlpha(70), width: 2)),
                 child: Center(
                   child: Container(
                     height: 36,
                     width: 36,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withAlpha(50), width: 1.5),
-                      boxShadow: AppTheme.neonGlow(color, blur: 14),
-                    ),
+                    decoration: BoxDecoration(borderRadius: AppRadius.smallAll, color: color),
                   ),
                 ),
               ),
@@ -802,7 +716,7 @@ class _BrandColorPickerCard extends StatelessWidget {
                             'Click to Customize Brand Color',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.archivo(
                               fontSize: 14.5,
                               fontWeight: FontWeight.w700,
                               color: theme.colorScheme.onSurface,
@@ -815,12 +729,11 @@ class _BrandColorPickerCard extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
                               color: color.withAlpha(28),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(color: color.withAlpha(80), width: 0.8),
+                              borderRadius: AppRadius.smallAll,
                             ),
                             child: Text(
                               'CUSTOM',
-                              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5),
+                              style: GoogleFonts.archivo(fontSize: 9.5, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5),
                             ),
                           ),
                       ],
@@ -839,9 +752,9 @@ class _BrandColorPickerCard extends StatelessWidget {
                 IconButton(
                   tooltip: 'Reset to default',
                   onPressed: onReset,
-                  icon: Icon(Icons.refresh, size: 20, color: theme.colorScheme.onSurfaceVariant),
+                  icon: Icon(PhosphorIconsRegular.arrowClockwise, size: 20, color: theme.colorScheme.onSurfaceVariant),
                 ),
-              Icon(Icons.tune, color: color),
+              Icon(PhosphorIconsRegular.slidersHorizontal, color: color),
             ],
           ),
         ),

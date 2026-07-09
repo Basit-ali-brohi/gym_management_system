@@ -76,7 +76,7 @@ InputDecoration appDenseInputDecoration(
   return InputDecoration(
     isDense: true,
     hintText: hint,
-    hintStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurfaceVariant),
+    hintStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurfaceVariant),
     prefixIcon: prefixIcon,
     prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
     filled: true,
@@ -165,7 +165,7 @@ class _AppFilterPillState extends State<AppFilterPill> {
               ],
               Text(
                 widget.label,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.archivo(
                   fontSize: 12.5,
                   color: fg,
                   fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,

@@ -1,3 +1,4 @@
+import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -26,10 +27,16 @@ final routerNotifierProvider = Provider<RouterNotifier>((ref) => RouterNotifier(
 CustomTransitionPage<void> _fadePage(GoRouterState state, Widget child) {
   return CustomTransitionPage<void>(
     key: state.pageKey,
+    transitionDuration: const Duration(milliseconds: 320),
+    reverseTransitionDuration: const Duration(milliseconds: 240),
     child: child,
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-      return FadeTransition(opacity: curved, child: child);
+      // Native-feeling fade-through between routes (Material motion).
+      return FadeThroughTransition(
+        animation: animation,
+        secondaryAnimation: secondaryAnimation,
+        child: child,
+      );
     },
   );
 }
@@ -129,47 +136,47 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dual-font text theme
+// "Gym Floor" text theme
 //
 // Strategy — two-pass construction:
-//   Pass 1: GoogleFonts.interTextTheme(base) — Inter owns every slot.
-//   Pass 2: .copyWith() — Bebas Neue replaces the display / headline / title
-//           roles that carry KPI numbers and section labels.
+//   Pass 1: GoogleFonts.archivoTextTheme(base) — Archivo owns every slot; it's
+//           the workhorse face for buttons, list rows, descriptions, labels.
+//   Pass 2: .copyWith() — Oswald (condensed, uppercase-styled) replaces the
+//           display / headline / title roles — page titles, section headers,
+//           KPI headline text. Reads like gym signage / locker-room lettering.
 //
-// Why Bebas Neue for headlineSmall?
-//   The KPI metric values (revenue, check-ins) use headlineSmall in widget
-//   code. Bebas Neue at that size with 2.0 tracking reads as a scoreboard
-//   digit — immediately scannable from across a room, matching the gym brand.
-//
-// Why Inter for everything else?
-//   Inter is a humanist sans designed for sub-16px legibility on screens.
-//   Member names, dates, table rows, and form fields all stay readable in
-//   the dark theme at their small sizes because Inter was built for it.
+// NOTE: the actual scoreboard NUMERALS (stat values, currency, dates, IDs,
+// percentages) do not come from this text theme at all — they always render
+// via [AppTypography.mono] (JetBrains Mono) at the call site, per the firm
+// "every number is mono" rule. This theme only covers prose/label text.
 // ─────────────────────────────────────────────────────────────────────────────
 TextTheme _buildMixedTextTheme(TextTheme base) {
-  // Pass 1: Inter base — all slots get the screen-optimised humanist face.
-  final inter = GoogleFonts.interTextTheme(base);
+  // Pass 1: Archivo base — all slots get the workhorse UI face.
+  final body = GoogleFonts.archivoTextTheme(base);
 
-  // Pass 2: Bebas Neue overlay on heading and KPI-display slots only.
-  return inter.copyWith(
-    // ── Large display (hero numbers, future full-screen KPIs) ───────────────
-    displayLarge:  GoogleFonts.bebasNeue(textStyle: inter.displayLarge,  letterSpacing: 2.0),
-    displayMedium: GoogleFonts.bebasNeue(textStyle: inter.displayMedium, letterSpacing: 2.0),
-    displaySmall:  GoogleFonts.bebasNeue(textStyle: inter.displaySmall,  letterSpacing: 1.8),
-    // ── Headline (KPI values — revenue, member counts, check-ins) ───────────
-    headlineLarge:  GoogleFonts.bebasNeue(textStyle: inter.headlineLarge,  letterSpacing: 2.0),
-    headlineMedium: GoogleFonts.bebasNeue(textStyle: inter.headlineMedium, letterSpacing: 2.0),
-    headlineSmall:  GoogleFonts.bebasNeue(textStyle: inter.headlineSmall,  letterSpacing: 2.0, height: 1.05),
-    // ── Title (section labels and sidebar brand) ─────────────────────────────
-    // titleLarge  → sidebar "GYM MANAGEMENT" lockup + chart primary headers
-    titleLarge:  GoogleFonts.bebasNeue(textStyle: inter.titleLarge,  letterSpacing: 3.0),
-    // titleMedium → section titles ("QUICK ACTIONS", "AT-RISK MEMBERS")
-    titleMedium: GoogleFonts.bebasNeue(textStyle: inter.titleMedium, letterSpacing: 2.5),
-    // titleSmall stays Inter — used for member names and list row titles
-    // where legibility at 14 px matters more than brand presence.
-    // ── Inter data labels (keep light weight contrast for hierarchy) ─────────
-    labelLarge:  inter.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-    labelMedium: inter.labelMedium?.copyWith(fontWeight: FontWeight.w500),
+  // Pass 2: Oswald overlay on display / headline / title slots.
+  TextStyle? oswald(TextStyle? s, {double ls = 0.3, double? height}) => s?.copyWith(
+        fontFamily: AppTypography.displayFamily,
+        fontWeight: FontWeight.w700,
+        letterSpacing: ls,
+        height: height,
+      );
+
+  return body.copyWith(
+    // ── Large display (hero numbers, full-screen KPIs) ──────────────────────
+    displayLarge: oswald(body.displayLarge, ls: 0.4),
+    displayMedium: oswald(body.displayMedium, ls: 0.4),
+    displaySmall: oswald(body.displaySmall, ls: 0.3),
+    // ── Headline (page titles, KPI headline text) ───────────────────────────
+    headlineLarge: oswald(body.headlineLarge, ls: 0.3),
+    headlineMedium: oswald(body.headlineMedium, ls: 0.3),
+    headlineSmall: oswald(body.headlineSmall, ls: 0.3, height: 1.05),
+    // ── Title (section labels and sidebar brand) ────────────────────────────
+    titleLarge: oswald(body.titleLarge, ls: 0.4),
+    titleMedium: oswald(body.titleMedium, ls: 0.3),
+    // titleSmall stays Archivo — member names / list titles (legibility first).
+    labelLarge: body.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+    labelMedium: body.labelMedium?.copyWith(fontWeight: FontWeight.w500),
   );
 }
 
@@ -194,32 +201,35 @@ class GymSaasApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final accent = ref.watch(accentColorProvider);
     final isAccentDark = ThemeData.estimateBrightnessForColor(accent) == Brightness.dark;
-    final onAccentDark = isAccentDark ? Colors.white : const Color(0xFF0B0F14);
-    final onAccentLight = isAccentDark ? Colors.white : const Color(0xFF121212);
-    const obsidian = Color(0xFF0B0B0C);   // deep obsidian black canvas
-    const surface = Color(0xFF16161A);    // rich charcoal container surface
-  
+    // Brief default: solid ember bg + dark (--charcoal) text. The dynamic
+    // contrast check is kept so a user-picked custom accent colour never ends
+    // up with unreadable text.
+    final onAccentDark = isAccentDark ? Colors.white : AppTheme.obsidian;
+    final onAccentLight = isAccentDark ? Colors.white : AppTheme.ink;
+    const obsidian = AppTheme.obsidian; // dark chrome / canvas (#15171B)
+    const surface = AppTheme.charcoal; // dark card surface (#1D2024)
+
     final darkScheme = ColorScheme(
       brightness: Brightness.dark,
       primary: accent,
       onPrimary: onAccentDark,
       secondary: accent,
       onSecondary: onAccentDark,
-      error: Color(0xFFFF5C5C),
-      onError: Color(0xFF0B0F14),
+      error: AppTheme.danger,
+      onError: Colors.white,
       surface: surface,
-      onSurface: Color(0xFFEAECEF),
-      surfaceContainerHighest: Color(0xFF1E1E24),
-      onSurfaceVariant: Color(0xFFAAB4C8),
-      outline: Color(0xFF2F2F3D),
-      outlineVariant: Color(0xFF252530),
+      onSurface: Color(0xFFECEDEE),
+      surfaceContainerHighest: AppTheme.charcoalHigh,
+      onSurfaceVariant: Color(0xFF9BA1A8),
+      outline: AppTheme.borderHover,
+      outlineVariant: AppTheme.borderSubtle,
       shadow: Colors.black,
       scrim: Colors.black,
-      inverseSurface: Color(0xFFEAECEF),
+      inverseSurface: Color(0xFFEAECEE),
       onInverseSurface: Color(0xFF0B0B0C),
       inversePrimary: accent,
-      tertiary: Color(0xFF10B981),      // electric emerald — health/active metrics
-      onTertiary: Color(0xFF071F16),
+      tertiary: Color(0xFF2F8F7E), // spotter teal, lifted for dark-bg legibility
+      onTertiary: Color(0xFF07211C),
     );
 
     final lightScheme = ColorScheme(
@@ -228,20 +238,20 @@ class GymSaasApp extends ConsumerWidget {
       onPrimary: onAccentLight,
       secondary: accent,
       onSecondary: onAccentLight,
-      error: Color(0xFFB3261E),
+      error: AppTheme.danger,
       onError: Colors.white,
-      surface: Colors.white,
-      onSurface: Color(0xFF15181E),
-      surfaceContainerHighest: Color(0xFFF4F5F7),
-      onSurfaceVariant: Color(0xFF4B5563),
-      outline: Color(0xFFE5E7EB),
-      outlineVariant: Color(0xFFD1D5DB),
-      shadow: Color(0x22000000),
+      surface: AppTheme.card,
+      onSurface: AppTheme.ink,
+      surfaceContainerHighest: AppTheme.ironSoft,
+      onSurfaceVariant: AppTheme.muted,
+      outline: AppTheme.line,
+      outlineVariant: AppTheme.line,
+      shadow: Color(0x14000000),
       scrim: Colors.black,
-      inverseSurface: Color(0xFF15181E),
+      inverseSurface: AppTheme.ink,
       onInverseSurface: Colors.white,
       inversePrimary: accent,
-      tertiary: Color(0xFF0F766E),
+      tertiary: AppTheme.emerald, // spotter teal — membership/active category
       onTertiary: Colors.white,
     );
 
@@ -254,7 +264,7 @@ class GymSaasApp extends ConsumerWidget {
       ThemeData(useMaterial3: true, colorScheme: darkScheme).textTheme,
     );
 
-    const darkCardColor = Color(0xFF16161A); // solid charcoal — opaque above obsidian canvas
+    const darkCardColor = AppTheme.charcoal; // solid dark card surface above the obsidian canvas
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
@@ -265,39 +275,41 @@ class GymSaasApp extends ConsumerWidget {
         useMaterial3: true,
         colorScheme: lightScheme,
         textTheme: tunedLightText,
-        scaffoldBackgroundColor: const Color(0xFFF7F7F9),
-        canvasColor: Colors.white,
+        scaffoldBackgroundColor: AppTheme.canvas,
+        canvasColor: AppTheme.canvas,
         highlightColor: Colors.transparent,
         splashColor: Colors.transparent,
         appBarTheme: const AppBarTheme(centerTitle: false),
+        // Flat and utilitarian, like gym equipment — no shadow, tight radius.
         cardTheme: CardThemeData(
-          elevation: 2,
-          color: Colors.white,
+          elevation: 0,
+          color: AppTheme.card,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.largeAll,
-            side: BorderSide(color: lightScheme.outlineVariant),
+            side: BorderSide(color: AppTheme.line),
           ),
           clipBehavior: Clip.antiAlias,
         ),
-        shadowColor: Colors.black.withAlpha(30),
+        shadowColor: Colors.transparent,
         dialogTheme: DialogThemeData(
-          backgroundColor: Colors.white,
+          backgroundColor: AppTheme.card,
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.largeAll,
-            side: BorderSide(color: lightScheme.outlineVariant),
+            side: BorderSide(color: AppTheme.line),
           ),
         ),
-        dividerTheme: DividerThemeData(color: lightScheme.outlineVariant),
+        dividerTheme: const DividerThemeData(color: AppTheme.line),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFFF1F2F4),
+          fillColor: const Color(0xFFF6F7F3),
           border: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
-            borderSide: BorderSide(color: lightScheme.outlineVariant),
+            borderSide: const BorderSide(color: AppTheme.line),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
-            borderSide: BorderSide(color: lightScheme.outlineVariant),
+            borderSide: const BorderSide(color: AppTheme.line),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
@@ -310,14 +322,15 @@ class GymSaasApp extends ConsumerWidget {
             minimumSize: const Size(44, 44),
             backgroundColor: accent,
             foregroundColor: onAccentLight,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            textStyle: AppTypography.emphasisLabel(color: onAccentLight, fontSize: 13),
+            shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
           ),
         ),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
           backgroundColor: lightScheme.inverseSurface,
           contentTextStyle: tunedLightText.bodyMedium?.copyWith(color: lightScheme.onInverseSurface),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
         ),
         dataTableTheme: const DataTableThemeData(
           headingRowHeight: 44,
@@ -327,10 +340,12 @@ class GymSaasApp extends ConsumerWidget {
         iconButtonTheme: IconButtonThemeData(
           style: IconButton.styleFrom(foregroundColor: lightScheme.onSurface),
         ),
+        // Tight radius everywhere, including "pill" chips — this system never
+        // uses the soft 12px+ bubble radius of generic SaaS UI.
         chipTheme: ChipThemeData(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-          backgroundColor: const Color(0xFFF1F2F4),
-          side: BorderSide(color: lightScheme.outlineVariant),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
+          backgroundColor: AppTheme.ironSoft,
+          side: const BorderSide(color: AppTheme.line),
         ),
       ),
       darkTheme: ThemeData(
@@ -348,30 +363,29 @@ class GymSaasApp extends ConsumerWidget {
           shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.largeAll,
-            // 5 % white border — gives shape without adding colour noise.
-            side: const BorderSide(color: Color(0x0DFFFFFF), width: 0.8),
+            side: const BorderSide(color: AppTheme.borderSubtle, width: 0.8),
           ),
           clipBehavior: Clip.antiAlias,
         ),
-        shadowColor: Colors.black.withAlpha(140),
+        shadowColor: Colors.transparent,
         dialogTheme: DialogThemeData(
           backgroundColor: surface.withAlpha(235),
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.largeAll,
-            side: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
+            side: const BorderSide(color: AppTheme.borderHover, width: 0.8),
           ),
         ),
-        dividerTheme: const DividerThemeData(color: Color(0x0DFFFFFF), thickness: 1, space: 1),
+        dividerTheme: const DividerThemeData(color: AppTheme.borderSubtle, thickness: 1, space: 1),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: const Color(0x18FFFFFF),
           border: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
-            borderSide: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
+            borderSide: const BorderSide(color: AppTheme.borderHover, width: 0.8),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
-            borderSide: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
+            borderSide: const BorderSide(color: AppTheme.borderHover, width: 0.8),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: AppRadius.mediumAll,
@@ -384,20 +398,21 @@ class GymSaasApp extends ConsumerWidget {
             minimumSize: const Size(44, 44),
             backgroundColor: accent,
             foregroundColor: onAccentDark,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            textStyle: AppTypography.emphasisLabel(color: onAccentDark, fontSize: 13),
+            shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
           ),
         ),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
           backgroundColor: darkScheme.inverseSurface,
           contentTextStyle: tunedDarkText.bodyMedium?.copyWith(color: darkScheme.onInverseSurface),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
         ),
         dataTableTheme: DataTableThemeData(
           headingRowHeight: 44,
           dataRowMinHeight: 48,
           dataRowMaxHeight: 56,
-          headingRowColor: const WidgetStatePropertyAll(Color(0xFF1E1E24)),
+          headingRowColor: const WidgetStatePropertyAll(AppTheme.charcoalHigh),
           dividerThickness: 0.6,
           headingTextStyle: tunedDarkText.labelLarge?.copyWith(color: darkScheme.onSurfaceVariant),
           dataTextStyle: tunedDarkText.bodyMedium?.copyWith(color: darkScheme.onSurface),
@@ -406,9 +421,9 @@ class GymSaasApp extends ConsumerWidget {
           style: IconButton.styleFrom(foregroundColor: darkScheme.onSurface),
         ),
         chipTheme: ChipThemeData(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-          backgroundColor: const Color(0xFF1E1E24),
-          side: const BorderSide(color: Color(0x14FFFFFF), width: 0.8),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.smallAll),
+          backgroundColor: AppTheme.charcoalHigh,
+          side: const BorderSide(color: AppTheme.borderHover, width: 0.8),
           labelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
           secondaryLabelStyle: tunedDarkText.labelMedium?.copyWith(color: darkScheme.onSurface),
         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -6,8 +7,9 @@ import 'dart:async';
 import 'dart:math';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/in_app_pdf.dart';
@@ -254,7 +256,7 @@ class PaymentsScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runPaymentsPdf(context, ref, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -262,7 +264,7 @@ class PaymentsScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runPaymentsPdf(context, ref, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -330,7 +332,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.payments_outlined,
+      icon: PhosphorIconsRegular.wallet,
       title: 'Record Manual Payment',
       subtitle: 'Log a partial or full payment against an open invoice',
       maxWidth: 820,
@@ -356,7 +358,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                     const FormSectionLabel(
                       'Invoice',
                       hint: 'Search by invoice number, member name, or code. Only open (unpaid / partially paid) invoices appear.',
-                      icon: Icons.receipt_long_outlined,
+                      icon: PhosphorIconsRegular.receipt,
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -364,7 +366,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Search Invoice',
                         hintText: 'Invoice no., member name or code…',
-                        prefixIcon: Icon(Icons.search),
+                        prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass),
                       ),
                       onChanged: (v) {
                         searchDebounce?.cancel();
@@ -411,7 +413,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                                 selected: isSelected,
                                 selectedTileColor: accent.withAlpha(22),
                                 leading: Icon(
-                                  Icons.receipt_outlined,
+                                  PhosphorIconsRegular.receipt,
                                   size: 18,
                                   color: isSelected ? accent : Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
@@ -444,7 +446,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                     const FormSectionLabel(
                       'Payment Details',
                       hint: 'Amount auto-fills to the outstanding balance. Edit for partial payments.',
-                      icon: Icons.account_balance_wallet_outlined,
+                      icon: PhosphorIconsRegular.wallet,
                     ),
                     const SizedBox(height: 12),
                     // Amount input — full width
@@ -456,7 +458,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         hintText: selectedInvoice == null
                             ? 'Select an invoice first'
                             : 'Balance due: ${selectedInvoice!.balance.toStringAsFixed(2)}',
-                        prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
+                        prefixIcon: const Icon(PhosphorIconsRegular.wallet),
                       ),
                       validator: (v) {
                         if (selectedInvoice == null) return 'Select an invoice first';
@@ -474,13 +476,13 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         decoration: const InputDecoration(labelText: 'Payment Mode'),
                         items: const [
                           DropdownMenuItem(value: 'cash',
-                              child: Row(children: [Icon(Icons.money, size: 18), SizedBox(width: 8), Text('Cash')])),
+                              child: Row(children: [Icon(PhosphorIconsRegular.money, size: 18), SizedBox(width: 8), Text('Cash')])),
                           DropdownMenuItem(value: 'card',
-                              child: Row(children: [Icon(Icons.credit_card, size: 18), SizedBox(width: 8), Text('Card')])),
+                              child: Row(children: [Icon(PhosphorIconsRegular.creditCard, size: 18), SizedBox(width: 8), Text('Card')])),
                           DropdownMenuItem(value: 'bank',
-                              child: Row(children: [Icon(Icons.account_balance, size: 18), SizedBox(width: 8), Text('Bank Transfer')])),
+                              child: Row(children: [Icon(PhosphorIconsRegular.bank, size: 18), SizedBox(width: 8), Text('Bank Transfer')])),
                           DropdownMenuItem(value: 'online',
-                              child: Row(children: [Icon(Icons.smartphone, size: 18), SizedBox(width: 8), Text('Online (JazzCash/EasyPaisa)')])),
+                              child: Row(children: [Icon(PhosphorIconsRegular.deviceMobile, size: 18), SizedBox(width: 8), Text('Online (JazzCash/EasyPaisa)')])),
                         ],
                         onChanged: (v) => setModalState(() => paymentMethod = v ?? 'cash'),
                       ),
@@ -528,7 +530,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
         ),
         const SizedBox(width: 8),
         FilledButton.icon(
-          icon: const Icon(Icons.check),
+          icon: const Icon(PhosphorIconsRegular.check),
           onPressed: () async {
             if (!(formKey.currentState?.validate() ?? false)) return;
             final amount = double.tryParse(amountCtrl.text.trim());
@@ -552,7 +554,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         ? 'Payment recorded — invoice marked Paid ✓'
                         : 'Partial payment recorded — invoice marked Partially Paid',
                   ),
-                  backgroundColor: settled ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                  backgroundColor: settled ? StatCategory.membership.color : StatCategory.operational.color,
                 ),
               );
             } on ApiException catch (e) {
@@ -613,7 +615,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
 
       await showAppFormDialog<void>(
         context: context,
-        icon: Icons.edit_outlined,
+        icon: PhosphorIconsRegular.pencilSimple,
         title: 'Edit Payment',
         subtitle: '${p.invoiceNo} • ${p.memberName}',
         body: StatefulBuilder(
@@ -718,21 +720,21 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
               page.total == 0
                   ? 'No payments'
                   : 'Showing ${number.format(f)}-${number.format(t)} of ${number.format(page.total)}',
-              style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+              style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
             ),
             const Spacer(),
             IconButton(
               tooltip: 'Previous',
               visualDensity: VisualDensity.compact,
               onPressed: cp ? () => ref.read(paymentsControllerProvider.notifier).prevPage() : null,
-              icon: const Icon(Icons.chevron_left),
+              icon: const Icon(PhosphorIconsRegular.caretLeft),
             ),
             const SizedBox(width: 4),
             IconButton(
               tooltip: 'Next',
               visualDensity: VisualDensity.compact,
               onPressed: cn ? () => ref.read(paymentsControllerProvider.notifier).nextPage() : null,
-              icon: const Icon(Icons.chevron_right),
+              icon: const Icon(PhosphorIconsRegular.caretRight),
             ),
           ],
         ),
@@ -758,17 +760,14 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         Container(
                           height: 52,
                           width: 52,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFFE06C6C).withAlpha(22),
-                          ),
-                          child: const Icon(Icons.payments_outlined, size: 26, color: Color(0xFFE06C6C)),
+                          decoration: AppTheme.iconBox(color: StatCategory.operational.color),
+                          child: Icon(PhosphorIconsRegular.wallet, size: 26, color: StatCategory.operational.color),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'No payments found',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.archivo(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
                             color: theme.colorScheme.onSurface,
@@ -778,7 +777,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         Text(
                           'Try changing the date range or search above.',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                          style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -816,7 +815,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                                   p.invoiceNo,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                                  style: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w700),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -828,31 +827,31 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                             '${p.memberName} (${p.memberCode})',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                            style: GoogleFonts.archivo(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             '${number.format(p.amount)}  •  ${fmtDateTime(p.paidAt)}',
-                            style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                            style: GoogleFonts.archivo(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                           ),
                           const SizedBox(height: 6),
                           Row(
                             children: [
                               AppTableActionButton(
-                                icon: Icons.visibility_outlined,
+                                icon: PhosphorIconsRegular.eye,
                                 tooltip: 'View',
                                 onPressed: () => _openView(context, p),
                               ),
                               const SizedBox(width: 2),
                               AppTableActionButton(
-                                icon: Icons.edit_outlined,
+                                icon: PhosphorIconsRegular.pencilSimple,
                                 tooltip: 'Edit',
                                 onPressed: () => openEdit(p),
                               ),
                               if (canDelete) ...[
                                 const Spacer(),
                                 AppTableActionButton(
-                                  icon: Icons.delete_outline,
+                                  icon: PhosphorIconsRegular.trash,
                                   tooltip: 'Delete',
                                   danger: true,
                                   onPressed: () => confirmDelete(p),
@@ -890,13 +889,13 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       dividerColor: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
                       dataTableTheme: DataTableThemeData(
                         dividerThickness: 1,
-                        headingTextStyle: GoogleFonts.inter(
+                        headingTextStyle: GoogleFonts.archivo(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.3,
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                        dataTextStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                         headingRowColor: WidgetStatePropertyAll(
                           isDark ? Colors.white.withAlpha(8) : Colors.black.withAlpha(5),
                         ),
@@ -922,7 +921,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                               DataCell(Text('${p.memberName} (${p.memberCode})')),
                               DataCell(Text(
                                 number.format(p.amount),
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.archivo(
                                   fontSize: 13.5,
                                   fontWeight: FontWeight.w600,
                                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -935,20 +934,20 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     AppTableActionButton(
-                                      icon: Icons.visibility_outlined,
+                                      icon: PhosphorIconsRegular.eye,
                                       tooltip: 'View',
                                       onPressed: () => _openView(context, p),
                                     ),
                                     const SizedBox(width: 2),
                                     AppTableActionButton(
-                                      icon: Icons.edit_outlined,
+                                      icon: PhosphorIconsRegular.pencilSimple,
                                       tooltip: 'Edit',
                                       onPressed: () => openEdit(p),
                                     ),
                                     if (canDelete) ...[
                                       const SizedBox(width: 2),
                                       AppTableActionButton(
-                                        icon: Icons.delete_outline,
+                                        icon: PhosphorIconsRegular.trash,
                                         tooltip: 'Delete',
                                         danger: true,
                                         onPressed: () => confirmDelete(p),
@@ -987,31 +986,30 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
           final todayCount = (s['today'] as Map?)?['count'] as num? ?? 0;
           final last7Total = (s['last7Days'] as Map?)?['total'] as num? ?? 0;
           final last30Total = (s['last30Days'] as Map?)?['total'] as num? ?? 0;
+          // All three are financial figures — same ember category everywhere,
+          // not a different colour per card.
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _MetricCard(
-                title: 'Today',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Today',
                 value: number.format(todayTotal),
-                subtitle: '${todayCount.toInt()} payments',
-                icon: Icons.today_outlined,
-                accent: theme.colorScheme.primary,
+                footnote: '${todayCount.toInt()} PAYMENTS',
               ),
               const SizedBox(height: 12),
-              _MetricCard(
-                title: 'Last 7 days',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Last 7 days',
                 value: number.format(last7Total),
-                subtitle: 'Collection',
-                icon: Icons.calendar_view_week_outlined,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'COLLECTION',
               ),
               const SizedBox(height: 12),
-              _MetricCard(
-                title: 'Last 30 days',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Last 30 days',
                 value: number.format(last30Total),
-                subtitle: 'Collection',
-                icon: Icons.calendar_month_outlined,
-                accent: const Color(0xFFF59E0B),
+                footnote: 'COLLECTION',
               ),
             ],
           );
@@ -1030,23 +1028,23 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Expanded(child: Text('Payments', style: theme.textTheme.headlineSmall)),
+              const Expanded(child: AppPageTitle('Payments')),
               FilledButton.icon(
                 onPressed: () => _openRecordPayment(context, ref),
-                icon: const Icon(Icons.add),
+                icon: const Icon(PhosphorIconsRegular.plus),
                 label: const Text('Record'),
               ),
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'PDF',
                 onPressed: () => widget._openPaymentsPdfActions(context, ref),
-                icon: const Icon(Icons.picture_as_pdf_outlined),
+                icon: const Icon(PhosphorIconsRegular.filePdf),
               ),
               const SizedBox(width: 6),
               IconButton(
                 tooltip: 'Refresh',
                 onPressed: () => ref.read(paymentsControllerProvider.notifier).load(),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(PhosphorIconsRegular.arrowClockwise),
               ),
             ],
           ),
@@ -1068,11 +1066,11 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                     child: TextField(
                       controller: _searchCtrl,
                       focusNode: _searchFocus,
-                      style: GoogleFonts.inter(fontSize: 13.5),
+                      style: GoogleFonts.archivo(fontSize: 13.5),
                       decoration: appDenseInputDecoration(
                         context,
                         hint: 'Search invoice / member / code',
-                        prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                        prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                       ),
                       onChanged: (v) {
                         _applyQuery(query, q: v);
@@ -1092,7 +1090,7 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       initialValue: query.method,
                       isDense: true,
                       isExpanded: true,
-                      style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                      style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                       decoration: appDenseInputDecoration(context),
                       items: const [
                         DropdownMenuItem(value: '', child: Text('All Methods')),
@@ -1124,10 +1122,10 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                         _applyQuery(query, from: f, to: t);
                         await ref.read(paymentsControllerProvider.notifier).load();
                       },
-                      icon: Icon(Icons.calendar_today_outlined, size: 15, color: theme.colorScheme.onSurfaceVariant),
+                      icon: Icon(PhosphorIconsRegular.calendarBlank, size: 15, color: theme.colorScheme.onSurfaceVariant),
                       label: Text(
                         '${query.from} → ${query.to}',
-                        style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w500),
+                        style: GoogleFonts.archivo(fontSize: 12.5, fontWeight: FontWeight.w500),
                       ),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1145,14 +1143,14 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       onPressed: () => ref.read(paymentsControllerProvider.notifier).load(),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
-                        textStyle: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w700),
+                        textStyle: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w700),
                       ),
                       child: const Text('Apply'),
                     ),
                   ),
                   AppFilterPill(
                     label: 'Reset',
-                    icon: Icons.restart_alt_rounded,
+                    icon: PhosphorIconsRegular.arrowsClockwise,
                     selected: false,
                     onTap: () {
                       final today = DateTime.now();
@@ -1243,116 +1241,6 @@ void _openView(BuildContext context, Payment p) {
   );
 }
 
-/// Collection stat card for the right-hand metrics sidebar. Fills its parent
-/// width (no fixed size) and renders the financial figure in Bebas Neue.
-class _MetricCard extends StatefulWidget {
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.accent,
-  });
-
-  final String title;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color accent;
-
-  @override
-  State<_MetricCard> createState() => _MetricCardState();
-}
-
-class _MetricCardState extends State<_MetricCard> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: theme.brightness == Brightness.dark ? AppTheme.charcoal : theme.colorScheme.surface,
-          border: Border.all(
-            color: _hover
-                ? widget.accent.withAlpha(90)
-                : (theme.brightness == Brightness.dark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant),
-            width: _hover ? 1.0 : 0.8,
-          ),
-          boxShadow: _hover
-              ? [BoxShadow(color: widget.accent.withAlpha(40), blurRadius: 26, offset: const Offset(0, 12))]
-              : [BoxShadow(color: Colors.black.withAlpha(theme.brightness == Brightness.dark ? 55 : 12), blurRadius: 14, offset: const Offset(0, 6))],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    height: 36,
-                    width: 36,
-                    decoration: BoxDecoration(
-                      color: widget.accent.withAlpha(28),
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: widget.accent.withAlpha(60), width: 0.8),
-                    ),
-                    child: Icon(widget.icon, color: widget.accent, size: 19),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // Bebas Neue accumulation figure — scales down if very large.
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  widget.value,
-                  maxLines: 1,
-                  style: GoogleFonts.bebasNeue(
-                    fontSize: 38,
-                    height: 1.0,
-                    letterSpacing: 1.5,
-                    color: widget.accent,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                widget.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Flat payment-method pill — Inter, colour-coded by channel.
 /// Small status pill inside the invoice picker list.
 class _InvoiceStatusPill extends StatelessWidget {
@@ -1362,28 +1250,27 @@ class _InvoiceStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color;
+    final StatCategory category;
     final String label;
     if (status == 'unpaid') {
-      color = const Color(0xFFDC2626);
+      category = StatCategory.atRisk;
       label = 'Unpaid';
     } else if (status == 'partial' || status == 'partially_paid') {
-      color = const Color(0xFFF59E0B);
+      category = StatCategory.operational;
       label = 'Partial';
     } else {
-      color = Theme.of(context).colorScheme.onSurfaceVariant;
+      category = StatCategory.operational;
       label = status;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withAlpha(24),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withAlpha(70), width: 0.8),
+        color: category.soft,
+        borderRadius: AppRadius.smallAll,
       ),
       child: Text(
-        label,
-        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: color, letterSpacing: 0.2),
+        label.toUpperCase(),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }
@@ -1411,7 +1298,7 @@ class _SelectedInvoiceBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.receipt_long_outlined, color: accent, size: 20),
+          Icon(PhosphorIconsRegular.receipt, color: accent, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1454,8 +1341,8 @@ class _LedgerPreviewBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final Color accent = willFullySettle ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
-    final IconData icon = willFullySettle ? Icons.check_circle_outline : Icons.timelapse;
+    final Color accent = willFullySettle ? StatCategory.membership.color : StatCategory.operational.color;
+    final IconData icon = willFullySettle ? PhosphorIconsRegular.checkCircle : PhosphorIconsRegular.timer;
     final String message = willFullySettle
         ? 'Invoice will be marked Paid ✓'
         : 'Invoice will be marked Partially Paid — ${NumberFormat.decimalPattern().format(remaining)} still outstanding.';
@@ -1515,7 +1402,7 @@ class _MethodChip extends StatelessWidget {
       ),
       child: Text(
         m,
-        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+        style: GoogleFonts.archivo(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +10,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart'; // AppTheme + AppTypography
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/in_app_pdf.dart';
@@ -351,77 +353,6 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       return '${h}h ${m}m';
     }
 
-    // Flex metric tile — no fixed width. The parent grid wraps each in an
-    // Expanded so 4 tiles span the container edge-to-edge.
-    Widget metricCard({
-      required String title,
-      required String value,
-      required String subtitle,
-      required IconData icon,
-      required Color accent,
-    }) {
-      return Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                ),
-                child: Icon(icon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    // Bebas Neue display number; scales down so long datetimes fit.
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        style: theme.textTheme.headlineSmall?.copyWith(color: accent),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 11.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     final goldBorder = theme.cardTheme.shape is RoundedRectangleBorder
         ? (theme.cardTheme.shape as RoundedRectangleBorder).side
         : BorderSide(color: theme.colorScheme.outlineVariant);
@@ -436,7 +367,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       children: [
         Text('CHECK-IN', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
         const SizedBox(height: 2),
-        Text('Manual entry kiosk', style: GoogleFonts.inter(fontSize: 12, color: onVar)),
+        Text('Manual entry kiosk', style: GoogleFonts.archivo(fontSize: 12, color: onVar)),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -445,11 +376,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 height: 52,
                 child: TextField(
                   controller: _codeCtrl,
-                  style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600),
+                  style: GoogleFonts.archivo(fontSize: 15, fontWeight: FontWeight.w600),
                   decoration: appDenseInputDecoration(
                     context,
                     hint: 'Member Code',
-                    prefixIcon: Icon(Icons.badge_outlined, size: 20, color: onVar),
+                    prefixIcon: Icon(PhosphorIconsRegular.identificationBadge, size: 20, color: onVar),
                   ),
                   onChanged: (v) => _scheduleValidate(v),
                   onSubmitted: (v) => _checkInByCode(v),
@@ -461,11 +392,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
               height: 52,
               child: FilledButton.icon(
                 onPressed: () => _checkInByCode(_codeCtrl.text),
-                icon: const Icon(Icons.login_rounded, size: 18),
+                icon: const Icon(PhosphorIconsRegular.signIn, size: 18),
                 label: const Text('Check-in'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  textStyle: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                  textStyle: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
             ),
@@ -494,7 +425,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
-                child: Text('Type to filter members', style: GoogleFonts.inter(fontSize: 12.5, color: onVar)),
+                child: Text('Type to filter members', style: GoogleFonts.archivo(fontSize: 12.5, color: onVar)),
               ),
             );
           }
@@ -502,7 +433,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
-                child: Text('No results', style: GoogleFonts.inter(fontSize: 12.5, color: onVar)),
+                child: Text('No results', style: GoogleFonts.archivo(fontSize: 12.5, color: onVar)),
               ),
             );
           }
@@ -520,7 +451,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                   dense: true,
                   title: Text(
                     '${m.fullName} (${m.memberCode})',
-                    style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w600),
                   ),
                   subtitle: Text(
                     [
@@ -528,7 +459,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                       if (m.phone != null && m.phone!.isNotEmpty) m.phone!,
                       if (m.email != null && m.email!.isNotEmpty) m.email!,
                     ].join(' • '),
-                    style: GoogleFonts.inter(fontSize: 11.5, color: onVar),
+                    style: GoogleFonts.archivo(fontSize: 11.5, color: onVar),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -536,7 +467,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       AppTableActionButton(
-                        icon: Icons.visibility_outlined,
+                        icon: PhosphorIconsRegular.eye,
                         tooltip: 'View',
                         onPressed: () => _openMemberView(context, m.id),
                       ),
@@ -546,7 +477,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(0, 34),
                           padding: const EdgeInsets.symmetric(horizontal: 14),
-                          textStyle: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w700),
+                          textStyle: GoogleFonts.archivo(fontSize: 12.5, fontWeight: FontWeight.w700),
                         ),
                         child: const Text('Check-in'),
                       ),
@@ -559,7 +490,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         },
         error: (e, _) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 28),
-          child: Center(child: Text(e.toString(), style: GoogleFonts.inter(fontSize: 12.5, color: onVar))),
+          child: Center(child: Text(e.toString(), style: GoogleFonts.archivo(fontSize: 12.5, color: onVar))),
         ),
         loading: () => const Padding(
           padding: EdgeInsets.symmetric(vertical: 28),
@@ -575,22 +506,22 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       children: [
         Text('FIND MEMBER', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
         const SizedBox(height: 2),
-        Text('Live search', style: GoogleFonts.inter(fontSize: 12, color: onVar)),
+        Text('Live search', style: GoogleFonts.archivo(fontSize: 12, color: onVar)),
         const SizedBox(height: 14),
         SizedBox(
           height: 52,
           child: TextField(
             controller: _searchCtrl,
-            style: GoogleFonts.inter(fontSize: 14),
+            style: GoogleFonts.archivo(fontSize: 14),
             decoration: appDenseInputDecoration(
               context,
               hint: 'Instant search (code / name / phone)',
-              prefixIcon: Icon(Icons.search, size: 20, color: onVar),
+              prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 20, color: onVar),
             ).copyWith(
               suffixIcon: IconButton(
                 tooltip: 'Search',
                 onPressed: () => ref.read(memberSearchProvider.notifier).search(_searchCtrl.text),
-                icon: Icon(Icons.arrow_forward, size: 18, color: onVar),
+                icon: Icon(PhosphorIconsRegular.arrowRight, size: 18, color: onVar),
               ),
             ),
             onChanged: (v) {
@@ -691,7 +622,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 IconButton(
                   tooltip: 'Refresh',
                   onPressed: () => ref.read(attendanceControllerProvider.notifier).load(),
-                  icon: const Icon(Icons.refresh),
+                  icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                 ),
               ],
             ),
@@ -701,7 +632,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 final items = page.items;
                 if (items.isEmpty) {
                   return _EmptyState(
-                    icon: Icons.how_to_reg_outlined,
+                    icon: PhosphorIconsRegular.userCheck,
                     title: _range == 'today'
                         ? 'No active check-ins for today yet'
                         : 'No logs in this range',
@@ -731,12 +662,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                             IconButton(
                               tooltip: 'Previous',
                               onPressed: canPrev ? () => ref.read(attendanceControllerProvider.notifier).prevPage() : null,
-                              icon: const Icon(Icons.chevron_left),
+                              icon: const Icon(PhosphorIconsRegular.caretLeft),
                             ),
                             IconButton(
                               tooltip: 'Next',
                               onPressed: canNext ? () => ref.read(attendanceControllerProvider.notifier).nextPage() : null,
-                              icon: const Icon(Icons.chevron_right),
+                              icon: const Icon(PhosphorIconsRegular.caretRight),
                             ),
                           ],
                         ),
@@ -749,13 +680,21 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                     final inText = checkedIn == null ? a.checkedInAt : _dt.format(checkedIn);
                     final outText = checkedOut == null ? null : _dt.format(checkedOut);
                     return ListTile(
-                      leading: const Icon(Icons.how_to_reg),
+                      leading: Container(
+                        height: 34,
+                        width: 34,
+                        decoration: AppTheme.iconBox(color: StatCategory.membership.color),
+                        child: Icon(PhosphorIconsRegular.userCheck, color: StatCategory.membership.color, size: 16),
+                      ),
                       title: Text('${a.fullName} (${a.memberCode})'),
-                      subtitle: Text('In: $inText${outText != null ? ' • Out: $outText' : ''}'),
+                      subtitle: Text(
+                        'IN $inText${outText != null ? '  ·  OUT $outText' : ''}',
+                        style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant, fontSize: 11.5),
+                      ),
                       trailing: IconButton(
                         tooltip: 'View',
                         onPressed: () => _openMemberView(context, a.memberId),
-                        icon: const Icon(Icons.visibility),
+                        icon: const Icon(PhosphorIconsRegular.eye),
                       ),
                     );
                   },
@@ -777,17 +716,17 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
       children: [
         Row(
           children: [
-            Expanded(child: Text('Attendance', style: theme.textTheme.headlineSmall)),
+            const Expanded(child: AppPageTitle('Attendance')),
             IconButton(
               tooltip: 'PDF',
               onPressed: () => _openAttendancePdfActions(context),
-              icon: const Icon(Icons.picture_as_pdf_outlined),
+              icon: const Icon(PhosphorIconsRegular.filePdf),
             ),
             const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
               onPressed: () => ref.read(attendanceControllerProvider.notifier).load(),
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(PhosphorIconsRegular.arrowClockwise),
             ),
           ],
         ),
@@ -798,33 +737,29 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         LayoutBuilder(
           builder: (context, c) {
             final tiles = <Widget>[
-              metricCard(
-                title: '$rangeLabel Check-ins',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: '$rangeLabel Check-ins',
                 value: '$total',
-                subtitle: 'Attendance',
-                icon: Icons.how_to_reg,
-                accent: theme.colorScheme.primary,
+                footnote: 'ATTENDANCE',
               ),
-              metricCard(
-                title: 'Unique members',
+              CategoryStatCard(
+                category: StatCategory.membership,
+                label: 'Unique members',
                 value: '$unique',
-                subtitle: 'Checked-in users',
-                icon: Icons.groups_outlined,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'CHECKED-IN USERS',
               ),
-              metricCard(
-                title: 'Latest check-in',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Latest check-in',
                 value: latestLabel,
-                subtitle: 'Most recent',
-                icon: Icons.schedule_outlined,
-                accent: const Color(0xFF3B82F6),
+                footnote: 'MOST RECENT',
               ),
-              metricCard(
-                title: 'Avg session',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Avg session',
                 value: fmtAvgSession(),
-                subtitle: 'Based on check-outs',
-                icon: Icons.timelapse_outlined,
-                accent: const Color(0xFFF59E0B),
+                footnote: 'BASED ON CHECK-OUTS',
               ),
             ];
             final cols = c.maxWidth >= 900
@@ -874,7 +809,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                     initialValue: _range,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'today', child: Text('Today')),
@@ -896,7 +831,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                     initialValue: _sort,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
@@ -914,11 +849,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                   height: 40,
                   child: TextField(
                     controller: _logSearchCtrl,
-                    style: GoogleFonts.inter(fontSize: 13.5),
+                    style: GoogleFonts.archivo(fontSize: 13.5),
                     decoration: appDenseInputDecoration(
                       context,
                       hint: 'Search member, code',
-                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) {
                       _debounce?.cancel();
@@ -956,7 +891,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Navigator.of(context).pop();
                 await _runAttendancePdf(context, preview: true, date: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -964,7 +899,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
                 Navigator.of(context).pop();
                 await _runAttendancePdf(context, preview: false, date: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -1022,7 +957,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             return AlertDialog(
               title: Text(title),
               content: Text(body),
-              icon: const Icon(Icons.error_outline, color: Colors.redAccent),
+              icon: const Icon(PhosphorIconsRegular.warningCircle, color: Colors.redAccent),
               actions: [
                 FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
               ],
@@ -1048,7 +983,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         builder: (context) {
           final unpaid = result.unpaidInvoices;
           return AlertDialog(
-            icon: Icon(Icons.verified, color: Theme.of(context).colorScheme.tertiary),
+            icon: Icon(PhosphorIconsRegular.sealCheck, color: Theme.of(context).colorScheme.tertiary),
             title: Text(result.alreadyCheckedIn ? 'Already Checked-in' : 'Access Granted'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1123,7 +1058,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
             return AlertDialog(
               title: Text(title),
               content: Text(body),
-              icon: const Icon(Icons.error_outline, color: Colors.redAccent),
+              icon: const Icon(PhosphorIconsRegular.warningCircle, color: Colors.redAccent),
               actions: [
                 FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
               ],
@@ -1148,7 +1083,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
         builder: (context) {
           final unpaid = result.unpaidInvoices;
           return AlertDialog(
-            icon: Icon(Icons.verified, color: Theme.of(context).colorScheme.tertiary),
+            icon: Icon(PhosphorIconsRegular.sealCheck, color: Theme.of(context).colorScheme.tertiary),
             title: Text(result.alreadyCheckedIn ? 'Already Checked-in' : 'Access Granted'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1214,7 +1149,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> with Single
 
   void _setSuccessBorder() {
     _borderReset?.cancel();
-    setState(() => _panelBorderColor = const Color(0xFF10B981));
+    setState(() => _panelBorderColor = StatCategory.membership.color);
     _borderReset = Timer(const Duration(seconds: 2), () {
       if (mounted) setState(() => _panelBorderColor = null);
     });
@@ -1337,7 +1272,7 @@ class _AccessPreviewCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+            Icon(PhosphorIconsRegular.magnifyingGlass, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1351,17 +1286,18 @@ class _AccessPreviewCard extends StatelessWidget {
     }
 
     final ok = p.allowed;
-    final green = const Color(0xFF10B981);
+    final green = StatCategory.membership.color;
     final red = theme.colorScheme.error;
 
     final child = Padding(
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: ok ? green.withAlpha(44) : red.withAlpha(44),
-            child: Icon(ok ? Icons.verified : Icons.block, color: ok ? green : red),
+          Container(
+            height: 36,
+            width: 36,
+            decoration: AppTheme.iconBox(color: ok ? green : red),
+            child: Icon(ok ? PhosphorIconsRegular.sealCheck : PhosphorIconsRegular.prohibit, color: ok ? green : red, size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1531,7 +1467,7 @@ class _EmptyState extends StatelessWidget {
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.archivo(
                   fontSize: 14.5,
                   fontWeight: FontWeight.w600,
                   color: theme.colorScheme.onSurface,
@@ -1541,7 +1477,7 @@ class _EmptyState extends StatelessWidget {
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),

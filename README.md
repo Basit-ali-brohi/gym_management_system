@@ -18,10 +18,11 @@ Members • Leads (CRM) • Billing • Attendance • Inventory • Reports —
 
 ## ✨ Overview
 
-A multi-tenant gym management ERP with a sleek **Obsidian × Gold × Emerald** dark theme, a fully
-**mobile-responsive** UI, and a clean Node.js + MySQL backend. Built for real gym operations —
-member lifecycles, lead nurturing, billing & partial payments, attendance check-ins, supplement
-inventory, staff roles, and rich PDF reporting.
+A multi-tenant gym management ERP with a **"Gym Floor"** design language — chalkboard workout-log
+hero panels, scoreboard-style mono numerals, a category-colour system, and a collapsible icon-rail
+sidebar — built on a fully **mobile-responsive** UI and a clean Node.js + MySQL backend. Built for
+real gym operations — member lifecycles, lead nurturing, billing & partial payments, attendance
+check-ins, supplement inventory, staff roles, and rich PDF reporting.
 
 > Designed to compete with global products like Zenoti & Mindbody, scaled for local gyms.
 
@@ -52,7 +53,8 @@ fully responsive (desktop + mobile), and a configurable backend URL.
 ## 🧱 Tech Stack
 
 **Frontend — Flutter**
-`Riverpod` (state) · `GoRouter` (routing) · `fl_chart` (charts) · `google_fonts` (Bebas Neue + Inter) ·
+`Riverpod` (state) · `GoRouter` (routing) · `fl_chart` (charts) · `google_fonts` (Oswald + Archivo +
+JetBrains Mono) · `phosphor_flutter` (icons) · `flutter_animate` / `animations` (motion) ·
 `printing` (PDF) · `qr_flutter` · `flutter_colorpicker` · `shared_preferences` · `url_launcher`
 
 **Backend — Node.js**

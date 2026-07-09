@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 /// Lays its children as a horizontal grid of equal-width [Expanded] cells on
 /// wide modals (the 2-/3-column row system), collapsing to a clean vertical
@@ -418,7 +419,7 @@ class AppFormDialog extends StatelessWidget {
                 onPressed: () async {
                   await Navigator.of(context).maybePop();
                 },
-                icon: const Icon(Icons.close),
+                icon: const Icon(PhosphorIconsRegular.x),
               ),
             ],
           ),

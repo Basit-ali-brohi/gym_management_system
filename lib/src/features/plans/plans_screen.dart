@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/in_app_pdf.dart';
@@ -125,7 +128,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runPlansPdf(context, ref, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -133,7 +136,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runPlansPdf(context, ref, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -180,95 +183,28 @@ class PlansScreen extends ConsumerStatefulWidget {
         : (itemsPreview.map((p) => p.durationDays).reduce((a, b) => a + b) / itemsPreview.length).round();
     final filteredPreview = state._applyPlanUiFilters(itemsPreview);
 
-    // Flex metric tile — no fixed width. The parent grid wraps each in an
-    // Expanded so 4 tiles span the container edge-to-edge.
-    Widget metricCard({
-      required String title,
-      required String value,
-      required String subtitle,
-      required IconData icon,
-      required Color accent,
-    }) {
-      return Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                ),
-                child: Icon(icon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineSmall?.copyWith(color: accent),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 11.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Row(
           children: [
-            Expanded(child: Text('Plans', style: theme.textTheme.headlineSmall)),
+            const Expanded(child: AppPageTitle('Plans')),
             FilledButton.icon(
               onPressed: () => _openAddPlan(context, ref),
-              icon: const Icon(Icons.add),
+              icon: const Icon(PhosphorIconsRegular.plus),
               label: const Text('Add Plan'),
             ),
             const SizedBox(width: 8),
             IconButton(
               tooltip: 'PDF',
               onPressed: () => _openPlansPdfActions(context, ref),
-              icon: const Icon(Icons.picture_as_pdf_outlined),
+              icon: const Icon(PhosphorIconsRegular.filePdf),
             ),
             const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
               onPressed: () => ref.read(plansControllerProvider.notifier).load(),
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(PhosphorIconsRegular.arrowClockwise),
             ),
           ],
         ),
@@ -279,33 +215,29 @@ class PlansScreen extends ConsumerStatefulWidget {
         LayoutBuilder(
           builder: (context, c) {
             final tiles = <Widget>[
-              metricCard(
-                title: 'Total Plans',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Total Plans',
                 value: '$total',
-                subtitle: 'In your gym',
-                icon: Icons.card_membership_outlined,
-                accent: theme.colorScheme.primary,
+                footnote: 'IN YOUR GYM',
               ),
-              metricCard(
-                title: 'Active',
+              CategoryStatCard(
+                category: StatCategory.membership,
+                label: 'Active',
                 value: '$active',
-                subtitle: 'Ready for production',
-                icon: Icons.verified_outlined,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'READY FOR PRODUCTION',
               ),
-              metricCard(
-                title: 'Inactive',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Inactive',
                 value: '$inactive',
-                subtitle: 'Archived / disabled',
-                icon: Icons.block_outlined,
-                accent: theme.colorScheme.onSurfaceVariant,
+                footnote: 'ARCHIVED / DISABLED',
               ),
-              metricCard(
-                title: 'Avg Duration',
-                value: '$avgDays days',
-                subtitle: 'Across plans',
-                icon: Icons.timelapse_outlined,
-                accent: const Color(0xFFF59E0B),
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Avg Duration',
+                value: '$avgDays',
+                footnote: 'DAYS ACROSS PLANS',
               ),
             ];
             final cols = c.maxWidth >= 900
@@ -355,7 +287,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                     initialValue: state._statusFilter,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
@@ -373,7 +305,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                     initialValue: state._sort,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'name_asc', child: Text('Name A-Z')),
@@ -388,22 +320,22 @@ class PlansScreen extends ConsumerStatefulWidget {
                   height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    style: GoogleFonts.inter(fontSize: 13.5),
+                    style: GoogleFonts.archivo(fontSize: 13.5),
                     decoration: appDenseInputDecoration(
                       context,
                       hint: 'Search plan',
-                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 Text(
                   'Showing ${number.format(filteredPreview.length)} of ${number.format(total)}',
-                  style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                  style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                 ),
                 AppFilterPill(
                   label: 'Clear',
-                  icon: Icons.close_rounded,
+                  icon: PhosphorIconsRegular.x,
                   selected: false,
                   onTap: () => state._clearFilters(),
                 ),
@@ -460,13 +392,13 @@ class PlansScreen extends ConsumerStatefulWidget {
                             : Colors.grey.shade200,
                         dataTableTheme: DataTableThemeData(
                           dividerThickness: 1,
-                          headingTextStyle: GoogleFonts.inter(
+                          headingTextStyle: GoogleFonts.archivo(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.3,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
-                          dataTextStyle: GoogleFonts.inter(
+                          dataTextStyle: GoogleFonts.archivo(
                             fontSize: 13.5,
                             color: theme.colorScheme.onSurface,
                           ),
@@ -521,20 +453,20 @@ class PlansScreen extends ConsumerStatefulWidget {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     AppTableActionButton(
-                                      icon: Icons.visibility_outlined,
+                                      icon: PhosphorIconsRegular.eye,
                                       tooltip: 'View',
                                       onPressed: () => _openViewPlan(context, p),
                                     ),
                                     const SizedBox(width: 2),
                                     AppTableActionButton(
-                                      icon: Icons.edit_outlined,
+                                      icon: PhosphorIconsRegular.pencilSimple,
                                       tooltip: 'Edit',
                                       onPressed: () => _openEditPlan(context, ref, p),
                                     ),
                                     if (canManage) ...[
                                       const SizedBox(width: 2),
                                       AppTableActionButton(
-                                        icon: Icons.delete_outline,
+                                        icon: PhosphorIconsRegular.trash,
                                         tooltip: 'Delete',
                                         danger: true,
                                         onPressed: () => _confirmDelete(context, ref, p),
@@ -571,7 +503,7 @@ class PlansScreen extends ConsumerStatefulWidget {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.card_membership, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                              Icon(PhosphorIconsRegular.identificationCard, size: 18, color: theme.colorScheme.onSurfaceVariant),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -596,20 +528,20 @@ class PlansScreen extends ConsumerStatefulWidget {
                           Row(
                             children: [
                               AppTableActionButton(
-                                icon: Icons.visibility_outlined,
+                                icon: PhosphorIconsRegular.eye,
                                 tooltip: 'View',
                                 onPressed: () => _openViewPlan(context, p),
                               ),
                               const SizedBox(width: 2),
                               AppTableActionButton(
-                                icon: Icons.edit_outlined,
+                                icon: PhosphorIconsRegular.pencilSimple,
                                 tooltip: 'Edit',
                                 onPressed: () => _openEditPlan(context, ref, p),
                               ),
                               if (canManage) ...[
                                 const Spacer(),
                                 AppTableActionButton(
-                                  icon: Icons.delete_outline,
+                                  icon: PhosphorIconsRegular.trash,
                                   tooltip: 'Delete',
                                   danger: true,
                                   onPressed: () => _confirmDelete(context, ref, p),
@@ -667,7 +599,7 @@ class PlansScreen extends ConsumerStatefulWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.edit_outlined,
+      icon: PhosphorIconsRegular.pencilSimple,
       title: 'Edit Plan',
       subtitle: plan.name,
       body: StatefulBuilder(
@@ -836,7 +768,7 @@ class PlansScreen extends ConsumerStatefulWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.add,
+      icon: PhosphorIconsRegular.plus,
       title: 'Add Plan',
       subtitle: 'Create membership plan details',
       body: Form(
@@ -994,14 +926,14 @@ class _EmptyState extends StatelessWidget {
                   radius: 28,
                   backgroundColor: theme.colorScheme.primaryContainer,
                   foregroundColor: theme.colorScheme.onPrimaryContainer,
-                  child: const Icon(Icons.card_membership, size: 28),
+                  child: const Icon(PhosphorIconsRegular.identificationCard, size: 28),
                 ),
                 const SizedBox(height: 12),
                 Text('No plans yet', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text('Create membership plans for your gym.', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 16),
-                FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Add Plan')),
+                FilledButton.icon(onPressed: onAdd, icon: const Icon(PhosphorIconsRegular.plus), label: const Text('Add Plan')),
               ],
             ),
           ),
@@ -1019,19 +951,17 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isActive = status == 'active';
-    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    final category = isActive ? StatCategory.membership : StatCategory.operational;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: accent.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+        color: category.soft,
+        borderRadius: AppRadius.smallAll,
       ),
       child: Text(
-        status,
-        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+        status.toUpperCase(),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }
@@ -1047,30 +977,28 @@ class _StatusToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isActive = status == 'active';
-    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    final category = isActive ? StatCategory.membership : StatCategory.operational;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppRadius.smallAll,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: accent.withAlpha(28),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: accent.withAlpha(70), width: 0.8),
+            color: category.soft,
+            borderRadius: AppRadius.smallAll,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                status,
-                style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+                status.toUpperCase(),
+                style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.unfold_more, size: 14, color: accent.withAlpha(180)),
+              Icon(PhosphorIconsRegular.arrowsDownUp, size: 13, color: category.color.withAlpha(180)),
             ],
           ),
         ),

@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 
-import '../../core/app_theme.dart'; // AppTheme + AppTypography
-import '../../core/branding.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/providers.dart';
 import '../../core/whatsapp.dart';
 import '../auth/auth_controller.dart';
+import 'collapsible_sidebar.dart';
 
 class ExpiringPreviewMember {
   const ExpiringPreviewMember({
@@ -308,7 +309,7 @@ class AppShell extends ConsumerWidget {
                                             alignment: Alignment.centerLeft,
                                             child: FilledButton.icon(
                                               onPressed: unpaid.valueOrNull == null ? null : () => sendAllUnpaidInvoiceReminders(unpaidList),
-                                              icon: const Icon(Icons.done_all),
+                                              icon: const Icon(PhosphorIconsRegular.checks),
                                               label: const Text('Approve'),
                                             ),
                                           ),
@@ -361,7 +362,7 @@ class AppShell extends ConsumerWidget {
                                       IconButton(
                                         tooltip: 'Refresh',
                                         onPressed: () => r.refresh(expiringMembersProvider(days)),
-                                        icon: const Icon(Icons.refresh),
+                                        icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                                       ),
                                       Text(
                                         urgentCount == 0 ? 'Urgent: 0' : 'Urgent: $urgentCount',
@@ -393,12 +394,12 @@ class AppShell extends ConsumerWidget {
                                                     onPressed: m.phone == null || m.phone!.trim().isEmpty
                                                         ? null
                                                         : () => openWhatsApp(phone: m.phone, message: msg),
-                                                    icon: const Icon(Icons.chat_bubble_outline),
+                                                    icon: const Icon(PhosphorIconsRegular.chatCircle),
                                                   ),
                                                   IconButton(
                                                     tooltip: 'Copy message',
                                                     onPressed: () => copyToClipboard(msg),
-                                                    icon: const Icon(Icons.content_copy_outlined),
+                                                    icon: const Icon(PhosphorIconsRegular.copy),
                                                   ),
                                                   IconButton(
                                                     tooltip: 'Open member',
@@ -406,7 +407,7 @@ class AppShell extends ConsumerWidget {
                                                       Navigator.of(context).pop();
                                                       context.go('/members?q=${Uri.encodeComponent(m.memberCode)}');
                                                     },
-                                                    icon: const Icon(Icons.open_in_new),
+                                                    icon: const Icon(PhosphorIconsRegular.arrowSquareOut),
                                                   ),
                                                 ],
                                               ),
@@ -437,13 +438,13 @@ class AppShell extends ConsumerWidget {
                                     children: [
                                       FilledButton.icon(
                                         onPressed: unpaid.valueOrNull == null ? null : () => sendAllUnpaidInvoiceReminders(list),
-                                        icon: const Icon(Icons.done_all),
+                                        icon: const Icon(PhosphorIconsRegular.checks),
                                         label: Text('Send All ($readyCount)'),
                                       ),
                                       IconButton(
                                         tooltip: 'Refresh',
                                         onPressed: () => r.refresh(unpaidInvoicesProvider),
-                                        icon: const Icon(Icons.refresh),
+                                        icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                                       ),
                                       Text(
                                         'Tip: open invoice page to mark Paid',
@@ -475,12 +476,12 @@ class AppShell extends ConsumerWidget {
                                                     onPressed: inv.phone == null || inv.phone!.trim().isEmpty
                                                         ? null
                                                         : () => openWhatsApp(phone: inv.phone, message: msg),
-                                                    icon: const Icon(Icons.chat_bubble_outline),
+                                                    icon: const Icon(PhosphorIconsRegular.chatCircle),
                                                   ),
                                                   IconButton(
                                                     tooltip: 'Copy message',
                                                     onPressed: () => copyToClipboard(msg),
-                                                    icon: const Icon(Icons.content_copy_outlined),
+                                                    icon: const Icon(PhosphorIconsRegular.copy),
                                                   ),
                                                   IconButton(
                                                     tooltip: 'Open invoices',
@@ -488,7 +489,7 @@ class AppShell extends ConsumerWidget {
                                                       Navigator.of(context).pop();
                                                       context.go('/invoices');
                                                     },
-                                                    icon: const Icon(Icons.open_in_new),
+                                                    icon: const Icon(PhosphorIconsRegular.arrowSquareOut),
                                                   ),
                                                 ],
                                               ),
@@ -553,29 +554,29 @@ class AppShell extends ConsumerWidget {
 
     final destinations = <_NavDestination>[
       const _NavDestination.header('Overview'),
-      const _NavDestination.item('Dashboard', Icons.dashboard, '/dashboard'),
+      _NavDestination.item('Dashboard', PhosphorIconsRegular.squaresFour, '/dashboard'),
       const _NavDestination.header('CRM'),
-      const _NavDestination.item('Leads', Icons.person_search, '/leads'),
+      _NavDestination.item('Leads', PhosphorIconsRegular.userList, '/leads'),
       const _NavDestination.header('Members'),
-      const _NavDestination.item('Members', Icons.people, '/members'),
-      const _NavDestination.item('Plans', Icons.card_membership, '/plans'),
-      const _NavDestination.item('Attendance', Icons.how_to_reg, '/attendance'),
+      _NavDestination.item('Members', PhosphorIconsRegular.users, '/members'),
+      _NavDestination.item('Plans', PhosphorIconsRegular.identificationCard, '/plans'),
+      _NavDestination.item('Attendance', PhosphorIconsRegular.userCheck, '/attendance'),
       if (canSeeRevenue) ...[
         const _NavDestination.header('Billing'),
-        const _NavDestination.item('Invoices', Icons.receipt_long, '/invoices'),
-        const _NavDestination.item('Payments', Icons.payments, '/payments'),
+        _NavDestination.item('Invoices', PhosphorIconsRegular.receipt, '/invoices'),
+        _NavDestination.item('Payments', PhosphorIconsRegular.wallet, '/payments'),
         const _NavDestination.header('Finance'),
-        const _NavDestination.item('Expenses', Icons.account_balance_wallet, '/expenses'),
-        const _NavDestination.item('Reports', Icons.bar_chart, '/reports'),
+        _NavDestination.item('Expenses', PhosphorIconsRegular.coins, '/expenses'),
+        _NavDestination.item('Reports', PhosphorIconsRegular.chartBar, '/reports'),
       ],
       if (canSeeInventory) ...[
         const _NavDestination.header('Operations'),
-        const _NavDestination.item('Inventory', Icons.inventory_2, '/inventory'),
+        _NavDestination.item('Inventory', PhosphorIconsRegular.package, '/inventory'),
       ],
       if (canManageStaff || canSeeSettings) ...[
         const _NavDestination.header('Admin'),
-        if (canManageStaff) const _NavDestination.item('Staff', Icons.badge, '/staff'),
-        if (canSeeSettings) const _NavDestination.item('Settings', Icons.settings, '/settings'),
+        if (canManageStaff) _NavDestination.item('Staff', PhosphorIconsRegular.identificationBadge, '/staff'),
+        if (canSeeSettings) _NavDestination.item('Settings', PhosphorIconsRegular.gearSix, '/settings'),
       ],
     ];
 
@@ -642,7 +643,7 @@ class AppShell extends ConsumerWidget {
                   actions: [
                     _IconBadgeButton(
                       tooltip: 'Notifications',
-                      icon: const Icon(Icons.notifications_none),
+                      icon: const Icon(PhosphorIconsRegular.bell),
                       badgeCount: expiringAsync.valueOrNull?.length ?? 0,
                       onPressed: openExpiringDialog,
                     ),
@@ -650,13 +651,13 @@ class AppShell extends ConsumerWidget {
                       visualDensity: VisualDensity.compact,
                       tooltip: isDark ? 'Light theme' : 'Dark theme',
                       onPressed: toggleTheme,
-                      icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
+                      icon: Icon(isDark ? PhosphorIconsRegular.sun : PhosphorIconsRegular.moon),
                     ),
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       tooltip: 'Search',
                       onPressed: openGlobalSearch,
-                      icon: const Icon(Icons.search),
+                      icon: const Icon(PhosphorIconsRegular.magnifyingGlass),
                     ),
                     _QuickActionsButton(onQuickAction: runQuickAction),
                     PopupMenuButton<String>(
@@ -704,6 +705,14 @@ class AppShell extends ConsumerWidget {
               );
             }
 
+            final sidebarEntries = <SidebarEntry>[
+              for (final d in destinations)
+                if (d.isHeader)
+                  SidebarEntry.header(d.label)
+                else
+                  SidebarEntry.item(d.label, d.icon!, d.route!),
+            ];
+
             return Scaffold(
               body: _DesktopFrame(
                 tenantLabel: tenantLabel,
@@ -712,7 +721,7 @@ class AppShell extends ConsumerWidget {
                 initials: initials,
                 pageTitle: pageTitle,
                 selectedRoute: location,
-                destinations: destinations,
+                entries: sidebarEntries,
                 onGo: (route) => context.go(route),
                 onLogout: () => ref.read(authControllerProvider.notifier).logout(),
                 isDark: isDark,
@@ -912,7 +921,7 @@ class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
       final q = Uri.encodeComponent(target);
       final subtitle = [m.phone, m.memberCode].whereType<String>().map((s) => s.trim()).where((s) => s.isNotEmpty).join(' • ');
       return _MasterSearchTileData(
-        icon: Icons.people,
+        icon: PhosphorIconsRegular.users,
         title: m.fullName.trim().isEmpty ? target : '${m.fullName} (${m.memberCode ?? ''})'.replaceAll(' ()', ''),
         subtitle: subtitle.isEmpty ? null : subtitle,
         route: '/members?q=$q',
@@ -925,7 +934,7 @@ class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
       final subtitle =
           [l.phone, l.status, l.source, l.interest].whereType<String>().map((s) => s.trim()).where((s) => s.isNotEmpty).join(' • ');
       return _MasterSearchTileData(
-        icon: Icons.person_search,
+        icon: PhosphorIconsRegular.userList,
         title: l.fullName,
         subtitle: subtitle.isEmpty ? null : subtitle,
         route: '/leads?q=$q',
@@ -940,7 +949,7 @@ class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
         'Rs ${i.total}',
       ].where((s) => s.trim().isNotEmpty).toList();
       return _MasterSearchTileData(
-        icon: Icons.receipt_long,
+        icon: PhosphorIconsRegular.receipt,
         title: i.invoiceNo,
         subtitle: subtitleParts.join(' • '),
         route: '/invoices?q=$q',
@@ -967,12 +976,12 @@ class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
                         autofocus: true,
                         decoration: InputDecoration(
                           hintText: 'Search Members, Leads, Invoices…',
-                          prefixIcon: const Icon(Icons.search),
+                          prefixIcon: const Icon(PhosphorIconsRegular.magnifyingGlass),
                           suffixIcon: _q.isEmpty
                               ? IconButton(
                                   tooltip: 'Close',
                                   onPressed: () => Navigator.of(context).pop(),
-                                  icon: const Icon(Icons.close),
+                                  icon: const Icon(PhosphorIconsRegular.x),
                                 )
                               : IconButton(
                                   tooltip: 'Clear',
@@ -980,7 +989,7 @@ class _MasterSearchDialogState extends ConsumerState<_MasterSearchDialog> {
                                     _ctrl.clear();
                                     _setQuery('');
                                   },
-                                  icon: const Icon(Icons.clear),
+                                  icon: const Icon(PhosphorIconsRegular.x),
                                 ),
                         ),
                         onChanged: _setQuery,
@@ -1243,7 +1252,7 @@ class _DesktopFrame extends StatelessWidget {
     required this.initials,
     required this.pageTitle,
     required this.selectedRoute,
-    required this.destinations,
+    required this.entries,
     required this.onGo,
     required this.onLogout,
     required this.isDark,
@@ -1261,7 +1270,7 @@ class _DesktopFrame extends StatelessWidget {
   final String initials;
   final String pageTitle;
   final String selectedRoute;
-  final List<_NavDestination> destinations;
+  final List<SidebarEntry> entries;
   final void Function(String route) onGo;
   final VoidCallback onLogout;
   final bool isDark;
@@ -1275,368 +1284,44 @@ class _DesktopFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bg = theme.scaffoldBackgroundColor;
-
     final isDark = theme.brightness == Brightness.dark;
-    final accent = theme.colorScheme.primary;
 
+    // Flat and utilitarian: content sits flush against the sidebar, no
+    // decorative outer frame, no rounding, no glow — like gym equipment.
     return Container(
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.obsidian : bg,
-        gradient: isDark
-            ? null
-            : LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [bg, theme.colorScheme.surface],
-              ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
-            // 5 % white border on the outer frame — shape only, no accent colour.
-            border: Border.all(
-              color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant,
-              width: 0.8,
+      color: theme.scaffoldBackgroundColor,
+      child: CollapsibleSidebar(
+        entries: entries,
+        selectedRoute: selectedRoute,
+        onGo: onGo,
+        onLogout: onLogout,
+        tenantLabel: tenantLabel,
+        userName: userName,
+        email: email,
+        initials: initials,
+        content: Column(
+          children: [
+            _TopBar(
+              pageTitle: pageTitle,
+              isDark: isDark,
+              onToggleTheme: onToggleTheme,
+              onOpenNotifications: onOpenNotifications,
+              onOpenSearch: onOpenSearch,
+              onQuickAction: onQuickAction,
+              expiringCount: expiringAsync.valueOrNull?.length ?? 0,
             ),
-            boxShadow: isDark
-                ? [
-                    // Accent ambient glow stays in the shadow layer, not on the border.
-                    BoxShadow(color: accent.withAlpha(12), blurRadius: 70, spreadRadius: 0, offset: const Offset(0, 24)),
-                    BoxShadow(color: Colors.black.withAlpha(200), blurRadius: 44, spreadRadius: 0, offset: const Offset(0, 20)),
-                  ]
-                : [
-                    BoxShadow(color: Colors.black.withAlpha(28), blurRadius: 40, spreadRadius: 0, offset: const Offset(0, 18)),
-                  ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: Row(
-              children: [
-                _Sidebar(
-                  tenantLabel: tenantLabel,
-                  userName: userName,
-                  email: email,
-                  initials: initials,
-                  selectedRoute: selectedRoute,
-                  destinations: destinations,
-                  onGo: onGo,
-                  onLogout: onLogout,
-                ),
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? AppTheme.obsidian.withAlpha(200)
-                          : theme.colorScheme.surfaceContainerHighest.withAlpha(64),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(22),
-                        child: Container(
-                          color: theme.scaffoldBackgroundColor,
-                          child: Column(
-                            children: [
-                              _TopBar(
-                                isDark: isDark,
-                                onToggleTheme: onToggleTheme,
-                                onOpenNotifications: onOpenNotifications,
-                                onOpenSearch: onOpenSearch,
-                                onQuickAction: onQuickAction,
-                                expiringCount: expiringAsync.valueOrNull?.length ?? 0,
-                              ),
-                              Expanded(child: child),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+            Expanded(child: child),
+          ],
         ),
       ),
     );
   }
 }
 
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.tenantLabel,
-    required this.userName,
-    required this.email,
-    required this.initials,
-    required this.selectedRoute,
-    required this.destinations,
-    required this.onGo,
-    required this.onLogout,
-  });
-
-  final String tenantLabel;
-  final String userName;
-  final String email;
-  final String initials;
-  final String selectedRoute;
-  final List<_NavDestination> destinations;
-  final void Function(String route) onGo;
-  final VoidCallback onLogout;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = theme.colorScheme.primary;
-
-    return Container(
-      width: 260,
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.obsidian : theme.colorScheme.surfaceContainerHighest.withAlpha(77),
-        border: Border(
-          right: BorderSide(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
-        ),
-        gradient: isDark
-            ? const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0D0D10), AppTheme.obsidian],
-              )
-            : null,
-      ),
-      child: Column(
-        children: [
-          // Premium brand header
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: accent,
-                    // No border ring on the logo avatar — accent fill is enough.
-                    // Neon glow removed; the avatar colour is the brand signal.
-                  ),
-                  child: Icon(Icons.fitness_center, color: theme.colorScheme.onPrimary, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Bebas Neue lockup — "GYM MANAGEMENT" in brand tracking
-                      Text(
-                        'GYM MANAGEMENT',
-                        style: AppTypography.brandTitle(color: theme.colorScheme.onSurface),
-                      ),
-                      // Inter for tenant slug — data text, must stay readable at 11 px
-                      Text(
-                        tenantLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.uiLabel(
-                          color: isDark ? accent.withAlpha(160) : theme.colorScheme.onSurfaceVariant,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                for (final d in destinations)
-                  if (d.isHeader)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 14, 6, 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            // Nav group headers: Inter small-caps — legibility over brand.
-                            child: Text(
-                              d.label.toUpperCase(),
-                              style: AppTypography.uiLabel(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                fontSize: 11,
-                                weight: FontWeight.w700,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    _SidebarItem(
-                      icon: d.icon!,
-                      label: d.label,
-                      selected: selectedRoute == d.route,
-                      onTap: () => onGo(d.route!),
-                    ),
-              ],
-            ),
-          ),
-          // User profile footer
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.charcoalHigh.withAlpha(200) : theme.colorScheme.surfaceContainerHighest.withAlpha(64),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isDark ? AppTheme.borderHover : theme.colorScheme.outlineVariant, width: 0.8),
-                boxShadow: isDark ? [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 14, offset: const Offset(0, 6))] : [],
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: accent.withAlpha(isDark ? 40 : 30),
-                  foregroundColor: accent,
-                  child: Text(initials, style: const TextStyle(fontWeight: FontWeight.w800)),
-                ),
-                title: Text(userName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text(email, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: IconButton(
-                  tooltip: 'Logout',
-                  onPressed: onLogout,
-                  icon: Icon(Icons.logout, color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-            ),
-          ),
-          // ── Corporate branding link, pinned to the sidebar base ──────────
-          const Padding(
-            padding: EdgeInsets.only(bottom: 6),
-            child: PoweredByDeverosity(padding: EdgeInsets.symmetric(vertical: 8)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// Sidebar item is stateful so it can track hover internally.
-// No external wrapper needed — all hover logic lives here.
-class _SidebarItem extends StatefulWidget {
-  const _SidebarItem({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  State<_SidebarItem> createState() => _SidebarItemState();
-}
-
-class _SidebarItemState extends State<_SidebarItem> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = theme.colorScheme.primary;
-    // Only show hover state on non-selected items.
-    final hover = _hover && !widget.selected;
-    final iconColor = widget.selected ? accent : theme.colorScheme.onSurfaceVariant;
-    final textColor = widget.selected ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: InkWell(
-          onTap: widget.onTap,
-          borderRadius: BorderRadius.circular(AppTheme.sidebarItemRadius),
-          // Suppress the default ink splash/highlight so the tile reads as
-          // a flat solid fill, not a rippling Material surface.
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          hoverColor: Colors.transparent,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            decoration: isDark
-                // Dark mode: white 5% tile on hover — no glow, no scale.
-                ? AppTheme.sidebarItem(accent: accent, selected: widget.selected, hover: hover)
-                // Light mode: black 4% tile on hover — matches Linear / Notion.
-                : BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppTheme.sidebarItemRadius),
-                    color: widget.selected
-                        ? accent.withAlpha(22)
-                        : hover
-                            ? Colors.black.withAlpha(10) // ≈ black.withOpacity(0.04)
-                            : Colors.transparent,
-                    border: Border.all(
-                      color: widget.selected ? accent.withAlpha(80) : Colors.transparent,
-                      width: 0.8,
-                    ),
-                  ),
-            child: Row(
-              children: [
-                // Selected-state accent pill (left edge).
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  height: widget.selected ? 20 : 0,
-                  width: 4,
-                  decoration: BoxDecoration(
-                    color: accent,
-                    borderRadius: BorderRadius.circular(999),
-                    boxShadow: widget.selected && isDark
-                        ? AppTheme.neonGlow(accent, blur: 8)
-                        : const [],
-                  ),
-                ),
-                SizedBox(width: widget.selected ? 10 : 14),
-                Icon(widget.icon, color: iconColor, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.label,
-                    style: AppTypography.emphasisLabel(color: textColor).copyWith(
-                      fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w500,
-                      fontSize: 13.5,
-                    ),
-                  ),
-                ),
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 160),
-                  opacity: widget.selected ? 1.0 : 0.0,
-                  child: Icon(Icons.chevron_right, color: iconColor, size: 18),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
+    required this.pageTitle,
     required this.isDark,
     required this.onToggleTheme,
     required this.onOpenNotifications,
@@ -1645,6 +1330,7 @@ class _TopBar extends StatelessWidget {
     required this.expiringCount,
   });
 
+  final String pageTitle;
   final bool isDark;
   final VoidCallback onToggleTheme;
   final VoidCallback onOpenNotifications;
@@ -1658,43 +1344,45 @@ class _TopBar extends StatelessWidget {
     final isDark2 = theme.brightness == Brightness.dark;
     final accent = theme.colorScheme.primary;
 
-    return ClipRect(
-      child: BackdropFilter(
-        filter: isDark2 ? ImageFilter.blur(sigmaX: 12, sigmaY: 12) : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-        child: Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: isDark2
-                ? AppTheme.charcoal.withAlpha(220)
-                : theme.colorScheme.surface.withAlpha(220),
-            border: Border(
-              bottom: BorderSide(
-                color: isDark2 ? AppTheme.strokeSubtle : theme.colorScheme.outlineVariant,
-              ),
-            ),
-          ),
-          child: Row(
+    // Flat top bar — no blur/glass, matches the utilitarian chrome elsewhere.
+    return Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: theme.scaffoldBackgroundColor,
+          border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
+        ),
+        child: Row(
             children: [
-              const Spacer(),
+              const SizedBox(width: 6),
+              // Contextual page title — the rail now owns branding, so the top
+              // bar just names the current screen (Oswald display face).
+              Expanded(
+                child: Text(
+                  pageTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface, fontSize: 18),
+                ),
+              ),
               IconButton(
                 tooltip: 'Refresh',
                 onPressed: () {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshed')));
                 },
-                icon: Icon(Icons.refresh, color: theme.colorScheme.onSurfaceVariant),
+                icon: Icon(PhosphorIconsRegular.arrowClockwise, color: theme.colorScheme.onSurfaceVariant),
               ),
               IconButton(
                 tooltip: isDark ? 'Light theme' : 'Dark theme',
                 onPressed: onToggleTheme,
                 icon: Icon(
-                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                  isDark ? PhosphorIconsRegular.sun : PhosphorIconsRegular.moon,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               _IconBadgeButton(
                 tooltip: 'Notifications',
-                icon: Icon(Icons.notifications_none, color: theme.colorScheme.onSurfaceVariant),
+                icon: Icon(PhosphorIconsRegular.bell, color: theme.colorScheme.onSurfaceVariant),
                 badgeCount: expiringCount,
                 onPressed: onOpenNotifications,
               ),
@@ -1706,7 +1394,7 @@ class _TopBar extends StatelessWidget {
                   onTap: onOpenSearch,
                   decoration: InputDecoration(
                     hintText: 'Search members, leads…',
-                    prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, color: theme.colorScheme.onSurfaceVariant, size: 20),
                     filled: true,
                     fillColor: isDark2 ? AppTheme.charcoalHigh.withAlpha(160) : null,
                     border: OutlineInputBorder(
@@ -1728,15 +1416,13 @@ class _TopBar extends StatelessWidget {
               _QuickActionsButton(onQuickAction: onQuickAction),
             ],
           ),
-        ),
-      ),
-    );
+      );
   }
 }
 
 /// Global "+" Quick Actions popover — opens the four primary create modals from
-/// anywhere in the app, matching the app design system (rounded 12px, line
-/// icons, elegant separation).
+/// anywhere in the app. The trigger itself is a solid filled ember button, the
+/// one deliberate accent fill in the top bar.
 class _QuickActionsButton extends StatelessWidget {
   const _QuickActionsButton({required this.onQuickAction});
 
@@ -1747,6 +1433,8 @@ class _QuickActionsButton extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = theme.colorScheme.primary;
+    final isAccentDark = ThemeData.estimateBrightnessForColor(accent) == Brightness.dark;
+    final onAccent = isAccentDark ? Colors.white : AppTheme.obsidian;
 
     PopupMenuItem<QuickAction> row(
       QuickAction value,
@@ -1765,7 +1453,7 @@ class _QuickActionsButton extends StatelessWidget {
               width: 34,
               decoration: BoxDecoration(
                 color: tint.withAlpha(28),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: AppRadius.smallAll,
               ),
               child: Icon(icon, size: 18, color: tint),
             ),
@@ -1794,11 +1482,11 @@ class _QuickActionsButton extends StatelessWidget {
       position: PopupMenuPosition.under,
       offset: const Offset(0, 8),
       elevation: 12,
-      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      color: isDark ? AppTheme.charcoalHigh : Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppRadius.smallAll,
         side: BorderSide(
-          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          color: isDark ? AppTheme.borderHover : AppTheme.line,
           width: 0.8,
         ),
       ),
@@ -1812,26 +1500,28 @@ class _QuickActionsButton extends StatelessWidget {
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8),
           ),
         ),
-        row(QuickAction.addMember, Icons.person_add_alt_1_outlined, 'Add Member',
-            'Register a new member', accent),
-        row(QuickAction.addLead, Icons.person_search_outlined, 'Add Lead',
-            'Capture a CRM enquiry', const Color(0xFF2563EB)),
+        // Category colours match the app-wide system: membership (spotter),
+        // operational (iron), financial (ember) — same meaning everywhere.
+        row(QuickAction.addMember, PhosphorIconsRegular.userPlus, 'Add Member',
+            'Register a new member', StatCategory.membership.color),
+        row(QuickAction.addLead, PhosphorIconsRegular.userList, 'Add Lead',
+            'Capture a CRM enquiry', StatCategory.operational.color),
         const PopupMenuDivider(),
-        row(QuickAction.quickInvoice, Icons.receipt_long_outlined, 'Quick Invoice',
-            'Auto-generate an invoice', const Color(0xFF10B981)),
-        row(QuickAction.recordExpense, Icons.account_balance_wallet_outlined, 'Record Expense',
-            'Log a business expense', const Color(0xFFF59E0B)),
+        row(QuickAction.quickInvoice, PhosphorIconsRegular.receipt, 'Quick Invoice',
+            'Auto-generate an invoice', StatCategory.financial.color),
+        row(QuickAction.recordExpense, PhosphorIconsRegular.coins, 'Record Expense',
+            'Log a business expense', StatCategory.financial.color),
       ],
+      // The one deliberate solid-ember fill in the top bar.
       child: Container(
         height: 38,
         width: 38,
         margin: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
-          color: accent.withAlpha(isDark ? 36 : 24),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: accent.withAlpha(90)),
+          color: accent,
+          borderRadius: AppRadius.smallAll,
         ),
-        child: Icon(Icons.add, size: 20, color: accent),
+        child: Icon(PhosphorIconsRegular.plus, size: 20, color: onAccent),
       ),
     );
   }

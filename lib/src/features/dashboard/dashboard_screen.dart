@@ -1,14 +1,15 @@
 ﻿import 'dart:async';
-import 'dart:math';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart'; // AppTheme + AppTypography
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
+import '../../core/bento_grid.dart';
+import '../../core/gym_floor_components.dart';
 import '../../core/providers.dart';
 import '../../core/whatsapp.dart';
 import '../../core/in_app_pdf.dart';
@@ -287,147 +288,113 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
     final canSeeRevenue = roles.contains('owner') || roles.contains('admin') || roles.contains('super_admin');
     final activityCollapsed = ref.watch(dashboardActivityPanelCollapsedProvider);
 
-    Widget mainList({
-      required EdgeInsets padding,
-      required bool includeInlineActivity,
-    }) {
-      return ListView(
-        padding: padding,
-        children: [
-          _HeroBanner(
-            tenantSlug: widget.tenantSlug,
-            onRefresh: widget.onRefresh,
-            onExportPdf: () => _openDashboardPdfActions(context),
-            canSeeRevenue: canSeeRevenue,
+    // ── KPI tiles ──────────────────────────────────────────────────────────
+    List<BentoItem> metricItems() {
+      return widget.summaryAsync.when(
+        data: (s) {
+          final frozen = s.frozenMembers;
+          return <BentoItem>[
+            if (canSeeRevenue)
+              BentoItem(
+                span: BentoSpan.metric,
+                child: CategoryStatCard(
+                  category: StatCategory.financial,
+                  label: 'Total Revenue',
+                  value: widget.number.format(s.revenueTotal),
+                  footnote: 'ALL-TIME PAID',
+                  onTap: () => context.go('/invoices'),
+                ),
+              ),
+            if (canSeeRevenue)
+              BentoItem(
+                span: BentoSpan.metric,
+                child: CategoryStatCard(
+                  category: StatCategory.financial,
+                  label: 'Revenue (30d)',
+                  value: widget.number.format(s.revenueLast30Days),
+                  footnote: 'LAST 30 DAYS',
+                  onTap: () => context.go('/invoices'),
+                ),
+              ),
+            BentoItem(
+              span: BentoSpan.metric,
+              child: CategoryStatCard(
+                category: StatCategory.membership,
+                label: 'Active Members',
+                value: widget.number.format(s.membershipActiveMembers),
+                footnote: 'MEMBERSHIP ACTIVE',
+                onTap: () => context.go('/members'),
+              ),
+            ),
+            BentoItem(
+              span: BentoSpan.metric,
+              child: CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Frozen Members',
+                value: frozen == null ? '—' : widget.number.format(frozen),
+                footnote: frozen == null ? 'RESTART BACKEND TO ENABLE' : 'ACCESS BLOCKED',
+                onTap: () => context.go('/members'),
+              ),
+            ),
+            if (canSeeRevenue)
+              BentoItem(
+                span: BentoSpan.metric,
+                child: CategoryStatCard(
+                  category: StatCategory.financial,
+                  label: 'Unpaid Dues',
+                  value: widget.number.format(s.unpaidAmount),
+                  footnote: '${widget.number.format(s.unpaidInvoices)} INVOICES',
+                  onTap: () => context.go('/invoices'),
+                ),
+              ),
+            BentoItem(
+              span: BentoSpan.metric,
+              child: CategoryStatCard(
+                category: StatCategory.operational,
+                label: "Today's Check-ins",
+                value: widget.number.format(s.todayCheckins),
+                footnote: 'ATTENDANCE TODAY',
+                onTap: () => context.go('/attendance'),
+              ),
+            ),
+            BentoItem(
+              span: BentoSpan.metric,
+              child: CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Plans',
+                value: widget.number.format(s.plansTotal),
+                footnote: 'MEMBERSHIP PLANS',
+                onTap: () => context.go('/plans'),
+              ),
+            ),
+          ];
+        },
+        loading: () => const [
+          BentoItem(
+            span: BentoSpan.wide,
+            child: Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator())),
           ),
-          const SizedBox(height: 16),
-          widget.summaryAsync.when(
-            data: (s) {
-              final frozen = s.frozenMembers;
-              return LayoutBuilder(
-                builder: (context, box) {
-                  // ── Strict 3-column layout ────────────────────────────────
-                  // Column count is fixed at 3 across all drawer states so the
-                  // KPI grid always shares vertical alignment edges with the
-                  // 3-column Quick Actions grid below.
-                  // Card WIDTH (not column count) changes when the drawer opens
-                  // or closes — the TweenAnimationBuilder handles that smoothly.
-                  // Desktop (content area ≥ 480) keeps the premium 3-up grid,
-                  // unchanged. Narrow phones drop straight to a single
-                  // full-width column so card text ("Total Revenue") fits on one
-                  // line instead of wrapping mid-word in a cramped 2-col squeeze.
-                  final int cols = box.maxWidth >= 480 ? 3 : 1;
-
-                  const double gap = 12;
-
-                  // Exact card width: fills the row wall-to-wall.
-                  // Same formula used by _QuickActionsSection → guarantees
-                  // the right edge of row N aligns with the banner's right edge.
-                  final double targetW =
-                      (box.maxWidth - (cols - 1) * gap) / cols;
-
-                  // AnimatedSize smooths the height change when the row count
-                  // changes (e.g. 2 rows of 4 → 2 rows of 3 when drawer opens).
-                  // TweenAnimationBuilder interpolates each card's width at
-                  // 60 fps so the expansion/contraction is a true size morph,
-                  // not an instant snap or a cross-fade.
-                  return AnimatedSize(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeInOut,
-                    alignment: Alignment.topCenter,
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(end: targetW),
-                      duration: const Duration(milliseconds: 250),
-                      curve: Curves.easeInOut,
-                      builder: (context, animW, _) {
-                        return Wrap(
-                          spacing: gap,
-                          runSpacing: gap,
-                          children: [
-                            if (canSeeRevenue)
-                              _MetricCard(
-                                width: animW,
-                                title: 'Total Revenue',
-                                value: widget.number.format(s.revenueTotal),
-                                subtitle: 'All-time paid',
-                                icon: Icons.payments,
-                                onTap: () => context.go('/invoices'),
-                              ),
-                            if (canSeeRevenue)
-                              _MetricCard(
-                                width: animW,
-                                title: 'Revenue (30d)',
-                                value: widget.number.format(s.revenueLast30Days),
-                                subtitle: 'Last 30 days',
-                                icon: Icons.show_chart,
-                                onTap: () => context.go('/invoices'),
-                              ),
-                            _MetricCard(
-                              width: animW,
-                              title: 'Active Members',
-                              value: widget.number.format(s.membershipActiveMembers),
-                              subtitle: 'Membership active',
-                              icon: Icons.people,
-                              onTap: () => context.go('/members'),
-                            ),
-                            _MetricCard(
-                              width: animW,
-                              title: 'Frozen Members',
-                              value: frozen == null ? '—' : widget.number.format(frozen),
-                              subtitle: frozen == null ? 'Restart backend to enable' : 'Access blocked',
-                              icon: Icons.ac_unit_outlined,
-                              onTap: () => context.go('/members'),
-                            ),
-                            if (canSeeRevenue)
-                              _MetricCard(
-                                width: animW,
-                                title: 'Unpaid Dues',
-                                value: widget.number.format(s.unpaidAmount),
-                                subtitle: '${widget.number.format(s.unpaidInvoices)} invoices',
-                                icon: Icons.receipt_long,
-                                onTap: () => context.go('/invoices'),
-                              ),
-                            _MetricCard(
-                              width: animW,
-                              title: "Today's Check-ins",
-                              value: widget.number.format(s.todayCheckins),
-                              subtitle: 'Attendance today',
-                              icon: Icons.how_to_reg,
-                              onTap: () => context.go('/attendance'),
-                            ),
-                            _MetricCard(
-                              width: animW,
-                              title: 'Plans',
-                              value: widget.number.format(s.plansTotal),
-                              subtitle: 'Membership plans',
-                              icon: Icons.card_membership,
-                              onTap: () => context.go('/plans'),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  );
-                },
-              );
-            },
-            error: (e, stackTrace) {
-              String message = e.toString();
-              if (e is ApiException) {
-                if (e.statusCode == 404) {
-                  message = 'Backend update not applied. Stop the server and start it again.';
-                } else if (e.statusCode == 401) {
-                  message = 'Session expired. Please log in again.';
-                } else {
-                  message = e.message;
-                }
-              }
-              return Card(
+        ],
+        error: (e, stackTrace) {
+          String message = e.toString();
+          if (e is ApiException) {
+            if (e.statusCode == 404) {
+              message = 'Backend update not applied. Stop the server and start it again.';
+            } else if (e.statusCode == 401) {
+              message = 'Session expired. Please log in again.';
+            } else {
+              message = e.message;
+            }
+          }
+          return [
+            BentoItem(
+              span: BentoSpan.wide,
+              child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      const Icon(Icons.warning_amber),
+                      const Icon(PhosphorIconsRegular.warning),
                       const SizedBox(width: 10),
                       Expanded(child: Text(message)),
                       const SizedBox(width: 10),
@@ -438,71 +405,87 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                     ],
                   ),
                 ),
-              );
-            },
-            loading: () => const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          _QuickActionsSection(canSeeRevenue: canSeeRevenue),
-          const SizedBox(height: 18),
-          const _AtRiskMembersCard(),
-          if (includeInlineActivity) ...[
-            const SizedBox(height: 18),
-            const _RecentActivityFeedCard(),
-          ],
-          const SizedBox(height: 18),
-          widget.summaryAsync.when(
-            data: (s) {
-              final active = s.membershipActiveMembers;
-              final expired = s.membershipExpiredMembers;
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  final wide = constraints.maxWidth >= 1100;
-                  if (!canSeeRevenue) {
-                    return _ActiveInactiveCard(active: active, expired: expired);
-                  }
-                  if (wide) {
-                    final half = (constraints.maxWidth - 12) / 2;
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(width: half, child: _Revenue7dCard(points: s.revenue7d)),
-                        const SizedBox(width: 12),
-                        SizedBox(width: half, child: _ActiveInactiveCard(active: active, expired: expired)),
-                      ],
-                    );
-                  }
-                  return Column(
-                    children: [
-                      _Revenue7dCard(points: s.revenue7d),
-                      const SizedBox(height: 12),
-                      _ActiveInactiveCard(active: active, expired: expired),
-                    ],
-                  );
-                },
-              );
-            },
-            error: (e, stackTrace) => const SizedBox.shrink(),
-            loading: () => const SizedBox.shrink(),
-          ),
-          const SizedBox(height: 18),
-          widget.summaryAsync.when(
-            data: (s) => _InsightsCard(summary: s, canSeeRevenue: canSeeRevenue, number: widget.number),
-            error: (e, _) => const SizedBox.shrink(),
-            loading: () => const SizedBox.shrink(),
-          ),
-          widget.summaryAsync.when(
-            data: (s) => _ExpiringMembersCard(
-              members: s.expiringMembers,
-              onOpenMembers: () => context.go('/members'),
-            ),
-            error: (e, _) => const SizedBox.shrink(),
-            loading: () => const SizedBox.shrink(),
+          ];
+        },
+      );
+    }
+
+    // ── Charts row: revenue (large) + active/expired donut (small) ───────────
+    List<BentoItem> chartItems() {
+      return widget.summaryAsync.maybeWhen(
+        data: (s) {
+          final active = s.membershipActiveMembers;
+          final expired = s.membershipExpiredMembers;
+          if (!canSeeRevenue) {
+            return [BentoItem(span: BentoSpan.wide, lift: true, child: _ActiveInactiveCard(active: active, expired: expired))];
+          }
+          return [
+            BentoItem(span: BentoSpan.chartLarge, lift: true, child: _Revenue7dCard(points: s.revenue7d)),
+            BentoItem(span: BentoSpan.chartSmall, lift: true, child: _ActiveInactiveCard(active: active, expired: expired)),
+          ];
+        },
+        orElse: () => const <BentoItem>[],
+      );
+    }
+
+    List<BentoItem> insightItems() {
+      return widget.summaryAsync.maybeWhen(
+        data: (s) => [
+          BentoItem(
+            span: BentoSpan.wide,
+            lift: true,
+            child: _InsightsCard(summary: s, canSeeRevenue: canSeeRevenue, number: widget.number),
           ),
         ],
+        orElse: () => const <BentoItem>[],
+      );
+    }
+
+    List<BentoItem> expiringItems() {
+      return widget.summaryAsync.maybeWhen(
+        data: (s) {
+          final hasExpiring = s.expiringMembers.any((m) => m.daysLeft >= 0 && m.daysLeft <= 7);
+          if (!hasExpiring) return const <BentoItem>[];
+          return [
+            BentoItem(
+              span: BentoSpan.wide,
+              child: _ExpiringMembersCard(members: s.expiringMembers, onOpenMembers: () => context.go('/members')),
+            ),
+          ];
+        },
+        orElse: () => const <BentoItem>[],
+      );
+    }
+
+    // ── Bento composition: independently-floating tiles on one grid ──────────
+    Widget mainList({
+      required EdgeInsets padding,
+      required bool includeInlineActivity,
+    }) {
+      final items = <BentoItem>[
+        BentoItem(
+          span: BentoSpan.hero,
+          child: _HeroBanner(
+            tenantSlug: widget.tenantSlug,
+            onRefresh: widget.onRefresh,
+            onExportPdf: () => _openDashboardPdfActions(context),
+            canSeeRevenue: canSeeRevenue,
+          ),
+        ),
+        ...metricItems(),
+        BentoItem(span: BentoSpan.wide, child: _QuickActionsSection(canSeeRevenue: canSeeRevenue)),
+        ...chartItems(),
+        BentoItem(span: BentoSpan.list, lift: true, child: const _AtRiskMembersCard()),
+        if (includeInlineActivity)
+          BentoItem(span: BentoSpan.list, lift: true, child: const _RecentActivityFeedCard()),
+        ...insightItems(),
+        ...expiringItems(),
+      ];
+      return SingleChildScrollView(
+        padding: padding,
+        child: BentoGrid(items: items),
       );
     }
 
@@ -554,7 +537,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                                 headerTrailing: IconButton(
                                   tooltip: 'Hide',
                                   onPressed: () => ref.read(dashboardActivityPanelCollapsedProvider.notifier).state = true,
-                                  icon: const Icon(Icons.keyboard_double_arrow_right),
+                                  icon: const Icon(PhosphorIconsRegular.caretDoubleRight),
                                 ),
                               ),
                             ),
@@ -600,7 +583,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                 Navigator.of(context).pop();
                 await _runDashboardPdf(context, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -608,7 +591,7 @@ class _DashboardScaffoldState extends ConsumerState<_DashboardScaffold> {
                 Navigator.of(context).pop();
                 await _runDashboardPdf(context, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -706,12 +689,12 @@ class _QuickActionsSection extends StatelessWidget {
                     spacing: gap,
                     runSpacing: gap,
                     children: [
-                      card('Add Member', 'New registration', Icons.person_add_alt_1, () => context.go('/members')),
-                      card('Add Plan', 'Pricing & duration', Icons.add_card, () => context.go('/plans')),
-                      card('Check-in', 'Search member & check-in', Icons.qr_code_scanner, () => context.go('/attendance')),
-                      card('Add Lead', 'New enquiry', Icons.person_search, () => context.go('/leads')),
-                      if (canSeeRevenue) card('Invoices', 'Generate & track', Icons.receipt_long, () => context.go('/invoices')),
-                      if (canSeeRevenue) card('Record Expense', 'Track costs', Icons.account_balance_wallet, () => context.go('/expenses')),
+                      card('Add Member', 'New registration', PhosphorIconsRegular.userPlus, () => context.go('/members')),
+                      card('Add Plan', 'Pricing & duration', PhosphorIconsRegular.plusCircle, () => context.go('/plans')),
+                      card('Check-in', 'Search member & check-in', PhosphorIconsRegular.qrCode, () => context.go('/attendance')),
+                      card('Add Lead', 'New enquiry', PhosphorIconsRegular.userList, () => context.go('/leads')),
+                      if (canSeeRevenue) card('Invoices', 'Generate & track', PhosphorIconsRegular.receipt, () => context.go('/invoices')),
+                      if (canSeeRevenue) card('Record Expense', 'Track costs', PhosphorIconsRegular.wallet, () => context.go('/expenses')),
                     ],
                   );
                 },
@@ -857,7 +840,7 @@ class _AtRiskMembersCard extends ConsumerWidget {
           Container(
             height: 40, width: 40,
             decoration: AppTheme.iconBox(color: accent),
-            child: Center(child: Icon(Icons.warning_amber_rounded, color: accent, size: 20)),
+            child: Center(child: Icon(PhosphorIconsRegular.warning, color: accent, size: 20)),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -875,7 +858,7 @@ class _AtRiskMembersCard extends ConsumerWidget {
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => ref.invalidate(atRiskMembersProvider),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(PhosphorIconsRegular.arrowClockwise),
           ),
         ],
       );
@@ -945,7 +928,7 @@ class _AtRiskMembersCard extends ConsumerWidget {
                             trailing: IconButton(
                               tooltip: phoneOk ? 'Send WhatsApp' : 'Phone missing',
                               onPressed: phoneOk ? () => openWhatsApp(phone: m.phone, message: msg) : null,
-                              icon: Icon(Icons.chat_bubble_outline, color: phoneOk ? AppTheme.emerald : theme.colorScheme.onSurfaceVariant),
+                              icon: Icon(PhosphorIconsRegular.chatCircle, color: phoneOk ? AppTheme.emerald : theme.colorScheme.onSurfaceVariant),
                             ),
                             onTap: () => context.go('/members?q=${Uri.encodeComponent(m.memberCode)}'),
                           ),
@@ -1020,7 +1003,7 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
               color: primary.withValues(alpha: 0.12),
               border: Border.all(color: primary.withValues(alpha: 0.28)),
             ),
-            child: Icon(Icons.bolt, color: primary, size: dense ? 18 : 20),
+            child: Icon(PhosphorIconsRegular.lightning, color: primary, size: dense ? 18 : 20),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1038,7 +1021,7 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => ref.invalidate(dashboardActivityProvider),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(PhosphorIconsRegular.arrowClockwise),
           ),
           ...(headerTrailing == null ? const <Widget>[] : <Widget>[headerTrailing!]),
         ],
@@ -1053,7 +1036,7 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.history_toggle_off, size: 42, color: theme.colorScheme.onSurfaceVariant),
+                Icon(PhosphorIconsRegular.clockCountdown, size: 42, color: theme.colorScheme.onSurfaceVariant),
                 const SizedBox(height: 10),
                 Text('No activity yet', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
@@ -1081,10 +1064,10 @@ class _RecentActivityFeedCardBase extends ConsumerWidget {
               final isPayment = a.type == 'payment';
               final isAlert = a.type == 'alert';
               final icon = isPayment
-                  ? Icons.payments_outlined
+                  ? PhosphorIconsRegular.wallet
                   : isAlert
-                      ? Icons.warning_amber_outlined
-                      : Icons.how_to_reg;
+                      ? PhosphorIconsRegular.warning
+                      : PhosphorIconsRegular.userCheck;
               final chipColor = isPayment
                   ? theme.colorScheme.tertiary
                   : isAlert
@@ -1222,7 +1205,7 @@ class _ActivityVerticalTab extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.notifications_active_outlined, size: 18, color: glow),
+                    Icon(PhosphorIconsRegular.bellRinging, size: 18, color: glow),
                     const SizedBox(width: 8),
                     Text(
                       'Activity',
@@ -1233,7 +1216,7 @@ class _ActivityVerticalTab extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Icon(Icons.keyboard_double_arrow_left, size: 18, color: glow),
+                    Icon(PhosphorIconsRegular.caretDoubleLeft, size: 18, color: glow),
                   ],
                 ),
               ),
@@ -1260,7 +1243,6 @@ class _HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final gymName = tenantSlug
         .trim()
         .replaceAll(RegExp(r'[_-]+'), ' ')
@@ -1271,462 +1253,41 @@ class _HeroBanner extends StatelessWidget {
         .trim();
     final hour = DateTime.now().hour;
     final greeting = hour < 12
-        ? 'Good morning'
+        ? 'GOOD MORNING'
         : hour < 17
-            ? 'Good afternoon'
-            : 'Good evening';
-    final today = DateFormat('EEE, MMM d').format(DateTime.now());
-    final gold = theme.colorScheme.primary;
-    final isDark = theme.brightness == Brightness.dark;
+            ? 'GOOD AFTERNOON'
+            : 'GOOD EVENING';
+    final today = DateFormat('EEE, MMM d').format(DateTime.now()).toUpperCase();
 
-    // Theme-aware banner tokens. Light mode abandons the dark charcoal gradient
-    // for a clean white→cream surface so it no longer clashes with the canvas.
-    final headingColor = isDark ? theme.colorScheme.onSurface : const Color(0xFF1E1E1E);
-    final greetingColor = isDark ? gold.withAlpha(200) : const Color(0xFF475569);
-
-    final BoxDecoration bannerDecoration = isDark
-        ? BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.large),
-            border: Border.all(color: AppTheme.borderSubtle, width: 0.8),
-            gradient: AppTheme.heroBannerGradient(primary: gold),
-            boxShadow: [
-              // Ambient accent glow lives OUTSIDE the card, not on the border.
-              BoxShadow(color: gold.withAlpha(16), blurRadius: 56, spreadRadius: 0, offset: const Offset(0, 28)),
-              BoxShadow(color: Colors.black.withAlpha(110), blurRadius: 30, offset: const Offset(0, 14)),
-            ],
-          )
-        : BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.large),
-            // Razor-thin structural border + soft elevation per spec.
-            border: Border.all(color: Colors.black.withValues(alpha: 0.06), width: 1),
-            // Ultra-soft slate-white → muted premium cream.
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFFAFBFC), Color(0xFFFAF7F0)],
-            ),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
-            ],
-          );
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 200),
-      child: Container(
-        decoration: bannerDecoration,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.large),
-          child: Stack(
-            children: [
-              // Single decorative accent bloom — top-left corner only.
-              // Very faint in light mode (premium cream tint, no contrast shock).
-              Positioned(
-                left: -60,
-                top: -60,
-                child: Container(
-                  height: 260,
-                  width: 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [gold.withAlpha(isDark ? 32 : 12), Colors.transparent],
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Builder(
-                  builder: (context) {
-                    final narrow = MediaQuery.sizeOf(context).width < 600;
-
-                    final heroActionsRow = Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Refresh',
-                          onPressed: onRefresh,
-                          icon: Icon(Icons.refresh, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
-                        ),
-                        IconButton(
-                          tooltip: 'PDF',
-                          onPressed: onExportPdf,
-                          icon: Icon(Icons.picture_as_pdf_outlined, color: isDark ? gold.withAlpha(200) : theme.colorScheme.onSurfaceVariant),
-                        ),
-                      ],
-                    );
-
-                    final dumbbell = isDark
-                        ? Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              color: AppTheme.charcoal.withAlpha(180),
-                              border: Border.all(color: gold.withAlpha(80)),
-                              boxShadow: AppTheme.neonGlow(gold, blur: 22),
-                            ),
-                            child: Icon(Icons.fitness_center_rounded, size: 44, color: gold),
-                          )
-                        : Container(
-                            height: 72,
-                            width: 72,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.grey.shade100,
-                              border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1),
-                            ),
-                            child: Icon(Icons.fitness_center_rounded, size: 34, color: Colors.grey.shade400),
-                          );
-
-                    final content = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$greeting  $today',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: greetingColor,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          gymName.isEmpty ? 'GYM DASHBOARD' : gymName.toUpperCase(),
-                          style: theme.textTheme.headlineSmall?.copyWith(color: headingColor),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          tenantSlug.trim().isEmpty
-                              ? 'Performance overview'
-                              : 'Gym: $tenantSlug  •  Performance overview',
-                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 14),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            const _TagChip(label: 'Members'),
-                            const _TagChip(label: 'Attendance'),
-                            if (canSeeRevenue) const _TagChip(label: 'Billing'),
-                            const _TagChip(label: 'CRM'),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        LayoutBuilder(
-                          builder: (context, c) {
-                            final heroActions = <Widget>[
-                              FilledButton.icon(
-                                onPressed: () => context.go('/members'),
-                                icon: const Icon(Icons.person_add_alt_1_outlined),
-                                label: const Text('Add member', maxLines: 1, overflow: TextOverflow.ellipsis),
-                              ),
-                              _HeroBorderButton(label: 'Check-in', icon: Icons.qr_code_scanner, accent: gold, onTap: () => context.go('/attendance')),
-                              if (canSeeRevenue)
-                                _HeroBorderButton(label: 'Invoices', icon: Icons.receipt_long_outlined, accent: gold, onTap: () => context.go('/invoices')),
-                              _HeroBorderButton(label: 'Leads', icon: Icons.person_search_outlined, accent: theme.colorScheme.tertiary, onTap: () => context.go('/leads')),
-                            ];
-                            // Mobile: clean 2-up grid (each button half-width).
-                            if (c.maxWidth < 600) {
-                              final half = (c.maxWidth - 8) / 2;
-                              return Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  for (final a in heroActions) SizedBox(width: half, child: a),
-                                ],
-                              );
-                            }
-                            return Wrap(spacing: 8, runSpacing: 8, children: heroActions);
-                          },
-                        ),
-                      ],
-                    );
-
-                    // Mobile: actions pinned top-right, content full-width, no
-                    // decorative dumbbell (so the 2×2 button grid has real room).
-                    if (narrow) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Align(alignment: Alignment.centerRight, child: heroActionsRow),
-                          content,
-                        ],
-                      );
-                    }
-
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: content),
-                        const SizedBox(width: 12),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: [
-                            heroActionsRow,
-                            const SizedBox(height: 10),
-                            dumbbell,
-                          ],
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ],
+    return BoardHeroPanel(
+      greetingPrefix: greeting,
+      greetingEmphasis: today,
+      title: gymName.isEmpty ? 'DASHBOARD' : gymName.toUpperCase(),
+      subtitle: tenantSlug.trim().isEmpty ? 'Performance overview' : 'Gym: $tenantSlug  ·  Performance overview',
+      tags: ['Members', 'Attendance', if (canSeeRevenue) 'Billing', 'CRM'],
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: onRefresh,
+            icon: const Icon(PhosphorIconsRegular.arrowClockwise, color: Colors.white70),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TagChip extends StatelessWidget {
-  const _TagChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        // Light: soft grey-100 pill; Dark: elevated charcoal.
-        color: isDark ? AppTheme.charcoalHigh : Colors.grey.shade100,
-        border: Border.all(
-          color: isDark ? AppTheme.borderHover : Colors.black.withValues(alpha: 0.06),
-          width: 0.8,
-        ),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: isDark ? theme.colorScheme.onSurface.withAlpha(200) : const Color(0xFF374151),
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroBorderButton extends StatefulWidget {
-  const _HeroBorderButton({required this.label, required this.icon, required this.accent, required this.onTap});
-  final String label;
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-  @override
-  State<_HeroBorderButton> createState() => _HeroBorderButtonState();
-}
-
-class _HeroBorderButtonState extends State<_HeroBorderButton> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: _hover ? widget.accent.withAlpha(22) : Colors.transparent,
-          border: Border.all(color: widget.accent.withAlpha(_hover ? 180 : 100), width: _hover ? 1.2 : 1.0),
-          boxShadow: _hover ? AppTheme.neonGlow(widget.accent, blur: 14) : const [],
-        ),
-        child: InkWell(
-          onTap: widget.onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(widget.icon, size: 18, color: widget.accent),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    widget.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelLarge?.copyWith(color: widget.accent, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
+          IconButton(
+            tooltip: 'PDF',
+            onPressed: onExportPdf,
+            icon: const Icon(PhosphorIconsRegular.filePdf, color: Colors.white70),
           ),
-        ),
+        ],
       ),
+      actions: [
+        BoardPrimaryButton(label: 'Add Member', icon: PhosphorIconsRegular.userPlus, onTap: () => context.go('/members')),
+        BoardDashedButton(label: 'Check-in', icon: PhosphorIconsRegular.qrCode, onTap: () => context.go('/attendance')),
+        if (canSeeRevenue)
+          BoardDashedButton(label: 'Invoices', icon: PhosphorIconsRegular.receipt, onTap: () => context.go('/invoices')),
+        BoardDashedButton(label: 'Leads', icon: PhosphorIconsRegular.userList, onTap: () => context.go('/leads')),
+      ],
     );
-  }
-}
-
-class _MetricCard extends StatefulWidget {
-  const _MetricCard({
-    required this.width,
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final double width;
-  final String title;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  State<_MetricCard> createState() => _MetricCardState();
-}
-
-class _MetricCardState extends State<_MetricCard> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hover = _hover;
-    final radius = AppRadius.largeAll;
-    final accent = theme.colorScheme.primary;
-    final accentLight = Color.lerp(accent, Colors.white, 0.40) ?? accent;
-    final isDark = theme.brightness == Brightness.dark;
-    final blurSigma = hover ? 30.0 : 24.0;
-
-    return SizedBox(
-      width: widget.width,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-          scale: hover ? 1.018 : 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
-            transform: Matrix4.translationValues(0, hover ? -6 : 0, 0),
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              boxShadow: hover
-                  ? [
-                      BoxShadow(color: accent.withAlpha(62), blurRadius: 40, offset: const Offset(0, 20)),
-                      BoxShadow(color: Colors.black.withAlpha(isDark ? 110 : 36), blurRadius: 28, offset: const Offset(0, 14)),
-                    ]
-                  : [BoxShadow(color: Colors.black.withAlpha(isDark ? 75 : 22), blurRadius: 20, offset: const Offset(0, 10))],
-            ),
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: widget.onTap,
-                    borderRadius: radius,
-                    child: CustomPaint(
-                      // At rest: barely-visible white shimmer — just shape, no colour.
-                      // On hover: thin accent stroke signals interactivity.
-                      foregroundPainter: _GradientStrokePainter(
-                        radius: radius,
-                        width: hover ? 1.1 : 0.8,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: hover
-                              ? [accent.withAlpha(100), accentLight.withAlpha(60), accent.withAlpha(100)]
-                              : [Colors.white.withAlpha(18), Colors.white.withAlpha(8), Colors.white.withAlpha(18)],
-                        ),
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: radius,
-                          // Flat charcoal — no competing colour gradient in the background.
-                          color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 160),
-                                height: 46,
-                                width: 46,
-                                decoration: AppTheme.iconBox(color: accent, hover: hover),
-                                child: Center(child: Icon(widget.icon, color: accent, size: 22)),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(widget.title, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                                    const SizedBox(height: 5),
-                                    // headlineSmall is Bebas Neue via theme — preserve only colour.
-                                    Text(
-                                      widget.value,
-                                      style: theme.textTheme.headlineSmall?.copyWith(
-                                        color: isDark ? accent : theme.colorScheme.onSurface,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(widget.subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.chevron_right, color: accent.withAlpha(hover ? 200 : 100), size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GradientStrokePainter extends CustomPainter {
-  const _GradientStrokePainter({
-    required this.radius,
-    required this.width,
-    required this.gradient,
-  });
-
-  final BorderRadius radius;
-  final double width;
-  final Gradient gradient;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rrect = radius.toRRect(rect).deflate(width / 2);
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = width
-      ..shader = gradient.createShader(rect);
-    canvas.drawRRect(rrect, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _GradientStrokePainter oldDelegate) {
-    return oldDelegate.radius != radius || oldDelegate.width != width || oldDelegate.gradient != gradient;
   }
 }
 
@@ -1771,18 +1332,19 @@ class _Revenue7dCard extends StatelessWidget {
     String labelFor(String raw) {
       final parsed = DateTime.tryParse(raw);
       if (parsed == null) return raw;
-      return DateFormat('E').format(parsed);
+      return DateFormat('E').format(parsed).toUpperCase();
     }
 
     final isDark = theme.brightness == Brightness.dark;
     final gold = theme.colorScheme.primary;
+    final cardColor = isDark ? AppTheme.charcoal : AppTheme.card;
+    final borderColor = isDark ? AppTheme.borderSubtle : AppTheme.line;
 
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
-        border: Border.all(color: isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 70 : 16), blurRadius: 18, offset: const Offset(0, 8))],
+        borderRadius: AppRadius.largeAll,
+        color: cardColor,
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1791,17 +1353,13 @@ class _Revenue7dCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Container(
-                  height: 38, width: 38,
-                  decoration: AppTheme.iconBox(color: gold),
-                  child: Center(child: Icon(Icons.show_chart_rounded, color: gold, size: 20)),
-                ),
-                const SizedBox(width: 12),
+                Container(width: 9, height: 9, color: StatCategory.financial.color),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('REVENUE (7 DAYS)', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface)),
+                      Text('REVENUE (7 DAYS)', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface, fontSize: 15)),
                       Text('Daily earnings trend', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                     ],
                   ),
@@ -1809,9 +1367,8 @@ class _Revenue7dCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    // titleLarge = Bebas Neue — keep only colour; tracking comes from theme.
-                    Text(number.format(total7d), style: theme.textTheme.titleLarge?.copyWith(color: gold)),
-                    Text('7-day total', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    Text(number.format(total7d), style: AppTypography.mono(color: gold, fontSize: 22)),
+                    Text('7-DAY TOTAL', style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant)),
                   ],
                 ),
               ],
@@ -1841,7 +1398,7 @@ class _Revenue7dCard extends StatelessWidget {
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.visible,
-                      style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ),
               ],
@@ -1877,7 +1434,7 @@ class _InsightsCard extends StatelessWidget {
 
     if (expiringSoon > 0) {
       items.add((
-        icon: Icons.notifications_active_outlined,
+        icon: PhosphorIconsRegular.bellRinging,
         color: AppTheme.alertAmber,
         title: '$expiringSoon memberships expiring',
         subtitle: 'Due within 3 days - action needed',
@@ -1886,7 +1443,7 @@ class _InsightsCard extends StatelessWidget {
 
     if (summary.membershipExpiredMembers > 0) {
       items.add((
-        icon: Icons.event_busy_outlined,
+        icon: PhosphorIconsRegular.calendarX,
         color: theme.colorScheme.error,
         title: '${number.format(summary.membershipExpiredMembers)} expired members',
         subtitle: 'Renewal follow-ups needed',
@@ -1895,7 +1452,7 @@ class _InsightsCard extends StatelessWidget {
 
     if (canSeeRevenue && summary.unpaidAmount > 0) {
       items.add((
-        icon: Icons.payments_outlined,
+        icon: PhosphorIconsRegular.wallet,
         color: theme.colorScheme.primary,
         title: '${number.format(summary.unpaidAmount)} unpaid dues',
         subtitle: '${number.format(summary.unpaidInvoices)} invoices pending',
@@ -1904,7 +1461,7 @@ class _InsightsCard extends StatelessWidget {
 
     if (summary.todayCheckins == 0) {
       items.add((
-        icon: Icons.how_to_reg_outlined,
+        icon: PhosphorIconsRegular.userCheck,
         color: theme.colorScheme.tertiary,
         title: 'No check-ins yet',
         subtitle: "Today's attendance is still zero",
@@ -1913,7 +1470,7 @@ class _InsightsCard extends StatelessWidget {
 
     if (items.isEmpty) {
       items.add((
-        icon: Icons.check_circle_outline,
+        icon: PhosphorIconsRegular.checkCircle,
         color: AppTheme.emeraldNeon,
         title: 'All systems green',
         subtitle: 'No urgent actions required',
@@ -2133,8 +1690,8 @@ class _RevenueChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final p = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.8
-      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.butt
       ..strokeJoin = StrokeJoin.round
       ..color = lineColor;
 
@@ -2148,9 +1705,16 @@ class _RevenueChartPainter extends CustomPainter {
     final h = size.height - padding * 2;
     final origin = Offset(padding, padding);
 
+    // Dashed gridlines — ties back to the chalkboard motif.
+    const dashW = 5.0, gapW = 4.0;
     for (int i = 1; i <= 3; i++) {
       final y = origin.dy + (h * i / 4);
-      canvas.drawLine(Offset(origin.dx, y), Offset(origin.dx + w, y), grid);
+      var x = origin.dx;
+      while (x < origin.dx + w) {
+        final next = x + dashW < origin.dx + w ? x + dashW : origin.dx + w;
+        canvas.drawLine(Offset(x, y), Offset(next, y), grid);
+        x = next + gapW;
+      }
     }
 
     if (points.isEmpty) return;
@@ -2193,32 +1757,20 @@ class _RevenueChartPainter extends CustomPainter {
       ..lineTo(pts.first.dx, bottomY)
       ..close();
 
+    // Flat ~8% fill under the line — no gradient bloom.
     final fillPaint = Paint()
       ..style = PaintingStyle.fill
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          lineColor.withAlpha(90),
-          lineColor.withAlpha(38),
-          lineColor.withAlpha(8),
-        ],
-        stops: const [0.0, 0.5, 1.0],
-      ).createShader(Rect.fromLTWH(origin.dx, origin.dy, w, h));
+      ..color = lineColor.withAlpha(20);
 
     canvas.drawPath(fill, fillPaint);
     canvas.drawPath(path, p);
 
-    // Neon glow data-point markers
+    // Flat-capped square markers — no glow rings.
     if (maxY > 0) {
       final dc = dotColor ?? lineColor;
-      final dotGlow = Paint()..color = dc.withAlpha(38)..style = PaintingStyle.fill;
-      final dotCore = Paint()..color = dc..style = PaintingStyle.fill;
-      final dotRing = Paint()..color = dc.withAlpha(80)..style = PaintingStyle.stroke..strokeWidth = 1.2;
+      final marker = Paint()..color = dc..style = PaintingStyle.fill;
       for (final pt in pts) {
-        canvas.drawCircle(pt, 6.0, dotGlow);
-        canvas.drawCircle(pt, 3.5, dotCore);
-        canvas.drawCircle(pt, 5.0, dotRing);
+        canvas.drawRect(Rect.fromCenter(center: pt, width: 7, height: 7), marker);
       }
     }
   }
@@ -2248,57 +1800,20 @@ class _ActiveInactiveCard extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 620;
-            final donutSize = wide ? 150.0 : 132.0;
-            // Slimmer rings for the sharp enterprise look (was 14/12).
+            final dialSize = wide ? 150.0 : 132.0;
             final ringW = wide ? 10.0 : 9.0;
-            Widget donut() {
-              return SizedBox(
-                height: donutSize,
-                width: donutSize,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0, end: pct),
-                  duration: const Duration(milliseconds: 650),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, _) {
-                    return CustomPaint(
-                      painter: _DonutPiePainter(
-                        value: value,
-                        activeColor: theme.colorScheme.tertiary,
-                        expiredColor: theme.colorScheme.error,
-                        trackColor: theme.colorScheme.outlineVariant,
-                        glowColor: theme.colorScheme.tertiary,
-                        ringWidth: ringW,
-                      ),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // titleMedium = Bebas Neue — percentage reads as a scoreboard digit.
-                            Text(
-                              pctText,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: theme.colorScheme.primary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Active',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: theme.colorScheme.tertiary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            }
 
-            // One clean legend row: [• label] ............ [count (pct%)]
-            Widget legendRow(Color dot, String label, int count) {
+            Widget dial() => StopwatchDial(
+                  value: pct,
+                  percentLabel: pctText,
+                  label: 'Active',
+                  color: StatCategory.membership.color,
+                  size: dialSize,
+                  ringWidth: ringW,
+                );
+
+            // One clean legend row: [■ label] ............ [count (pct%)]
+            Widget legendRow(StatCategory category, String label, int count) {
               final pctInt = total <= 0 ? 0 : ((count * 100) / total).round();
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 7),
@@ -2308,25 +1823,17 @@ class _ActiveInactiveCard extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
-                        ),
+                        Container(width: 9, height: 9, color: category.color),
                         const SizedBox(width: 8),
                         Text(
-                          label,
-                          style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+                          label.toUpperCase(),
+                          style: AppTypography.uiLabel(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
                         ),
                       ],
                     ),
                     Text(
                       '$count ($pctInt%)',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
+                      style: AppTypography.mono(color: theme.colorScheme.onSurface, fontSize: 14, weight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -2338,15 +1845,15 @@ class _ActiveInactiveCard extends StatelessWidget {
                 crossAxisAlignment: crossAxisAlignment,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Active vs Expired', style: theme.textTheme.titleMedium),
+                  Text('ACTIVE VS EXPIRED', style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface, fontSize: 14)),
                   const SizedBox(height: 10),
-                  legendRow(theme.colorScheme.tertiary, 'Active', active),
+                  legendRow(StatCategory.membership, 'Active', active),
                   Divider(height: 1, color: theme.dividerColor),
-                  legendRow(theme.colorScheme.error, 'Expired', expired),
+                  legendRow(StatCategory.atRisk, 'Expired', expired),
                   const SizedBox(height: 10),
                   Text(
-                    'Total: $total',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    'TOTAL ${total.toString()}',
+                    style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ],
               );
@@ -2356,7 +1863,7 @@ class _ActiveInactiveCard extends StatelessWidget {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Center(child: donut()),
+                  Center(child: dial()),
                   const SizedBox(height: 12),
                   legend(crossAxisAlignment: CrossAxisAlignment.center),
                 ],
@@ -2368,7 +1875,7 @@ class _ActiveInactiveCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(child: Center(child: donut())),
+                  Expanded(child: Center(child: dial())),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -2382,91 +1889,6 @@ class _ActiveInactiveCard extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _DonutPiePainter extends CustomPainter {
-  _DonutPiePainter({
-    required this.value,
-    required this.activeColor,
-    required this.expiredColor,
-    required this.trackColor,
-    required this.glowColor,
-    this.ringWidth = 12.0,
-  });
-
-  final double value;
-  final Color activeColor;
-  final Color expiredColor;
-  final Color trackColor;
-  final Color glowColor;
-  final double ringWidth;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final center = rect.center;
-    final radius = (size.shortestSide / 2) - 6;
-
-    final start = -pi / 2;
-    final full = 2 * pi;
-    final activeSweep = (full * value).clamp(0.0, full);
-    final gap = value <= 0 || value >= 1 ? 0.0 : 0.06;
-
-    final track = Paint()
-      ..color = trackColor.withAlpha(90)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = ringWidth
-      ..strokeCap = StrokeCap.round;
-
-    final activePaint = Paint()
-      ..color = activeColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = ringWidth
-      ..strokeCap = StrokeCap.round;
-
-    final expiredPaint = Paint()
-      ..color = expiredColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = ringWidth
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawCircle(center, radius, track);
-
-    final arcRect = Rect.fromCircle(center: center, radius: radius);
-
-    if (activeSweep > 0) {
-      final s = start + gap / 2;
-      final sw = max(0.0, activeSweep - gap);
-      if (sw > 0) {
-        final glow = Paint()
-          ..color = glowColor.withAlpha(55)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = ringWidth + 8
-          ..strokeCap = StrokeCap.round;
-        canvas.drawArc(arcRect, s, sw, false, glow);
-        canvas.drawArc(arcRect, s, sw, false, activePaint);
-      }
-    }
-
-    final remaining = full - activeSweep;
-    if (remaining > 0) {
-      final s = start + activeSweep + gap / 2;
-      final sw = max(0.0, remaining - gap);
-      if (sw > 0) {
-        canvas.drawArc(arcRect, s, sw, false, expiredPaint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DonutPiePainter oldDelegate) {
-    return oldDelegate.value != value ||
-        oldDelegate.activeColor != activeColor ||
-        oldDelegate.expiredColor != expiredColor ||
-        oldDelegate.trackColor != trackColor ||
-        oldDelegate.glowColor != glowColor ||
-        oldDelegate.ringWidth != ringWidth;
   }
 }
 
@@ -2568,7 +1990,7 @@ class _ActionCardState extends State<_ActionCard> {
                         AnimatedOpacity(
                           duration: const Duration(milliseconds: 160),
                           opacity: hover ? 1.0 : 0.4,
-                          child: Icon(Icons.chevron_right, color: accent, size: 20),
+                          child: Icon(PhosphorIconsRegular.caretRight, color: accent, size: 20),
                         ),
                       ],
                     ),

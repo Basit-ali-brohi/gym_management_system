@@ -7,6 +7,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:printing/printing.dart';
 
 import 'app_theme.dart';
@@ -125,7 +126,7 @@ class InAppPdfPreviewer extends StatelessWidget {
                     height: 36,
                     width: 36,
                     decoration: AppTheme.iconBox(color: theme.colorScheme.primary),
-                    child: Icon(Icons.picture_as_pdf_outlined, size: 19, color: theme.colorScheme.primary),
+                    child: Icon(PhosphorIconsRegular.filePdf, size: 19, color: theme.colorScheme.primary),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -136,17 +137,17 @@ class InAppPdfPreviewer extends StatelessWidget {
                       style: AppTypography.sectionHeader(color: theme.colorScheme.onSurface),
                     ),
                   ),
-                  actionBtn(Icons.print_outlined, 'Print', () {
+                  actionBtn(PhosphorIconsRegular.printer, 'Print', () {
                     Printing.layoutPdf(onLayout: (_) async => bytes, name: fileName);
                   }),
-                  actionBtn(Icons.ios_share_outlined, 'Share / Save', () {
+                  actionBtn(PhosphorIconsRegular.shareNetwork, 'Share / Save', () {
                     Printing.sharePdf(bytes: bytes, filename: fileName);
                   }),
                   const SizedBox(width: 2),
                   IconButton(
                     tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close_rounded, size: 20, color: theme.colorScheme.onSurface),
+                    icon: Icon(PhosphorIconsRegular.x, size: 20, color: theme.colorScheme.onSurface),
                   ),
                 ],
               ),

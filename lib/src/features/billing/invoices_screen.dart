@@ -2,14 +2,16 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/whatsapp.dart';
@@ -212,68 +214,6 @@ class InvoicesScreen extends ConsumerStatefulWidget {
     final voided = itemsPreview.where((i) => i.status == 'void').length;
     // Pagination is computed page-locally inside the data branch (see footer).
 
-    // Flex ledger tile — no fixed width. The parent grid wraps each in an
-    // Expanded so 4 tiles span the container edge-to-edge.
-    Widget metricCard({
-      required String title,
-      required String value,
-      required String subtitle,
-      required IconData icon,
-      required Color accent,
-    }) {
-      return Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                ),
-                child: Icon(icon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(value, style: theme.textTheme.headlineSmall?.copyWith(color: accent)),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 11.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -282,30 +222,30 @@ class InvoicesScreen extends ConsumerStatefulWidget {
             final actionList = <Widget>[
               FilledButton.icon(
                 onPressed: () => _openAutoInvoice(context, ref),
-                icon: const Icon(Icons.auto_awesome),
+                icon: const Icon(PhosphorIconsRegular.sparkle),
                 label: const Text('Generate'),
               ),
               OutlinedButton.icon(
                 onPressed: () => _sendAllInvoiceReminders(context, ref),
-                icon: const Icon(Icons.done_all),
+                icon: const Icon(PhosphorIconsRegular.checks),
                 label: const Text('Send All'),
               ),
               IconButton(
                 tooltip: 'PDF',
                 onPressed: () => _openInvoicesListPdfActions(context, ref),
-                icon: const Icon(Icons.picture_as_pdf_outlined),
+                icon: const Icon(PhosphorIconsRegular.filePdf),
               ),
               IconButton(
                 tooltip: 'Refresh',
                 onPressed: () => ref.read(invoicesControllerProvider.notifier).load(),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(PhosphorIconsRegular.arrowClockwise),
               ),
             ];
             if (c.maxWidth < 600) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Invoices', style: theme.textTheme.headlineSmall),
+                  const AppPageTitle('Invoices'),
                   const SizedBox(height: 12),
                   Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actionList),
                 ],
@@ -313,7 +253,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
             }
             return Row(
               children: [
-                Expanded(child: Text('Invoices', style: theme.textTheme.headlineSmall)),
+                Expanded(child: const AppPageTitle('Invoices')),
                 for (var k = 0; k < actionList.length; k++) ...[
                   if (k > 0) const SizedBox(width: 8),
                   actionList[k],
@@ -329,33 +269,29 @@ class InvoicesScreen extends ConsumerStatefulWidget {
         LayoutBuilder(
           builder: (context, c) {
             final tiles = <Widget>[
-              metricCard(
-                title: 'Total invoices',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Total invoices',
                 value: '$total',
-                subtitle: 'Filtered total',
-                icon: Icons.receipt_long,
-                accent: theme.colorScheme.primary,
+                footnote: 'FILTERED TOTAL',
               ),
-              metricCard(
-                title: 'Paid',
+              CategoryStatCard(
+                category: StatCategory.membership,
+                label: 'Paid',
                 value: '$paid',
-                subtitle: 'This page',
-                icon: Icons.verified_outlined,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'THIS PAGE',
               ),
-              metricCard(
-                title: 'Unpaid',
+              CategoryStatCard(
+                category: StatCategory.atRisk,
+                label: 'Unpaid',
                 value: '$unpaid',
-                subtitle: 'This page',
-                icon: Icons.pending_actions_outlined,
-                accent: const Color(0xFFF59E0B),
+                footnote: 'THIS PAGE',
               ),
-              metricCard(
-                title: 'Voided',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Voided',
                 value: '$voided',
-                subtitle: 'This page',
-                icon: Icons.block_outlined,
-                accent: theme.colorScheme.onSurfaceVariant,
+                footnote: 'THIS PAGE',
               ),
             ];
             final cols = c.maxWidth >= 900
@@ -405,7 +341,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     initialValue: state._statusFilter,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
@@ -424,7 +360,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     initialValue: state._sort,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'newest', child: Text('Newest')),
@@ -439,18 +375,18 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                   height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    style: GoogleFonts.inter(fontSize: 13.5),
+                    style: GoogleFonts.archivo(fontSize: 13.5),
                     decoration: appDenseInputDecoration(
                       context,
                       hint: 'Search invoice, member, code',
-                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._scheduleApplyFilters(),
                   ),
                 ),
                 AppFilterPill(
                   label: 'Clear',
-                  icon: Icons.close_rounded,
+                  icon: PhosphorIconsRegular.x,
                   selected: false,
                   onTap: state._clearFilters,
                 ),
@@ -499,20 +435,20 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                       page.total == 0
                           ? 'No invoices'
                           : 'Showing ${number.format(fFromN)}-${number.format(fToN)} of ${number.format(page.total)}',
-                      style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                      style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     const Spacer(),
                     IconButton(
                       tooltip: 'Previous',
                       onPressed: fCanPrev ? () => ref.read(invoicesControllerProvider.notifier).prevPage() : null,
-                      icon: const Icon(Icons.chevron_left),
+                      icon: const Icon(PhosphorIconsRegular.caretLeft),
                       visualDensity: VisualDensity.compact,
                     ),
                     const SizedBox(width: 4),
                     IconButton(
                       tooltip: 'Next',
                       onPressed: fCanNext ? () => ref.read(invoicesControllerProvider.notifier).nextPage() : null,
-                      icon: const Icon(Icons.chevron_right),
+                      icon: const Icon(PhosphorIconsRegular.caretRight),
                       visualDensity: VisualDensity.compact,
                     ),
                   ],
@@ -547,13 +483,13 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                   : Colors.grey.shade200,
                               dataTableTheme: DataTableThemeData(
                                 dividerThickness: 1,
-                                headingTextStyle: GoogleFonts.inter(
+                                headingTextStyle: GoogleFonts.archivo(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.3,
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                                dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                dataTextStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                                 headingRowColor: WidgetStatePropertyAll(
                                   theme.brightness == Brightness.dark
                                       ? Colors.white.withAlpha(8)
@@ -582,7 +518,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                       // Monetary figure in tabular Inter.
                                       DataCell(Text(
                                         number.format(inv.total),
-                                        style: GoogleFonts.inter(
+                                        style: GoogleFonts.archivo(
                                           fontSize: 13.5,
                                           fontWeight: FontWeight.w600,
                                           fontFeatures: const [FontFeature.tabularFigures()],
@@ -596,13 +532,13 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                           children: [
                                             // High-frequency read actions stay exposed.
                                             AppTableActionButton(
-                                              icon: Icons.visibility_outlined,
+                                              icon: PhosphorIconsRegular.eye,
                                               tooltip: 'View',
                                               onPressed: () => _openInvoiceView(context, ref, inv.id),
                                             ),
                                             const SizedBox(width: 2),
                                             AppTableActionButton(
-                                              icon: Icons.picture_as_pdf_outlined,
+                                              icon: PhosphorIconsRegular.filePdf,
                                               tooltip: 'Export PDF',
                                               onPressed: () => _openInvoicePdfActions(context, ref, inv),
                                             ),
@@ -658,7 +594,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                       inv.invoiceNo,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700),
+                                      style: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w700),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -670,19 +606,19 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                                 '${inv.memberName}  •  ${number.format(inv.total)}  •  ${formatDate(inv.createdAt)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.inter(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                                style: GoogleFonts.archivo(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                               ),
                               const SizedBox(height: 6),
                               Row(
                                 children: [
                                   AppTableActionButton(
-                                    icon: Icons.visibility_outlined,
+                                    icon: PhosphorIconsRegular.eye,
                                     tooltip: 'View',
                                     onPressed: () => _openInvoiceView(context, ref, inv.id),
                                   ),
                                   const SizedBox(width: 2),
                                   AppTableActionButton(
-                                    icon: Icons.picture_as_pdf_outlined,
+                                    icon: PhosphorIconsRegular.filePdf,
                                     tooltip: 'Export PDF',
                                     onPressed: () => _openInvoicePdfActions(context, ref, inv),
                                   ),
@@ -730,7 +666,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.auto_awesome,
+      icon: PhosphorIconsRegular.sparkle,
       title: 'Auto Invoice',
       subtitle: 'Generate invoice from member + plan',
       body: StatefulBuilder(
@@ -786,7 +722,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     controller: searchCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Search member (code / name / phone)',
-                      prefixIcon: Icon(Icons.search),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass),
                     ),
                     onChanged: (v) => r.read(invoiceMemberSearchProvider.notifier).search(v),
                   ),
@@ -822,7 +758,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                   const FormSectionLabel(
                     'Plan & Billing',
                     hint: 'Discount applies before tax. Totals recalculate live as you type.',
-                    icon: Icons.receipt_long_outlined,
+                    icon: PhosphorIconsRegular.receipt,
                   ),
                   const SizedBox(height: 12),
                   plansAsync.when(
@@ -873,8 +809,8 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                       value: discountType,
                       onChanged: (v) => setModalState(() => discountType = v),
                       segments: const [
-                        FormSegment('percentage', 'Percentage', icon: Icons.percent),
-                        FormSegment('fixed', 'Fixed', icon: Icons.payments_outlined),
+                        FormSegment('percentage', 'Percentage', icon: PhosphorIconsRegular.percent),
+                        FormSegment('fixed', 'Fixed', icon: PhosphorIconsRegular.wallet),
                       ],
                     ),
                     TextField(
@@ -908,9 +844,9 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                     value: paymentStatus,
                     onChanged: (v) => setModalState(() => paymentStatus = v),
                     segments: const [
-                      FormSegment('paid', 'Paid', icon: Icons.check_circle_outline, color: Color(0xFF10B981)),
-                      FormSegment('partial', 'Partially Paid', icon: Icons.timelapse, color: Color(0xFFF59E0B)),
-                      FormSegment('unpaid', 'Unpaid', icon: Icons.error_outline, color: Color(0xFFDC2626)),
+                      FormSegment('paid', 'Paid', icon: PhosphorIconsRegular.checkCircle, color: AppTheme.emerald),
+                      FormSegment('partial', 'Partially Paid', icon: PhosphorIconsRegular.timer, color: AppTheme.iron),
+                      FormSegment('unpaid', 'Unpaid', icon: PhosphorIconsRegular.warningCircle, color: AppTheme.danger),
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -999,7 +935,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runInvoicePdf(context, ref, inv, preview: true);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -1007,7 +943,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runInvoicePdf(context, ref, inv, preview: false);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -1051,7 +987,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runInvoicesListPdf(context, ref, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -1059,7 +995,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runInvoicesListPdf(context, ref, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -1202,7 +1138,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
       if (!context.mounted) return;
       await showAppFormDialog<void>(
         context: context,
-        icon: Icons.edit_outlined,
+        icon: PhosphorIconsRegular.pencilSimple,
         title: 'Edit Invoice',
         subtitle: res['invoiceNo']?.toString() ?? '',
         body: LayoutBuilder(
@@ -1403,7 +1339,7 @@ class _EmptyState extends StatelessWidget {
                   radius: 28,
                   backgroundColor: theme.colorScheme.primaryContainer,
                   foregroundColor: theme.colorScheme.onPrimaryContainer,
-                  child: const Icon(Icons.receipt_long, size: 28),
+                  child: const Icon(PhosphorIconsRegular.receipt, size: 28),
                 ),
                 const SizedBox(height: 12),
                 Text('No invoices yet', style: theme.textTheme.titleMedium),
@@ -1427,31 +1363,26 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // paid = membership (positive), unpaid = at-risk (same meaning as
+    // "unpaid/overdue" everywhere else), void = neutral operational.
     final isPaid = status == 'paid';
     final isUnpaid = status == 'unpaid';
-    final accent = isPaid
-        ? const Color(0xFF10B981)
+    final category = isPaid
+        ? StatCategory.membership
         : isUnpaid
-            ? const Color(0xFFF59E0B)
-            : theme.colorScheme.onSurfaceVariant;
+            ? StatCategory.atRisk
+            : StatCategory.operational;
     final label = (status.isEmpty ? '-' : status).toUpperCase();
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: accent.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+        color: category.soft,
+        borderRadius: AppRadius.smallAll,
       ),
       child: Text(
         label,
-        style: GoogleFonts.inter(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          color: accent,
-          letterSpacing: 0.5,
-        ),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }
@@ -1499,7 +1430,7 @@ class _InvoiceActionsMenu extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: !enabled ? color : (danger ? _mutedRed : theme.colorScheme.onSurfaceVariant)),
           const SizedBox(width: 12),
-          Text(label, style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
+          Text(label, style: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
         ],
       ),
     );
@@ -1515,15 +1446,15 @@ class _InvoiceActionsMenu extends StatelessWidget {
       tooltip: 'More actions',
       position: PopupMenuPosition.under,
       elevation: 10,
-      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      color: isDark ? AppTheme.charcoalHigh : Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppRadius.smallAll,
         side: BorderSide(
-          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          color: isDark ? AppTheme.borderHover : AppTheme.line,
           width: 0.8,
         ),
       ),
-      icon: Icon(Icons.more_vert, size: 18, color: theme.colorScheme.onSurfaceVariant),
+      icon: Icon(PhosphorIconsRegular.dotsThreeVertical, size: 18, color: theme.colorScheme.onSurfaceVariant),
       onSelected: (v) {
         switch (v) {
           case 'paid':
@@ -1538,10 +1469,10 @@ class _InvoiceActionsMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        if (status == 'unpaid') _item(context, 'paid', Icons.check_circle_outline, 'Mark as paid'),
-        _item(context, 'edit', Icons.edit_outlined, 'Edit invoice', enabled: !isPaid),
+        if (status == 'unpaid') _item(context, 'paid', PhosphorIconsRegular.checkCircle, 'Mark as paid'),
+        _item(context, 'edit', PhosphorIconsRegular.pencilSimple, 'Edit invoice', enabled: !isPaid),
         if (canDelete) const PopupMenuDivider(),
-        if (canDelete) _item(context, 'void', Icons.block_outlined, 'Void invoice', danger: true, enabled: !isPaid),
+        if (canDelete) _item(context, 'void', PhosphorIconsRegular.prohibit, 'Void invoice', danger: true, enabled: !isPaid),
       ],
     );
   }
@@ -1577,10 +1508,7 @@ class _InvoiceTotalsCard extends StatelessWidget {
             Text(label, style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
             Text(
               negative && value != '-' ? '− $value' : value,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: color ?? cs.onSurface,
-              ),
+              style: AppTypography.mono(color: color ?? cs.onSurface, fontSize: 14, weight: FontWeight.w600),
             ),
           ],
         ),
@@ -1597,7 +1525,7 @@ class _InvoiceTotalsCard extends StatelessWidget {
       child: Column(
         children: [
           line('Subtotal', fmt(subtotal)),
-          line('Discount', fmt(discount), negative: true, color: const Color(0xFFDC2626)),
+          line('Discount', fmt(discount), negative: true, color: AppTheme.danger),
           line('Tax', fmt(tax)),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),

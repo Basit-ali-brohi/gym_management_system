@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -83,8 +84,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final restBorder = isDark ? AppTheme.borderHover : lightBorder;
       return InputDecoration(
         labelText: label,
-        labelStyle: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
-        floatingLabelStyle: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600, color: accent),
+        labelStyle: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+        floatingLabelStyle: GoogleFonts.archivo(fontSize: 12.5, fontWeight: FontWeight.w600, color: accent),
         prefixIcon: Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
         suffixIcon: suffix,
         filled: true,
@@ -141,7 +142,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           color: accent,
                           boxShadow: AppTheme.neonGlow(accent, blur: 14),
                         ),
-                        child: Icon(Icons.fitness_center, color: theme.colorScheme.onPrimary, size: 22),
+                        child: Icon(PhosphorIconsRegular.barbell, color: theme.colorScheme.onPrimary, size: 22),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -152,7 +153,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 2),
                             Text(
                               'Sign in to continue',
-                              style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                              style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                             ),
                           ],
                         ),
@@ -163,8 +164,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   _GlowField(
                     child: TextFormField(
                       controller: _tenantCtrl,
-                      style: GoogleFonts.inter(fontSize: 14),
-                      decoration: deco('Tenant / Gym Code', Icons.apartment_outlined),
+                      style: GoogleFonts.archivo(fontSize: 14),
+                      decoration: deco('Tenant / Gym Code', PhosphorIconsRegular.buildings),
                       validator: (v) => (v == null || v.trim().length < 2) ? 'Tenant required' : null,
                       enabled: !auth.isLoading,
                       textInputAction: TextInputAction.next,
@@ -174,8 +175,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   _GlowField(
                     child: TextFormField(
                       controller: _emailCtrl,
-                      style: GoogleFonts.inter(fontSize: 14),
-                      decoration: deco('Email', Icons.alternate_email),
+                      style: GoogleFonts.archivo(fontSize: 14),
+                      decoration: deco('Email', PhosphorIconsRegular.at),
                       keyboardType: TextInputType.emailAddress,
                       validator: (v) => (v == null || !v.contains('@')) ? 'Valid email required' : null,
                       enabled: !auth.isLoading,
@@ -186,14 +187,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   _GlowField(
                     child: TextFormField(
                       controller: _passCtrl,
-                      style: GoogleFonts.inter(fontSize: 14),
+                      style: GoogleFonts.archivo(fontSize: 14),
                       decoration: deco(
                         'Password',
-                        Icons.lock_outline,
+                        PhosphorIconsRegular.lock,
                         suffix: IconButton(
                           tooltip: _obscure ? 'Show password' : 'Hide password',
                           onPressed: auth.isLoading ? null : () => setState(() => _obscure = !_obscure),
-                          icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                          icon: Icon(_obscure ? PhosphorIconsRegular.eye : PhosphorIconsRegular.eyeSlash,
                               size: 20, color: theme.colorScheme.onSurfaceVariant),
                         ),
                       ),
@@ -214,10 +215,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline, color: theme.colorScheme.error, size: 18),
+                          Icon(PhosphorIconsRegular.warningCircle, color: theme.colorScheme.error, size: 18),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(errorText, style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurface)),
+                            child: Text(errorText, style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurface)),
                           ),
                         ],
                       ),
@@ -237,11 +238,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   _serverCtrl.text = ref.read(serverUrlProvider);
                                 }
                               }),
-                      icon: Icon(_showServer ? Icons.expand_less : Icons.dns_outlined, size: 18),
+                      icon: Icon(_showServer ? PhosphorIconsRegular.caretUp : PhosphorIconsRegular.hardDrives, size: 18),
                       label: const Text('Server settings'),
                       style: TextButton.styleFrom(
                         foregroundColor: theme.colorScheme.onSurfaceVariant,
-                        textStyle: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600),
+                        textStyle: GoogleFonts.archivo(fontSize: 12.5, fontWeight: FontWeight.w600),
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       ),
                     ),
@@ -251,8 +252,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     _GlowField(
                       child: TextFormField(
                         controller: _serverCtrl,
-                        style: GoogleFonts.inter(fontSize: 14),
-                        decoration: deco('Server URL', Icons.dns_outlined),
+                        style: GoogleFonts.archivo(fontSize: 14),
+                        decoration: deco('Server URL', PhosphorIconsRegular.hardDrives),
                         keyboardType: TextInputType.url,
                         autocorrect: false,
                         enabled: !auth.isLoading,
@@ -295,7 +296,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 4),
                     Text(
                       'Current: ${ref.watch(serverUrlProvider)}',
-                      style: GoogleFonts.inter(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                      style: GoogleFonts.archivo(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                   const SizedBox(height: 18),
@@ -304,7 +305,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: FilledButton(
                       onPressed: auth.isLoading ? null : submit,
                       style: FilledButton.styleFrom(
-                        textStyle: GoogleFonts.inter(fontSize: 14.5, fontWeight: FontWeight.w700),
+                        textStyle: GoogleFonts.archivo(fontSize: 14.5, fontWeight: FontWeight.w700),
                       ),
                       child: auth.isLoading
                           ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
@@ -322,7 +323,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           child: RichText(
                             textAlign: TextAlign.center,
                             text: TextSpan(
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.archivo(
                                 fontSize: 13,
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -330,7 +331,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 const TextSpan(text: 'Powered by '),
                                 TextSpan(
                                   text: 'Deverosity',
-                                  style: GoogleFonts.inter(
+                                  style: GoogleFonts.archivo(
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                     color: const Color(0xFFFF7A00),
@@ -423,7 +424,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     Text(
                       'Members, leads, billing, attendance, inventory and reports — '
                       'all in one unified dashboard.',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.archivo(
                         fontSize: 14,
                         height: 1.5,
                         letterSpacing: 0.3,
@@ -554,7 +555,7 @@ class _ThemeToggleState extends ConsumerState<_ThemeToggle> {
                 child: FadeTransition(opacity: anim, child: child),
               ),
               child: Icon(
-                isDark ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+                isDark ? PhosphorIconsRegular.moon : PhosphorIconsRegular.sun,
                 key: ValueKey<bool>(isDark),
                 size: 20,
                 color: fg,
@@ -607,12 +608,12 @@ class _FeatureGrid extends StatelessWidget {
   const _FeatureGrid();
 
   static const _items = <({IconData icon, String label})>[
-    (icon: Icons.people_alt_outlined, label: 'Members'),
-    (icon: Icons.person_search_outlined, label: 'Leads'),
-    (icon: Icons.receipt_long_outlined, label: 'Invoices'),
-    (icon: Icons.how_to_reg_outlined, label: 'Attendance'),
-    (icon: Icons.inventory_2_outlined, label: 'Inventory'),
-    (icon: Icons.bar_chart_outlined, label: 'Reports'),
+    (icon: PhosphorIconsRegular.users, label: 'Members'),
+    (icon: PhosphorIconsRegular.userList, label: 'Leads'),
+    (icon: PhosphorIconsRegular.receipt, label: 'Invoices'),
+    (icon: PhosphorIconsRegular.userCheck, label: 'Attendance'),
+    (icon: PhosphorIconsRegular.package, label: 'Inventory'),
+    (icon: PhosphorIconsRegular.chartBar, label: 'Reports'),
   ];
 
   @override
@@ -670,7 +671,7 @@ class _FeatureItem extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.archivo(
               fontSize: 13,
               fontWeight: FontWeight.w500,
               color: Colors.white.withValues(alpha: 0.85),

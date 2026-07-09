@@ -1,11 +1,12 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/in_app_pdf.dart';
 import '../auth/auth_controller.dart';
@@ -19,10 +20,6 @@ String _abbrevNum(double v) {
   if (a >= 1e3) return '${(v / 1e3).round()}K';
   return v.round().toString();
 }
-
-// Emerald shades for premium gradient line series (Colors has no "emerald").
-const Color _emerald400 = Color(0xFF34D399);
-const Color _emerald700 = Color(0xFF047857);
 
 class _RevenueHistoryPoint {
   const _RevenueHistoryPoint({required this.month, required this.revenue});
@@ -181,83 +178,16 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final q = _searchCtrl.text.trim().toLowerCase();
     final profitAsync = ref.watch(profitSeriesProvider(monthLabel));
     final predictionAsync = ref.watch(revenuePredictionProvider);
-    // Flex KPI tile — no fixed width. The parent grid wraps each in an
-    // Expanded so 4 tiles span the container edge-to-edge.
-    Widget metricCard({
-      required String title,
-      required String value,
-      required String subtitle,
-      required IconData icon,
-      required Color accent,
-    }) {
-      return Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                ),
-                child: Icon(icon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        style: theme.textTheme.headlineSmall?.copyWith(color: accent),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Row(
           children: [
-            Expanded(child: Text('Reports', style: theme.textTheme.headlineSmall)),
+            const Expanded(child: AppPageTitle('Reports')),
             IconButton(
               tooltip: 'Refresh',
               onPressed: () => setState(() {}),
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(PhosphorIconsRegular.arrowClockwise),
             ),
           ],
         ),
@@ -268,33 +198,29 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         LayoutBuilder(
           builder: (context, c) {
             final tiles = <Widget>[
-              metricCard(
-                title: 'Total Reports',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Total Reports',
                 value: '4',
-                subtitle: 'PDF exports',
-                icon: Icons.picture_as_pdf_outlined,
-                accent: theme.colorScheme.primary,
+                footnote: 'PDF EXPORTS',
               ),
-              metricCard(
-                title: 'Monthly Revenue',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Monthly Revenue',
                 value: monthLabel,
-                subtitle: 'Selected month',
-                icon: Icons.trending_up,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'SELECTED MONTH',
               ),
-              metricCard(
-                title: 'Daily Attendance',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Daily Attendance',
                 value: dateLabel,
-                subtitle: 'Selected date',
-                icon: Icons.how_to_reg,
-                accent: const Color(0xFF3B82F6),
+                footnote: 'SELECTED DATE',
               ),
-              metricCard(
-                title: 'Quick Export',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Quick Export',
                 value: 'READY',
-                subtitle: 'One-click PDFs',
-                icon: Icons.bolt_outlined,
-                accent: const Color(0xFFF59E0B),
+                footnote: 'ONE-CLICK PDFS',
               ),
             ];
             final cols = c.maxWidth >= 900
@@ -344,7 +270,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     IconButton(
                       tooltip: 'Refresh',
                       onPressed: () => ref.invalidate(revenuePredictionProvider),
-                      icon: const Icon(Icons.refresh),
+                      icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                     ),
                   ],
                 ),
@@ -404,37 +330,27 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                         Container(
                           height: 260,
                           width: double.infinity,
+                          // Flat chart panel — no gradient, no glow, matches
+                          // the Dashboard's chart-card treatment.
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: AppRadius.largeAll,
                             border: Border.all(color: theme.colorScheme.outlineVariant),
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.62),
-                                theme.colorScheme.surface.withValues(alpha: 0.72),
-                              ],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: neon.withValues(alpha: 0.14),
-                                blurRadius: 26,
-                                offset: const Offset(0, 16),
-                              ),
-                            ],
+                            color: theme.brightness == Brightness.dark ? AppTheme.charcoal : AppTheme.card,
                           ),
                           padding: const EdgeInsets.fromLTRB(12, 12, 16, 10),
                           child: LineChart(
                             LineChartData(
                               minY: 0,
                               maxY: maxY * 1.12,
-                              // Sharp, very faint horizontal gridlines only.
+                              // Dashed gridlines — chalkboard motif, same as the
+                              // Dashboard revenue chart.
                               gridData: FlGridData(
                                 show: true,
                                 horizontalInterval: maxY / 4 <= 0 ? 1 : maxY / 4,
                                 getDrawingHorizontalLine: (v) => FlLine(
-                                  color: Colors.white.withAlpha(13), // ~white 5%
-                                  strokeWidth: 1,
+                                  color: theme.brightness == Brightness.dark ? AppTheme.borderHover : AppTheme.line,
+                                  strokeWidth: 0.8,
+                                  dashArray: const [5, 4],
                                 ),
                                 drawVerticalLine: false,
                               ),
@@ -443,7 +359,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                 topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                                 rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                                 // Left axis: wider reserve + abbreviated K/M labels
-                                // so figures never clip or overlap.
+                                // so figures never clip or overlap. Mono, per the
+                                // "every number is mono" rule.
                                 leftTitles: AxisTitles(
                                   sideTitles: SideTitles(
                                     showTitles: true,
@@ -456,11 +373,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                         child: Text(
                                           _abbrevNum(value),
                                           textAlign: TextAlign.right,
-                                          style: GoogleFonts.inter(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w500,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
+                                          style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant, fontSize: 11),
                                         ),
                                       );
                                     },
@@ -477,8 +390,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                         return Padding(
                                           padding: const EdgeInsets.only(top: 6),
                                           child: Text(
-                                            p.predictedMonth.isEmpty ? 'Next' : shortMonth(p.predictedMonth),
-                                            style: theme.textTheme.labelSmall?.copyWith(color: neon),
+                                            (p.predictedMonth.isEmpty ? 'Next' : shortMonth(p.predictedMonth)).toUpperCase(),
+                                            style: AppTypography.monoMeta(color: gold),
                                           ),
                                         );
                                       }
@@ -486,8 +399,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                       return Padding(
                                         padding: const EdgeInsets.only(top: 6),
                                         child: Text(
-                                          shortMonth(history[i].month),
-                                          style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                                          shortMonth(history[i].month).toUpperCase(),
+                                          style: AppTypography.monoMeta(color: theme.colorScheme.onSurfaceVariant),
                                         ),
                                       );
                                     },
@@ -512,59 +425,40 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                 ),
                               ),
                               lineBarsData: [
-                                // Historical trend — accent gradient curve with
-                                // a fading area fill for premium depth.
+                                // Historical trend — solid ember stroke, flat
+                                // caps, square markers, faint ember fill (~8%).
+                                // Same chart language as the Dashboard.
                                 LineChartBarData(
                                   spots: spots,
                                   isCurved: true,
                                   curveSmoothness: 0.28,
-                                  isStrokeCapRound: true,
-                                  gradient: LinearGradient(
-                                    colors: [Color.lerp(gold, Colors.white, 0.30) ?? gold, gold],
-                                  ),
-                                  barWidth: 3,
+                                  isStrokeCapRound: false,
+                                  color: gold,
+                                  barWidth: 2.6,
                                   dotData: FlDotData(
                                     show: true,
                                     checkToShowDot: (spot, barData) => spot.x >= history.length - 0.5,
                                     getDotPainter: (spot, percent, barData, idx) {
                                       final isPred = spot.x.round() == history.length;
-                                      final c = isPred ? neon : gold;
-                                      return FlDotCirclePainter(
-                                        radius: isPred ? 5 : 3.6,
-                                        color: c,
-                                        strokeWidth: 2,
-                                        strokeColor: theme.colorScheme.surface,
-                                      );
+                                      return FlDotSquarePainter(size: isPred ? 8 : 6, color: gold, strokeWidth: 0);
                                     },
                                   ),
-                                  belowBarData: BarAreaData(
-                                    show: true,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [gold.withAlpha(60), gold.withAlpha(4)],
-                                    ),
-                                  ),
+                                  belowBarData: BarAreaData(show: true, color: gold.withAlpha(20)),
                                 ),
-                                // Predicted segment — emerald neon gradient with
-                                // its own fading area fill (the green "forecast").
+                                // Predicted segment — same ember family, dashed
+                                // stroke signals "forecast" instead of a
+                                // separate green hue.
                                 if (predictedSegment.isNotEmpty)
                                   LineChartBarData(
                                     spots: predictedSegment,
                                     isCurved: true,
                                     curveSmoothness: 0.28,
-                                    isStrokeCapRound: true,
-                                    gradient: const LinearGradient(colors: [_emerald400, _emerald700]),
-                                    barWidth: 3.2,
+                                    isStrokeCapRound: false,
+                                    color: AppTheme.goldWarm,
+                                    barWidth: 2.6,
+                                    dashArray: const [6, 4],
                                     dotData: const FlDotData(show: false),
-                                    belowBarData: BarAreaData(
-                                      show: true,
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        colors: [_emerald400.withAlpha(55), _emerald400.withAlpha(0)],
-                                      ),
-                                    ),
+                                    belowBarData: BarAreaData(show: false),
                                   ),
                               ],
                             ),
@@ -601,13 +495,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     );
                     final monthBtn = OutlinedButton.icon(
                       onPressed: () => _pickMonth(context),
-                      icon: const Icon(Icons.date_range),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: Text(monthLabel),
                     );
                     final refreshBtn = IconButton(
                       tooltip: 'Refresh',
                       onPressed: () => ref.invalidate(profitSeriesProvider(monthLabel)),
-                      icon: const Icon(Icons.refresh),
+                      icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                     );
                     // Mobile: title gets the full width (wraps cleanly), controls below.
                     if (c.maxWidth < 480) {
@@ -677,19 +571,22 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                           width: double.infinity,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: AppRadius.largeAll,
                               border: Border.all(color: theme.colorScheme.outlineVariant),
-                              color: theme.colorScheme.surface,
+                              color: theme.brightness == Brightness.dark ? AppTheme.charcoal : AppTheme.card,
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(12),
                               child: CustomPaint(
                                 painter: _ProfitAreaPainter(
                                   items: s.items,
-                                  revenueColor: theme.colorScheme.primary,
-                                  expenseColor: theme.colorScheme.error,
+                                  // Revenue = financial (ember); expense = neutral
+                                  // operational cost — same category meaning as
+                                  // everywhere else, not an ad hoc chart palette.
+                                  revenueColor: StatCategory.financial.color,
+                                  expenseColor: StatCategory.operational.color,
                                   areaColor: profitColor,
-                                  gridColor: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+                                  gridColor: theme.brightness == Brightness.dark ? AppTheme.borderHover : AppTheme.line,
                                 ),
                                 child: const SizedBox.expand(),
                               ),
@@ -746,7 +643,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     controller: _searchCtrl,
                     decoration: const InputDecoration(
                       hintText: 'Search report',
-                      prefixIcon: Icon(Icons.search),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass),
                     ),
                     onChanged: (_) => setState(() {}),
                   );
@@ -796,13 +693,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 type: 'export',
                 title: 'Full Reports Export',
                 subtitle: 'PDF • Obsidian & Gold premium export for $monthLabel',
-                icon: Icons.picture_as_pdf_outlined,
+                icon: PhosphorIconsRegular.filePdf,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     OutlinedButton.icon(
                       onPressed: () => _pickMonth(context),
-                      icon: const Icon(Icons.date_range),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: Text(monthLabel),
                     ),
                     const SizedBox(width: 8),
@@ -814,7 +711,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                         fileName: 'reports_$monthLabel.pdf',
                         query: {'month': monthLabel},
                       ),
-                      icon: const Icon(Icons.picture_as_pdf),
+                      icon: const Icon(PhosphorIconsRegular.filePdf),
                       label: const Text('PDF'),
                     ),
                   ],
@@ -824,13 +721,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 type: 'monthly',
                 title: 'Monthly Revenue Report',
                 subtitle: 'PDF • Paid invoices summary for $monthLabel',
-                icon: Icons.trending_up,
+                icon: PhosphorIconsRegular.trendUp,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     OutlinedButton.icon(
                       onPressed: () => _pickMonth(context),
-                      icon: const Icon(Icons.date_range),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: Text(monthLabel),
                     ),
                     const SizedBox(width: 8),
@@ -842,7 +739,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                         fileName: 'monthly_revenue_$monthLabel.pdf',
                         query: {'month': monthLabel},
                       ),
-                      icon: const Icon(Icons.picture_as_pdf),
+                      icon: const Icon(PhosphorIconsRegular.filePdf),
                       label: const Text('PDF'),
                     ),
                   ],
@@ -852,7 +749,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 type: 'expired',
                 title: 'Expired Members List',
                 subtitle: 'PDF • All members whose latest membership is expired',
-                icon: Icons.person_off,
+                icon: PhosphorIconsRegular.userMinus,
                 trailing: FilledButton.icon(
                   onPressed: () => _openPdfActions(
                     context,
@@ -860,7 +757,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     path: '/reports/expired-members.pdf',
                     fileName: 'expired_members_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
                   ),
-                  icon: const Icon(Icons.picture_as_pdf),
+                  icon: const Icon(PhosphorIconsRegular.filePdf),
                   label: const Text('PDF'),
                 ),
               ),
@@ -868,13 +765,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 type: 'daily',
                 title: 'Daily Attendance Log',
                 subtitle: 'PDF • Attendance for $dateLabel',
-                icon: Icons.how_to_reg,
+                icon: PhosphorIconsRegular.userCheck,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     OutlinedButton.icon(
                       onPressed: () => _pickDate(context),
-                      icon: const Icon(Icons.event),
+                      icon: const Icon(PhosphorIconsRegular.calendarBlank),
                       label: Text(dateLabel),
                     ),
                     const SizedBox(width: 8),
@@ -886,7 +783,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                         fileName: 'attendance_$dateLabel.pdf',
                         query: {'date': dateLabel},
                       ),
-                      icon: const Icon(Icons.picture_as_pdf),
+                      icon: const Icon(PhosphorIconsRegular.filePdf),
                       label: const Text('PDF'),
                     ),
                   ],
@@ -984,7 +881,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 Navigator.of(context).pop();
                 await _runPdf(context, preview: true, path: path, fileName: fileName, query: query);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -992,7 +889,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 Navigator.of(context).pop();
                 await _runPdf(context, preview: false, path: path, fileName: fileName, query: query);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -1039,29 +936,21 @@ class _MetricPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: color.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withAlpha(70), width: 0.8),
+        borderRadius: AppRadius.smallAll,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            height: 9,
-            width: 9,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: AppTheme.neonGlow(color, blur: 6),
-            ),
-          ),
+          // Category colour-square — same micro-pattern as the stat cards.
+          Container(height: 9, width: 9, color: color),
           const SizedBox(width: 8),
           Text(
-            '$label: ',
-            style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+            '${label.toUpperCase()}: ',
+            style: AppTypography.uiLabel(color: theme.colorScheme.onSurfaceVariant, fontSize: 11.5),
           ),
           Text(
             value,
-            style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: theme.colorScheme.onSurface),
+            style: AppTypography.mono(color: theme.colorScheme.onSurface, fontSize: 13, weight: FontWeight.w700),
           ),
         ],
       ),
@@ -1096,13 +985,20 @@ class _ProfitAreaPainter extends CustomPainter {
     final rect = Offset.zero & size;
     final plot = Rect.fromLTWH(rect.left, rect.top + 6, rect.width, rect.height - 12);
 
+    // Dashed gridlines — chalkboard motif, same as every other chart.
     final gridPaint = Paint()
       ..color = gridColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
+      ..strokeWidth = 0.8;
+    const dashW = 5.0, gapW = 4.0;
     for (final t in [0.25, 0.5, 0.75]) {
       final y = plot.bottom - plot.height * t;
-      canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
+      var x = plot.left;
+      while (x < plot.right) {
+        final next = x + dashW < plot.right ? x + dashW : plot.right;
+        canvas.drawLine(Offset(x, y), Offset(next, y), gridPaint);
+        x = next + gapW;
+      }
     }
 
     Offset point(int i, double v) {
@@ -1128,21 +1024,22 @@ class _ProfitAreaPainter extends CustomPainter {
     areaPath.close();
 
     final fillPaint = Paint()
-      ..color = areaColor.withValues(alpha: 0.14)
+      ..color = areaColor.withAlpha(20)
       ..style = PaintingStyle.fill;
     canvas.drawPath(areaPath, fillPaint);
 
+    // Flat caps — no rounded "soft wellness app" strokes.
     final revenuePaint = Paint()
       ..color = revenueColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round
+      ..strokeCap = StrokeCap.butt
       ..strokeJoin = StrokeJoin.round;
     final expensePaint = Paint()
       ..color = expenseColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round
+      ..strokeCap = StrokeCap.butt
       ..strokeJoin = StrokeJoin.round;
 
     Path linePath(List<Offset> pts) {
@@ -1164,10 +1061,11 @@ class _ProfitAreaPainter extends CustomPainter {
       ..strokeWidth = 2;
     canvas.drawLine(lastRevenue, lastExpense, gapPaint);
 
+    // Flat-capped square markers, matching every other chart in the app.
     final dotPaintRevenue = Paint()..color = revenueColor;
     final dotPaintExpense = Paint()..color = expenseColor;
-    canvas.drawCircle(lastRevenue, 4.5, dotPaintRevenue);
-    canvas.drawCircle(lastExpense, 4.5, dotPaintExpense);
+    canvas.drawRect(Rect.fromCenter(center: lastRevenue, width: 7, height: 7), dotPaintRevenue);
+    canvas.drawRect(Rect.fromCenter(center: lastExpense, width: 7, height: 7), dotPaintExpense);
   }
 
   @override

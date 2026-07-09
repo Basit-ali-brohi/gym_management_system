@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/in_app_pdf.dart';
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
@@ -181,7 +183,7 @@ class ExpensesScreen extends ConsumerWidget {
                 Navigator.of(context).pop();
                 await _runExpensesPdf(context, ref, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -189,7 +191,7 @@ class ExpensesScreen extends ConsumerWidget {
                 Navigator.of(context).pop();
                 await _runExpensesPdf(context, ref, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -260,17 +262,14 @@ class ExpensesScreen extends ConsumerWidget {
                         Container(
                           height: 52,
                           width: 52,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFFE06C6C).withAlpha(22),
-                          ),
-                          child: const Icon(Icons.account_balance_wallet_outlined, size: 26, color: Color(0xFFE06C6C)),
+                          decoration: AppTheme.iconBox(color: StatCategory.operational.color),
+                          child: Icon(PhosphorIconsRegular.wallet, size: 26, color: StatCategory.operational.color),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'No expenses found',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.archivo(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
                             color: theme.colorScheme.onSurface,
@@ -280,7 +279,7 @@ class ExpensesScreen extends ConsumerWidget {
                         Text(
                           'Add an expense or change the filters above.',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                          style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -308,13 +307,13 @@ class ExpensesScreen extends ConsumerWidget {
                   dividerColor: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
                   dataTableTheme: DataTableThemeData(
                     dividerThickness: 1,
-                    headingTextStyle: GoogleFonts.inter(
+                    headingTextStyle: GoogleFonts.archivo(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.3,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
-                    dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    dataTextStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     headingRowColor: WidgetStatePropertyAll(
                       isDark ? Colors.white.withAlpha(8) : Colors.black.withAlpha(5),
                     ),
@@ -339,7 +338,7 @@ class ExpensesScreen extends ConsumerWidget {
                           DataCell(Text(e.category)),
                           DataCell(Text(
                             number.format(e.amount),
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.archivo(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w600,
                               fontFeatures: const [FontFeature.tabularFigures()],
@@ -351,20 +350,20 @@ class ExpensesScreen extends ConsumerWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 AppTableActionButton(
-                                  icon: Icons.visibility_outlined,
+                                  icon: PhosphorIconsRegular.eye,
                                   tooltip: 'View',
                                   onPressed: () => _openViewExpense(context, e),
                                 ),
                                 const SizedBox(width: 2),
                                 AppTableActionButton(
-                                  icon: Icons.edit_outlined,
+                                  icon: PhosphorIconsRegular.pencilSimple,
                                   tooltip: 'Edit',
                                   onPressed: () => _openEditExpense(context, ref, e),
                                 ),
                                 if (canDelete) ...[
                                   const SizedBox(width: 2),
                                   AppTableActionButton(
-                                    icon: Icons.delete_outline,
+                                    icon: PhosphorIconsRegular.trash,
                                     tooltip: 'Delete',
                                     danger: true,
                                     onPressed: () => _confirmDelete(context, ref, e.id),
@@ -400,23 +399,23 @@ class ExpensesScreen extends ConsumerWidget {
           final todayCount = (s['today'] as Map?)?['count'] as num? ?? 0;
           final monthTotal = (s['thisMonth'] as Map?)?['total'] as num? ?? 0;
           final monthCount = (s['thisMonth'] as Map?)?['count'] as num? ?? 0;
+          // Both are financial figures — same ember category, not a
+          // different colour per card (same fix as Payments).
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _MetricCard(
-                title: 'Today',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'Today',
                 value: number.format(todayTotal),
-                subtitle: '${todayCount.toInt()} entries',
-                icon: Icons.today_outlined,
-                accent: theme.colorScheme.primary,
+                footnote: '${todayCount.toInt()} ENTRIES',
               ),
               const SizedBox(height: 12),
-              _MetricCard(
-                title: 'This Month',
+              CategoryStatCard(
+                category: StatCategory.financial,
+                label: 'This Month',
                 value: number.format(monthTotal),
-                subtitle: '${monthCount.toInt()} entries',
-                icon: Icons.calendar_month_outlined,
-                accent: const Color(0xFFF59E0B),
+                footnote: '${monthCount.toInt()} ENTRIES',
               ),
             ],
           );
@@ -435,23 +434,23 @@ class ExpensesScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Expanded(child: Text('Expenses', style: theme.textTheme.headlineSmall)),
+              const Expanded(child: AppPageTitle('Expenses')),
               FilledButton.icon(
                 onPressed: () => _openAddExpense(context, ref),
-                icon: const Icon(Icons.add),
+                icon: const Icon(PhosphorIconsRegular.plus),
                 label: const Text('Add'),
               ),
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'PDF',
                 onPressed: () => _openExpensesPdfActions(context, ref),
-                icon: const Icon(Icons.picture_as_pdf_outlined),
+                icon: const Icon(PhosphorIconsRegular.filePdf),
               ),
               const SizedBox(width: 6),
               IconButton(
                 tooltip: 'Refresh',
                 onPressed: () => ref.read(expensesControllerProvider.notifier).load(),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(PhosphorIconsRegular.arrowClockwise),
               ),
             ],
           ),
@@ -471,11 +470,11 @@ class ExpensesScreen extends ConsumerWidget {
                     width: 300,
                     height: 40,
                     child: TextField(
-                      style: GoogleFonts.inter(fontSize: 13.5),
+                      style: GoogleFonts.archivo(fontSize: 13.5),
                       decoration: appDenseInputDecoration(
                         context,
                         hint: 'Search category / notes',
-                        prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                        prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                       ),
                       onChanged: (v) => ref.read(expensesQueryProvider.notifier).state = query.copyWith(q: v),
                       onSubmitted: (_) => ref.read(expensesControllerProvider.notifier).load(),
@@ -485,11 +484,11 @@ class ExpensesScreen extends ConsumerWidget {
                     width: 200,
                     height: 40,
                     child: TextField(
-                      style: GoogleFonts.inter(fontSize: 13.5),
+                      style: GoogleFonts.archivo(fontSize: 13.5),
                       decoration: appDenseInputDecoration(
                         context,
                         hint: 'Category (exact)',
-                        prefixIcon: Icon(Icons.label_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                        prefixIcon: Icon(PhosphorIconsRegular.tag, size: 18, color: theme.colorScheme.onSurfaceVariant),
                       ),
                       onChanged: (v) =>
                           ref.read(expensesQueryProvider.notifier).state = query.copyWith(category: v),
@@ -517,10 +516,10 @@ class ExpensesScreen extends ConsumerWidget {
                         await ref.read(expensesControllerProvider.notifier).load();
                         ref.invalidate(expensesSummaryProvider);
                       },
-                      icon: Icon(Icons.calendar_today_outlined, size: 15, color: theme.colorScheme.onSurfaceVariant),
+                      icon: Icon(PhosphorIconsRegular.calendarBlank, size: 15, color: theme.colorScheme.onSurfaceVariant),
                       label: Text(
                         '${query.from} → ${query.to}',
-                        style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w500),
+                        style: GoogleFonts.archivo(fontSize: 12.5, fontWeight: FontWeight.w500),
                       ),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -541,7 +540,7 @@ class ExpensesScreen extends ConsumerWidget {
                       },
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
-                        textStyle: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w700),
+                        textStyle: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w700),
                       ),
                       child: const Text('Apply'),
                     ),
@@ -612,7 +611,7 @@ class ExpensesScreen extends ConsumerWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.add,
+      icon: PhosphorIconsRegular.plus,
       title: 'Add Expense',
       subtitle: 'Record an expense entry',
       body: StatefulBuilder(
@@ -625,7 +624,7 @@ class ExpensesScreen extends ConsumerWidget {
               const FormSectionLabel(
                 'Expense Details',
                 hint: 'Logged to the cash book for clean, audit-ready bookkeeping.',
-                icon: Icons.receipt_long_outlined,
+                icon: PhosphorIconsRegular.receipt,
               ),
               const SizedBox(height: 16),
               // Category | Amount
@@ -687,7 +686,7 @@ class ExpensesScreen extends ConsumerWidget {
                   readOnly: true,
                   decoration: const InputDecoration(
                     labelText: 'Expense Date',
-                    suffixIcon: Icon(Icons.calendar_today_outlined),
+                    suffixIcon: Icon(PhosphorIconsRegular.calendarBlank),
                   ),
                   onTap: () async {
                     final current = DateTime.tryParse(dateCtrl.text.trim());
@@ -725,7 +724,7 @@ class ExpensesScreen extends ConsumerWidget {
                 maxLines: 2,
               ),
               const SizedBox(height: 18),
-              const FormSectionLabel('Receipt Voucher', icon: Icons.attach_file_outlined),
+              const FormSectionLabel('Receipt Voucher', icon: PhosphorIconsRegular.paperclip),
               const SizedBox(height: 12),
               _ReceiptDropZone(
                 fileName: receiptName,
@@ -833,7 +832,7 @@ class ExpensesScreen extends ConsumerWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.edit_outlined,
+      icon: PhosphorIconsRegular.pencilSimple,
       title: 'Edit Expense',
       subtitle: '${e.category} • ${_fmtDateOnly(e.expenseDate)}',
       body: LayoutBuilder(
@@ -905,7 +904,7 @@ class ExpensesScreen extends ConsumerWidget {
                     TextField(
                       controller: dateCtrl,
                       readOnly: true,
-                      decoration: const InputDecoration(labelText: 'Expense Date', suffixIcon: Icon(Icons.calendar_today_outlined)),
+                      decoration: const InputDecoration(labelText: 'Expense Date', suffixIcon: Icon(PhosphorIconsRegular.calendarBlank)),
                       onTap: () async {
                         final current = DateTime.tryParse(dateCtrl.text.trim());
                         final picked = await showDatePicker(
@@ -1010,18 +1009,18 @@ class ExpensesScreen extends ConsumerWidget {
 
 IconData _expenseCategoryIcon(String raw) {
   final v = raw.trim().toLowerCase();
-  if (v.contains('rent')) return Icons.apartment;
-  if (v.contains('electric')) return Icons.bolt;
-  if (v.contains('internet') || v.contains('wifi')) return Icons.wifi;
-  if (v.contains('clean')) return Icons.cleaning_services;
-  if (v.contains('supply')) return Icons.inventory_2;
-  if (v.contains('equip') || v.contains('repair')) return Icons.build_circle_outlined;
-  if (v.contains('maint')) return Icons.handyman_outlined;
-  if (v.contains('salary') || v.contains('staff')) return Icons.badge_outlined;
-  if (v.contains('water')) return Icons.water_drop_outlined;
-  if (v.contains('marketing') || v.contains('ads')) return Icons.campaign_outlined;
-  if (v.contains('other') || v.contains('misc')) return Icons.more_horiz;
-  return Icons.category_outlined;
+  if (v.contains('rent')) return PhosphorIconsRegular.buildings;
+  if (v.contains('electric')) return PhosphorIconsRegular.lightning;
+  if (v.contains('internet') || v.contains('wifi')) return PhosphorIconsRegular.wifiHigh;
+  if (v.contains('clean')) return PhosphorIconsRegular.broom;
+  if (v.contains('supply')) return PhosphorIconsRegular.package;
+  if (v.contains('equip') || v.contains('repair')) return PhosphorIconsRegular.wrench;
+  if (v.contains('maint')) return PhosphorIconsRegular.wrench;
+  if (v.contains('salary') || v.contains('staff')) return PhosphorIconsRegular.identificationBadge;
+  if (v.contains('water')) return PhosphorIconsRegular.drop;
+  if (v.contains('marketing') || v.contains('ads')) return PhosphorIconsRegular.megaphone;
+  if (v.contains('other') || v.contains('misc')) return PhosphorIconsRegular.dotsThree;
+  return PhosphorIconsRegular.squaresFour;
 }
 
 /// Dashed "upload receipt" drop-zone shown in the Add Expense form. A clean
@@ -1049,7 +1048,7 @@ class _ReceiptDropZone extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.description_outlined, color: cs.primary),
+            Icon(PhosphorIconsRegular.fileText, color: cs.primary),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1071,7 +1070,7 @@ class _ReceiptDropZone extends StatelessWidget {
             IconButton(
               tooltip: 'Remove',
               onPressed: onPick,
-              icon: Icon(Icons.close, size: 18, color: cs.onSurfaceVariant),
+              icon: Icon(PhosphorIconsRegular.x, size: 18, color: cs.onSurfaceVariant),
             ),
           ],
         ),
@@ -1091,7 +1090,7 @@ class _ReceiptDropZone extends StatelessWidget {
                 color: cs.primary.withAlpha(22),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.cloud_upload_outlined, color: cs.primary),
+              child: Icon(PhosphorIconsRegular.uploadSimple, color: cs.primary),
             ),
             const SizedBox(height: 10),
             Text(
@@ -1106,7 +1105,7 @@ class _ReceiptDropZone extends StatelessWidget {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: onPick,
-              icon: const Icon(Icons.upload_file_outlined, size: 18),
+              icon: const Icon(PhosphorIconsRegular.uploadSimple, size: 18),
               label: const Text('Upload Invoice File'),
             ),
           ],
@@ -1139,7 +1138,7 @@ class _ExpenseAmountField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: 'Expense Amount (Rs.)',
         hintText: '0.00',
-        prefixIcon: Icon(Icons.account_balance_wallet_rounded, color: brand),
+        prefixIcon: Icon(PhosphorIconsRegular.wallet, color: brand),
       ),
       validator: (value) {
         if (value == null || value.trim().isEmpty) {
@@ -1155,113 +1154,4 @@ class _ExpenseAmountField extends StatelessWidget {
   }
 }
 
-/// Financial summary card for the right-hand sidebar. Fills its parent width
-/// and renders the accumulation figure in Bebas Neue.
-class _MetricCard extends StatefulWidget {
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.accent,
-  });
-
-  final String title;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color accent;
-
-  @override
-  State<_MetricCard> createState() => _MetricCardState();
-}
-
-class _MetricCardState extends State<_MetricCard> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppTheme.charcoal : theme.colorScheme.surface,
-          border: Border.all(
-            color: _hover
-                ? widget.accent.withAlpha(90)
-                : (isDark ? AppTheme.borderSubtle : theme.colorScheme.outlineVariant),
-            width: _hover ? 1.0 : 0.8,
-          ),
-          boxShadow: _hover
-              ? [BoxShadow(color: widget.accent.withAlpha(40), blurRadius: 26, offset: const Offset(0, 12))]
-              : [BoxShadow(color: Colors.black.withAlpha(isDark ? 55 : 12), blurRadius: 14, offset: const Offset(0, 6))],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    height: 36,
-                    width: 36,
-                    decoration: BoxDecoration(
-                      color: widget.accent.withAlpha(28),
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: widget.accent.withAlpha(60), width: 0.8),
-                    ),
-                    child: Icon(widget.icon, color: widget.accent, size: 19),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  widget.value,
-                  maxLines: 1,
-                  style: GoogleFonts.bebasNeue(
-                    fontSize: 38,
-                    height: 1.0,
-                    letterSpacing: 1.5,
-                    color: widget.accent,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                widget.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +12,9 @@ import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/in_app_pdf.dart';
@@ -320,7 +323,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 Navigator.of(context).pop();
                 await _runMembersPdf(context, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -328,7 +331,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 Navigator.of(context).pop();
                 await _runMembersPdf(context, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -481,78 +484,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             final expired = items.where((m) => m.status == 'expired').length;
             final inactive = items.where((m) => m.status == 'inactive').length;
 
-            // Flex metric tile — no fixed width. The parent grid wraps each in
-            // an Expanded so 4 tiles span the container edge-to-edge.
-            Widget metricCard({
-              required String title,
-              required String value,
-              required String subtitle,
-              required IconData icon,
-              required Color accent,
-            }) {
-              return Card(
-                margin: EdgeInsets.zero,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Container(
-                        height: 42,
-                        width: 42,
-                        decoration: BoxDecoration(
-                          color: accent.withAlpha(28),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                        ),
-                        child: Icon(icon, color: accent, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.inter(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w500,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              value,
-                              style: theme.textTheme.headlineSmall?.copyWith(color: accent),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.inter(
-                                fontSize: 11.5,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-
             final search = TextField(
               controller: _searchCtrl,
-              style: GoogleFonts.inter(fontSize: 13.5),
+              style: GoogleFonts.archivo(fontSize: 13.5),
               decoration: appDenseInputDecoration(
                 context,
                 hint: 'Search code / name / phone',
-                prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
               ),
               onChanged: (v) {
                 _debounce?.cancel();
@@ -568,19 +506,19 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               _HoverScaleButton(
                 child: OutlinedButton.icon(
                   onPressed: items.isEmpty ? null : () => _exportMembersCsv(context, items),
-                  icon: const Icon(Icons.download_outlined),
+                  icon: const Icon(PhosphorIconsRegular.downloadSimple),
                   label: const Text('Export'),
                 ),
               ),
               IconButton(
                 tooltip: 'PDF',
                 onPressed: () => _openMembersPdfActions(context),
-                icon: const Icon(Icons.picture_as_pdf_outlined),
+                icon: const Icon(PhosphorIconsRegular.filePdf),
               ),
               _HoverScaleButton(
                 child: FilledButton.icon(
                   onPressed: () => _openAddMember(context),
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(PhosphorIconsRegular.plus),
                   label: const Text('Add Member'),
                 ),
               ),
@@ -589,7 +527,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 onPressed: () => ref
                     .read(membersControllerProvider.notifier)
                     .load(q: _searchCtrl.text.trim(), status: statusStr, from: fromStr, to: toStr),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(PhosphorIconsRegular.arrowClockwise),
               ),
             ];
 
@@ -597,7 +535,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text('Members', style: theme.textTheme.headlineSmall),
+                      const AppPageTitle('Members'),
                       const SizedBox(height: 12),
                       // Wrap so buttons flow to a second line instead of overflowing.
                       Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: actionButtons),
@@ -605,7 +543,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                   )
                 : Row(
                     children: [
-                      Expanded(child: Text('Members', style: theme.textTheme.headlineSmall)),
+                      Expanded(child: const AppPageTitle('Members')),
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -629,33 +567,29 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 Builder(
                   builder: (context) {
                     final tiles = <Widget>[
-                      metricCard(
-                        title: 'Total Members',
+                      CategoryStatCard(
+                        category: StatCategory.operational,
+                        label: 'Total Members',
                         value: '$total',
-                        subtitle: 'In your gym',
-                        icon: Icons.groups_outlined,
-                        accent: theme.colorScheme.primary,
+                        footnote: 'IN YOUR GYM',
                       ),
-                      metricCard(
-                        title: 'Active',
+                      CategoryStatCard(
+                        category: StatCategory.membership,
+                        label: 'Active',
                         value: '$active',
-                        subtitle: 'Membership active',
-                        icon: Icons.verified_outlined,
-                        accent: theme.colorScheme.tertiary,
+                        footnote: 'MEMBERSHIP ACTIVE',
                       ),
-                      metricCard(
-                        title: 'Expired',
+                      CategoryStatCard(
+                        category: StatCategory.atRisk,
+                        label: 'Expired',
                         value: '$expired',
-                        subtitle: 'Past end-date',
-                        icon: Icons.schedule_outlined,
-                        accent: const Color(0xFFF59E0B),
+                        footnote: 'PAST END-DATE',
                       ),
-                      metricCard(
-                        title: 'Inactive',
+                      CategoryStatCard(
+                        category: StatCategory.operational,
+                        label: 'Inactive',
                         value: '$inactive',
-                        subtitle: 'Disabled / archived',
-                        icon: Icons.block_outlined,
-                        accent: theme.colorScheme.onSurfaceVariant,
+                        footnote: 'DISABLED / ARCHIVED',
                       ),
                     ];
                     final cols = stacked
@@ -711,7 +645,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               initialValue: value,
                               isDense: true,
                               isExpanded: true,
-                              style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                              style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                               decoration: appDenseInputDecoration(context),
                               items: items,
                               onChanged: onChanged,
@@ -741,10 +675,10 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                 if (picked == null) return;
                                 onPick(picked);
                               },
-                              icon: Icon(Icons.calendar_today_outlined, size: 15, color: isSet ? accent : theme.colorScheme.onSurfaceVariant),
+                              icon: Icon(PhosphorIconsRegular.calendarBlank, size: 15, color: isSet ? accent : theme.colorScheme.onSurfaceVariant),
                               label: Text(
                                 isSet ? _date.format(value) : fallback,
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.archivo(
                                   fontSize: 12.5,
                                   fontWeight: isSet ? FontWeight.w600 : FontWeight.w500,
                                   color: isSet ? accent : theme.colorScheme.onSurfaceVariant,
@@ -856,15 +790,17 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               children: [
                                 AppFilterPill(
                                   label: 'Frozen',
-                                  icon: Icons.ac_unit_rounded,
+                                  icon: PhosphorIconsRegular.snowflake,
                                   selected: _frozenOnly,
                                   onTap: () => setState(() => _frozenOnly = !_frozenOnly),
                                 ),
                                 AppFilterPill(
                                   label: 'Expiring (<=7d)',
-                                  icon: Icons.timelapse_rounded,
+                                  icon: PhosphorIconsRegular.timer,
                                   selected: _expiringOnly,
-                                  accentOverride: const Color(0xFFF59E0B),
+                                  // Muted amber — "coming due soon", distinct
+                                  // from the harsher at-risk/expired red.
+                                  accentOverride: AppTheme.alertAmber,
                                   onTap: () => setState(() => _expiringOnly = !_expiringOnly),
                                 ),
                                 dateButton(
@@ -880,14 +816,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                 const SizedBox(width: 2),
                                 Text(
                                   'Showing ${filteredPreview.length} of $total',
-                                  style: GoogleFonts.inter(
+                                  style: GoogleFonts.archivo(
                                     fontSize: 12.5,
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                                 AppFilterPill(
                                   label: 'Clear',
-                                  icon: Icons.close_rounded,
+                                  icon: PhosphorIconsRegular.x,
                                   selected: false,
                                   onTap: () {
                                     _searchCtrl.clear();
@@ -926,7 +862,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.filter_alt_off_outlined, size: 44, color: theme.colorScheme.onSurfaceVariant),
+                      Icon(PhosphorIconsRegular.funnel, size: 44, color: theme.colorScheme.onSurfaceVariant),
                       const SizedBox(height: 10),
                       Text('No members match filters', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 4),
@@ -983,13 +919,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                   : Colors.grey.shade200,
                               dataTableTheme: DataTableThemeData(
                                 dividerThickness: 1,
-                                headingTextStyle: GoogleFonts.inter(
+                                headingTextStyle: GoogleFonts.archivo(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.3,
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                                dataTextStyle: GoogleFonts.inter(
+                                dataTextStyle: GoogleFonts.archivo(
                                   fontSize: 13.5,
                                   color: theme.colorScheme.onSurface,
                                 ),
@@ -1058,7 +994,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                                   ),
                                                   child: Text(
                                                     daysLeft <= 0 ? 'Today' : '${daysLeft}d',
-                                                    style: GoogleFonts.inter(
+                                                    style: GoogleFonts.archivo(
                                                       fontSize: 11,
                                                       fontWeight: FontWeight.w600,
                                                       color: accent,
@@ -1078,13 +1014,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                         children: [
                                           // Two high-frequency actions stay exposed.
                                           AppTableActionButton(
-                                            icon: Icons.visibility_outlined,
+                                            icon: PhosphorIconsRegular.eye,
                                             tooltip: 'View',
                                             onPressed: () => _openMemberDetail(context, m),
                                           ),
                                           const SizedBox(width: 2),
                                           AppTableActionButton(
-                                            icon: Icons.edit_outlined,
+                                            icon: PhosphorIconsRegular.pencilSimple,
                                             tooltip: 'Edit',
                                             onPressed: () => _openEditMember(context, m),
                                           ),
@@ -1179,13 +1115,13 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                           Row(
                             children: [
                               AppTableActionButton(
-                                icon: Icons.visibility_outlined,
+                                icon: PhosphorIconsRegular.eye,
                                 tooltip: 'View',
                                 onPressed: () => _openMemberDetail(context, m),
                               ),
                               const SizedBox(width: 2),
                               AppTableActionButton(
-                                icon: Icons.edit_outlined,
+                                icon: PhosphorIconsRegular.pencilSimple,
                                 tooltip: 'Edit',
                                 onPressed: () => _openEditMember(context, m),
                               ),
@@ -1301,12 +1237,12 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               memberCode: (m['memberCode']?.toString() ?? member.memberCode),
                               fullName: fullName,
                             ),
-                            icon: const Icon(Icons.qr_code_2),
+                            icon: const Icon(PhosphorIconsRegular.qrCode),
                           ),
                           IconButton(
                             tooltip: 'Close',
                             onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close),
+                            icon: const Icon(PhosphorIconsRegular.x),
                           ),
                         ],
                       ),
@@ -1489,7 +1425,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.autorenew,
+      icon: PhosphorIconsRegular.arrowsClockwise,
       title: 'Renew Membership',
       subtitle: member.fullName,
       body: StatefulBuilder(
@@ -1535,7 +1471,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                             if (picked == null) return;
                             setModalState(() => startDate = picked);
                           },
-                          icon: const Icon(Icons.calendar_month),
+                          icon: const Icon(PhosphorIconsRegular.calendarDots),
                           label: Text('Start: ${DateFormat('yyyy-MM-dd').format(startDate)}'),
                         ),
                         const SizedBox(height: 12),
@@ -1638,7 +1574,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.ac_unit_outlined,
+      icon: PhosphorIconsRegular.snowflake,
       title: 'Freeze Member',
       subtitle: member.fullName,
       body: StatefulBuilder(
@@ -1659,7 +1595,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     if (picked == null) return;
                     setModalState(() => until = picked);
                   },
-                  icon: const Icon(Icons.calendar_month),
+                  icon: const Icon(PhosphorIconsRegular.calendarDots),
                   label: Text('Freeze until: ${DateFormat('yyyy-MM-dd').format(until)}'),
                 ),
                 const SizedBox(height: 12),
@@ -1800,7 +1736,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.person_add_alt_1_outlined,
+      icon: PhosphorIconsRegular.userPlus,
       title: 'Add Member',
       subtitle: 'Create member and assign membership plan',
       body: StatefulBuilder(
@@ -1818,7 +1754,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     const FormSectionLabel(
                       'Member Details',
                       hint: 'Identity & contact info for billing, contracts and birthday loyalty campaigns.',
-                      icon: Icons.badge_outlined,
+                      icon: PhosphorIconsRegular.identificationBadge,
                     ),
                     const SizedBox(height: 16),
                     // Row 1 — Member Code | Full Name
@@ -1909,7 +1845,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     const FormSectionLabel(
                       'Emergency & Safety',
                       hint: 'Captured for medical liability and rapid response during training.',
-                      icon: Icons.health_and_safety_outlined,
+                      icon: PhosphorIconsRegular.heartbeat,
                     ),
                     const SizedBox(height: 16),
                     // Emergency Contact Name | Emergency Phone
@@ -1953,7 +1889,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                       }),
                     ),
                     const SizedBox(height: 18),
-                    const FormSectionLabel('Membership', icon: Icons.card_membership_outlined),
+                    const FormSectionLabel('Membership', icon: PhosphorIconsRegular.identificationCard),
                     const SizedBox(height: 16),
                     plansAsync.when(
                           data: (plans) {
@@ -1962,7 +1898,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                 decoration: const InputDecoration(labelText: 'Membership Plan'),
                                 child: Row(
                                   children: const [
-                                    Icon(Icons.info_outline),
+                                    Icon(PhosphorIconsRegular.info),
                                     SizedBox(width: 8),
                                     Expanded(child: Text('No plans found. Create a plan first.')),
                                   ],
@@ -1999,14 +1935,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                               decoration: const InputDecoration(labelText: 'Membership Plan'),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.warning_amber),
+                                  const Icon(PhosphorIconsRegular.warning),
                                   const SizedBox(width: 8),
                                   Expanded(child: Text(e.toString())),
                                   const SizedBox(width: 8),
                                   IconButton(
                                     tooltip: 'Retry',
                                     onPressed: () => r.invalidate(plansLookupProvider),
-                                    icon: const Icon(Icons.refresh),
+                                    icon: const Icon(PhosphorIconsRegular.arrowClockwise),
                                   ),
                                 ],
                               ),
@@ -2089,7 +2025,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.edit_outlined,
+      icon: PhosphorIconsRegular.pencilSimple,
       title: 'Edit Member',
       subtitle: '${member.fullName} (${member.memberCode})',
       body: StatefulBuilder(
@@ -2129,7 +2065,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                     decoration: const InputDecoration(labelText: 'Membership Plan'),
                                     child: Row(
                                       children: const [
-                                        Icon(Icons.info_outline),
+                                        Icon(PhosphorIconsRegular.info),
                                         SizedBox(width: 8),
                                         Expanded(child: Text('No plans found. Create a plan first.')),
                                       ],
@@ -2172,7 +2108,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                                           if (picked == null) return;
                                           setModalState(() => startDate = picked);
                                         },
-                                        icon: const Icon(Icons.date_range),
+                                        icon: const Icon(PhosphorIconsRegular.calendarBlank),
                                         label: Text(_pretty.format(startDate)),
                                       ),
                                     ),
@@ -2355,14 +2291,14 @@ class _EmptyState extends StatelessWidget {
                   radius: 28,
                   backgroundColor: theme.colorScheme.primaryContainer,
                   foregroundColor: theme.colorScheme.onPrimaryContainer,
-                  child: const Icon(Icons.people, size: 28),
+                  child: const Icon(PhosphorIconsRegular.users, size: 28),
                 ),
                 const SizedBox(height: 12),
                 Text('No members yet', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text('Add your first member to start attendance & billing.', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 16),
-                FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Add Member')),
+                FilledButton.icon(onPressed: onAdd, icon: const Icon(PhosphorIconsRegular.plus), label: const Text('Add Member')),
               ],
             ),
           ),
@@ -2382,39 +2318,34 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    late final Color accent;
+    // Category colours per the app-wide system: active = membership (spotter),
+    // expired = at-risk (alert), everything else (frozen/inactive) = neutral
+    // operational (iron). Same meaning as on every other page.
+    late final StatCategory category;
     late final String label;
     if (frozen) {
-      accent = const Color(0xFF3B82F6); // blue — paused, not failed
+      category = StatCategory.operational;
       label = 'frozen';
     } else if (status == 'active') {
-      accent = theme.colorScheme.tertiary; // emerald
+      category = StatCategory.membership;
       label = 'active';
     } else if (status == 'expired') {
-      accent = const Color(0xFFF59E0B); // amber
+      category = StatCategory.atRisk;
       label = 'expired';
     } else {
-      accent = theme.colorScheme.onSurfaceVariant; // muted grey
+      category = StatCategory.operational;
       label = status;
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: accent.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+        color: category.soft,
+        borderRadius: AppRadius.smallAll,
       ),
       child: Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: accent,
-          letterSpacing: 0.1,
-        ),
+        label.toUpperCase(),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }
@@ -2464,7 +2395,7 @@ class _MemberActionsMenu extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: danger ? _mutedRed : theme.colorScheme.onSurfaceVariant),
           const SizedBox(width: 12),
-          Text(label, style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
+          Text(label, style: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w500, color: color)),
         ],
       ),
     );
@@ -2479,15 +2410,15 @@ class _MemberActionsMenu extends StatelessWidget {
       tooltip: 'More actions',
       position: PopupMenuPosition.under,
       elevation: 10,
-      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      color: isDark ? AppTheme.charcoalHigh : Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppRadius.smallAll,
         side: BorderSide(
-          color: isDark ? Colors.white.withAlpha(22) : Colors.black.withAlpha(16),
+          color: isDark ? AppTheme.borderHover : AppTheme.line,
           width: 0.8,
         ),
       ),
-      icon: Icon(Icons.more_vert, size: 18, color: theme.colorScheme.onSurfaceVariant),
+      icon: Icon(PhosphorIconsRegular.dotsThreeVertical, size: 18, color: theme.colorScheme.onSurfaceVariant),
       onSelected: (v) {
         switch (v) {
           case 'renew':
@@ -2508,14 +2439,14 @@ class _MemberActionsMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        if (canManageMembership) _item(context, 'renew', Icons.autorenew, 'Renew membership'),
+        if (canManageMembership) _item(context, 'renew', PhosphorIconsRegular.arrowsClockwise, 'Renew membership'),
         if (canManageMembership)
-          _item(context, 'freeze', frozen ? Icons.play_circle_outline : Icons.ac_unit_outlined,
+          _item(context, 'freeze', frozen ? PhosphorIconsRegular.playCircle : PhosphorIconsRegular.snowflake,
               frozen ? 'Unfreeze member' : 'Freeze member'),
-        if (canManageMembership && hasPlan) _item(context, 'removePlan', Icons.link_off, 'Remove plan'),
-        _item(context, 'qr', Icons.qr_code_2, 'Show QR code'),
+        if (canManageMembership && hasPlan) _item(context, 'removePlan', PhosphorIconsRegular.linkBreak, 'Remove plan'),
+        _item(context, 'qr', PhosphorIconsRegular.qrCode, 'Show QR code'),
         if (canDelete) const PopupMenuDivider(),
-        if (canDelete) _item(context, 'delete', Icons.delete_outline, 'Delete member', danger: true),
+        if (canDelete) _item(context, 'delete', PhosphorIconsRegular.trash, 'Delete member', danger: true),
       ],
     );
   }

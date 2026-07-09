@@ -1,13 +1,15 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
-import '../../core/app_theme.dart';
+import '../../core/app_theme.dart'; // AppTheme + AppTypography + StatCategory
 import '../../core/form_dialog.dart';
+import '../../core/gym_floor_components.dart'; // CategoryStatCard
 import '../../core/providers.dart';
 import '../../core/ui_kit.dart';
 import '../../core/in_app_pdf.dart';
@@ -105,7 +107,7 @@ class StaffScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runStaffPdf(context, ref, preview: true, today: today);
               },
-              icon: const Icon(Icons.visibility_outlined),
+              icon: const Icon(PhosphorIconsRegular.eye),
               label: const Text('Preview'),
             ),
             FilledButton.icon(
@@ -113,7 +115,7 @@ class StaffScreen extends ConsumerStatefulWidget {
                 Navigator.of(context).pop();
                 await _runStaffPdf(context, ref, preview: false, today: today);
               },
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(PhosphorIconsRegular.downloadSimple),
               label: const Text('Download'),
             ),
           ],
@@ -156,65 +158,6 @@ class StaffScreen extends ConsumerStatefulWidget {
     final disabled = itemsPreview.where((u) => u.status != 'active').length;
     final admins = itemsPreview.where((u) => u.roles.contains('admin')).length;
 
-    // Flex team metric tile — fills its parent (no fixed width) so 4 tiles
-    // span edge-to-edge. Count rendered in Bebas Neue.
-    Widget metricCard({
-      required String title,
-      required String value,
-      required String subtitle,
-      required IconData icon,
-      required Color accent,
-    }) {
-      return Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                height: 42,
-                width: 42,
-                decoration: BoxDecoration(
-                  color: accent.withAlpha(28),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withAlpha(60), width: 0.8),
-                ),
-                child: Icon(icon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(value, style: theme.textTheme.headlineSmall?.copyWith(color: accent)),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     String fmtDate(String raw) {
       final parsed = DateTime.tryParse(raw);
       if (parsed == null) return raw;
@@ -226,23 +169,23 @@ class StaffScreen extends ConsumerStatefulWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text('Staff', style: theme.textTheme.headlineSmall)),
+            const Expanded(child: AppPageTitle('Staff')),
             FilledButton.icon(
               onPressed: () => _openInvite(context, ref),
-              icon: const Icon(Icons.person_add),
+              icon: const Icon(PhosphorIconsRegular.userPlus),
               label: const Text('Invite'),
             ),
             const SizedBox(width: 8),
             IconButton(
               tooltip: 'PDF',
               onPressed: () => _openStaffPdfActions(context, ref),
-              icon: const Icon(Icons.picture_as_pdf_outlined),
+              icon: const Icon(PhosphorIconsRegular.filePdf),
             ),
             const SizedBox(width: 6),
             IconButton(
               tooltip: 'Refresh',
               onPressed: () => ref.read(staffControllerProvider.notifier).load(),
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(PhosphorIconsRegular.arrowClockwise),
             ),
           ],
         ),
@@ -251,33 +194,29 @@ class StaffScreen extends ConsumerStatefulWidget {
         LayoutBuilder(
           builder: (context, c) {
             final tiles = <Widget>[
-              metricCard(
-                title: 'Total users',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Total users',
                 value: '$total',
-                subtitle: 'Team members',
-                icon: Icons.groups_outlined,
-                accent: theme.colorScheme.primary,
+                footnote: 'TEAM MEMBERS',
               ),
-              metricCard(
-                title: 'Active',
+              CategoryStatCard(
+                category: StatCategory.membership,
+                label: 'Active',
                 value: '$active',
-                subtitle: 'Can login',
-                icon: Icons.verified_outlined,
-                accent: theme.colorScheme.tertiary,
+                footnote: 'CAN LOGIN',
               ),
-              metricCard(
-                title: 'Disabled',
+              CategoryStatCard(
+                category: StatCategory.atRisk,
+                label: 'Disabled',
                 value: '$disabled',
-                subtitle: 'Blocked',
-                icon: Icons.block_outlined,
-                accent: const Color(0xFFE06C6C),
+                footnote: 'BLOCKED',
               ),
-              metricCard(
-                title: 'Admins',
+              CategoryStatCard(
+                category: StatCategory.operational,
+                label: 'Admins',
                 value: '$admins',
-                subtitle: 'Has admin role',
-                icon: Icons.admin_panel_settings_outlined,
-                accent: const Color(0xFF3B82F6),
+                footnote: 'HAS ADMIN ROLE',
               ),
             ];
             final cols = c.maxWidth >= 900
@@ -327,7 +266,7 @@ class StaffScreen extends ConsumerStatefulWidget {
                     initialValue: state._statusFilter,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Statuses')),
@@ -345,7 +284,7 @@ class StaffScreen extends ConsumerStatefulWidget {
                     initialValue: state._sort,
                     isDense: true,
                     isExpanded: true,
-                    style: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                    style: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                     decoration: appDenseInputDecoration(context),
                     items: const [
                       DropdownMenuItem(value: 'name_asc', child: Text('Name A-Z')),
@@ -360,18 +299,18 @@ class StaffScreen extends ConsumerStatefulWidget {
                   height: 40,
                   child: TextField(
                     controller: state._searchCtrl,
-                    style: GoogleFonts.inter(fontSize: 13.5),
+                    style: GoogleFonts.archivo(fontSize: 13.5),
                     decoration: appDenseInputDecoration(
                       context,
                       hint: 'Search staff, role, status',
-                      prefixIcon: Icon(Icons.search, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass, size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     onChanged: (_) => state._touchFilters(),
                   ),
                 ),
                 AppFilterPill(
                   label: 'Clear',
-                  icon: Icons.close_rounded,
+                  icon: PhosphorIconsRegular.x,
                   selected: false,
                   onTap: () => state._clearFilters(),
                 ),
@@ -386,7 +325,7 @@ class StaffScreen extends ConsumerStatefulWidget {
               return const _EmptyState(
                 title: 'No staff users',
                 subtitle: 'Invite staff to control access and audit activity.',
-                icon: Icons.badge,
+                icon: PhosphorIconsRegular.identificationBadge,
               );
             }
 
@@ -422,13 +361,13 @@ class StaffScreen extends ConsumerStatefulWidget {
                               dividerColor: isDark ? Colors.white.withAlpha(15) : Colors.grey.shade200,
                               dataTableTheme: DataTableThemeData(
                                 dividerThickness: 1,
-                                headingTextStyle: GoogleFonts.inter(
+                                headingTextStyle: GoogleFonts.archivo(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.3,
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                                dataTextStyle: GoogleFonts.inter(fontSize: 13.5, color: theme.colorScheme.onSurface),
+                                dataTextStyle: GoogleFonts.archivo(fontSize: 13.5, color: theme.colorScheme.onSurface),
                                 headingRowColor: WidgetStatePropertyAll(
                                   isDark ? Colors.white.withAlpha(8) : Colors.black.withAlpha(5),
                                 ),
@@ -452,18 +391,18 @@ class StaffScreen extends ConsumerStatefulWidget {
                                     cells: [
                                       DataCell(Text(
                                         u.fullName,
-                                        style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
+                                        style: GoogleFonts.archivo(fontSize: 13.5, fontWeight: FontWeight.w600),
                                       )),
                                       // Email in Inter, muted, for a technical look.
                                       DataCell(Text(
                                         u.email,
-                                        style: GoogleFonts.inter(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+                                        style: GoogleFonts.archivo(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
                                       )),
                                       DataCell(Wrap(spacing: 6, children: [for (final r in u.roles) _RoleChip(role: r)])),
                                       DataCell(_StatusChip(status: u.status)),
                                       DataCell(Text(
                                         fmtDate(u.createdAt),
-                                        style: GoogleFonts.inter(
+                                        style: GoogleFonts.archivo(
                                           fontSize: 13,
                                           color: theme.colorScheme.onSurfaceVariant,
                                           fontFeatures: const [FontFeature.tabularFigures()],
@@ -475,19 +414,19 @@ class StaffScreen extends ConsumerStatefulWidget {
                                           children: [
                                             // Hover-circle actions with a wider gap to avoid misclicks.
                                             AppTableActionButton(
-                                              icon: Icons.visibility_outlined,
+                                              icon: PhosphorIconsRegular.eye,
                                               tooltip: 'View',
                                               onPressed: () => _openView(context, u),
                                             ),
                                             const SizedBox(width: 8),
                                             AppTableActionButton(
-                                              icon: Icons.manage_accounts_outlined,
+                                              icon: PhosphorIconsRegular.userGear,
                                               tooltip: 'Manage roles',
                                               onPressed: () => _openRoles(context, ref, u),
                                             ),
                                             const SizedBox(width: 8),
                                             AppTableActionButton(
-                                              icon: u.status == 'active' ? Icons.block : Icons.check_circle_outline,
+                                              icon: u.status == 'active' ? PhosphorIconsRegular.prohibit : PhosphorIconsRegular.checkCircle,
                                               tooltip: u.status == 'active' ? 'Disable' : 'Enable',
                                               danger: u.status == 'active',
                                               onPressed: () => _confirmToggleStatus(context, ref, u),
@@ -514,7 +453,7 @@ class StaffScreen extends ConsumerStatefulWidget {
                               const Spacer(),
                               Text(
                                 'Showing ${number.format(filtered.length)} of ${number.format(items.length)}',
-                                style: GoogleFonts.inter(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
+                                style: GoogleFonts.archivo(fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -532,13 +471,13 @@ class StaffScreen extends ConsumerStatefulWidget {
                   itemBuilder: (context, i) {
                     final u = filtered[i];
                     return ListTile(
-                      leading: const Icon(Icons.badge),
+                      leading: const Icon(PhosphorIconsRegular.identificationBadge),
                       title: Text(u.fullName),
                       subtitle: Text('${u.email} • ${u.roles.join(', ')}'),
                       trailing: IconButton(
                         tooltip: 'Actions',
                         onPressed: () => _openActions(context, ref, u),
-                        icon: const Icon(Icons.more_vert),
+                        icon: const Icon(PhosphorIconsRegular.dotsThreeVertical),
                       ),
                     );
                   },
@@ -575,7 +514,7 @@ class StaffScreen extends ConsumerStatefulWidget {
 
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.person_add_alt_1_outlined,
+      icon: PhosphorIconsRegular.userPlus,
       title: 'Invite Staff',
       subtitle: 'Create staff user and assign roles',
       body: StatefulBuilder(
@@ -609,12 +548,12 @@ class StaffScreen extends ConsumerStatefulWidget {
                                 IconButton(
                                   tooltip: 'Generate',
                                   onPressed: () => setModalState(() => passCtrl.text = genPassword()),
-                                  icon: const Icon(Icons.auto_fix_high),
+                                  icon: const Icon(PhosphorIconsRegular.magicWand),
                                 ),
                                 IconButton(
                                   tooltip: showPass ? 'Hide' : 'Show',
                                   onPressed: () => setModalState(() => showPass = !showPass),
-                                  icon: Icon(showPass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                                  icon: Icon(showPass ? PhosphorIconsRegular.eyeSlash : PhosphorIconsRegular.eye),
                                 ),
                               ],
                             ),
@@ -722,7 +661,7 @@ class StaffScreen extends ConsumerStatefulWidget {
     var roles = user.roles.toSet();
     await showAppFormDialog<void>(
       context: context,
-      icon: Icons.manage_accounts_outlined,
+      icon: PhosphorIconsRegular.userGear,
       title: 'Edit Roles',
       subtitle: user.email,
       body: StatefulBuilder(
@@ -862,17 +801,17 @@ class StaffScreen extends ConsumerStatefulWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.visibility),
+                leading: const Icon(PhosphorIconsRegular.eye),
                 title: const Text('View'),
                 onTap: () => Navigator.of(context).pop('view'),
               ),
               ListTile(
-                leading: const Icon(Icons.manage_accounts),
+                leading: const Icon(PhosphorIconsRegular.userGear),
                 title: const Text('Edit roles'),
                 onTap: () => Navigator.of(context).pop('roles'),
               ),
               ListTile(
-                leading: Icon(next == 'disabled' ? Icons.block : Icons.check_circle_outline),
+                leading: Icon(next == 'disabled' ? PhosphorIconsRegular.prohibit : PhosphorIconsRegular.checkCircle),
                 title: Text(next == 'disabled' ? 'Disable' : 'Enable'),
                 onTap: () => Navigator.of(context).pop('status'),
               ),
@@ -889,8 +828,8 @@ class StaffScreen extends ConsumerStatefulWidget {
   }
 }
 
-/// Flat role pill — Inter, subtle tinted fill: owner → primary, admin →
-/// blue, staff/other → muted grey.
+/// Flat role pill: owner → brand accent (primary), admin/staff → neutral
+/// operational — no ad hoc colours outside the app's category system.
 class _RoleChip extends StatelessWidget {
   const _RoleChip({required this.role});
 
@@ -899,11 +838,7 @@ class _RoleChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = role == 'owner'
-        ? theme.colorScheme.primary
-        : role == 'admin'
-            ? const Color(0xFF3B82F6)
-            : theme.colorScheme.onSurfaceVariant;
+    final accent = role == 'owner' ? theme.colorScheme.primary : StatCategory.operational.color;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -913,7 +848,7 @@ class _RoleChip extends StatelessWidget {
       ),
       child: Text(
         role,
-        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+        style: GoogleFonts.archivo(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
       ),
     );
   }
@@ -980,7 +915,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 }
 
-/// Flat status pill — Inter, emerald for active, muted grey otherwise.
+/// Flat status pill: active = membership (spotter), everything else =
+/// neutral operational — same category system as every other page.
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
 
@@ -988,19 +924,17 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isActive = status == 'active';
-    final accent = isActive ? theme.colorScheme.tertiary : theme.colorScheme.onSurfaceVariant;
+    final category = isActive ? StatCategory.membership : StatCategory.operational;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: accent.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withAlpha(70), width: 0.8),
+        color: category.soft,
+        borderRadius: AppRadius.smallAll,
       ),
       child: Text(
-        status,
-        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: accent, letterSpacing: 0.1),
+        status.toUpperCase(),
+        style: AppTypography.uiLabel(color: category.color, fontSize: 11.5, weight: FontWeight.w700, letterSpacing: 0.15),
       ),
     );
   }

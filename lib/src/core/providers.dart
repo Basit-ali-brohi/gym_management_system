@@ -163,9 +163,9 @@ class AccentController extends StateNotifier<AppAccent> {
   }
 }
 
-/// The brand default — signature Sunset Orange. Used as the initial value of
+/// The brand default — "Gym Floor" ember. Used as the initial value of
 /// [accentColorProvider] and as the "reset to default" target.
-const kDefaultAccentColor = Color(0xFFFF7A00);
+const kDefaultAccentColor = Color(0xFFFF5A1F);
 
 /// The single unified source of truth for the live brand / primary colour used
 /// to build the app theme. Any widget can read it via `ref.watch` and update it
@@ -173,6 +173,37 @@ const kDefaultAccentColor = Color(0xFFFF7A00);
 final accentColorProvider = StateProvider<Color>((ref) {
   return kDefaultAccentColor; // Default Sunset Orange brand indicator
 });
+
+/// Whether the desktop navigation sidebar is pinned open (expanded) rather than
+/// the default collapsed hover-to-expand icon rail. Persisted so the choice
+/// survives restarts, exactly like [themeModeProvider] / [accentProvider].
+final sidebarPinnedProvider = StateNotifierProvider<SidebarPinnedController, bool>((ref) {
+  final store = ref.read(tokenStoreProvider);
+  return SidebarPinnedController(store);
+});
+
+class SidebarPinnedController extends StateNotifier<bool> {
+  // Default expanded (labeled) — the "Gym Floor" nav requires a visible icon
+  // + label on every item out of the box; hover-to-rail collapse remains
+  // available, but is opt-in rather than the default state.
+  SidebarPinnedController(this._store) : super(true) {
+    _bootstrap();
+  }
+
+  final TokenStore _store;
+
+  Future<void> _bootstrap() async {
+    final saved = await _store.getSidebarPinned();
+    if (mounted && saved != null) state = saved;
+  }
+
+  Future<void> setPinned(bool pinned) async {
+    state = pinned;
+    await _store.setSidebarPinned(pinned);
+  }
+
+  Future<void> toggle() => setPinned(!state);
+}
 
 class ThemeModeController extends StateNotifier<ThemeMode> {
   ThemeModeController(this._store) : super(ThemeMode.dark) {

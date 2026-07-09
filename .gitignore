@@ -52,3 +52,6 @@ app.*.map.json
 # Build artifacts
 server.zip
 *.zip
+
+# Claude Code local tooling config (not part of the app)
+.claude/

@@ -7,6 +7,7 @@ class TokenStore {
   static const _kAccent = 'accent_color';
   static const _kCustomAccent = 'custom_primary_color';
   static const _kServerUrl = 'server_url';
+  static const _kSidebarPinned = 'sidebar_pinned';
 
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -99,6 +100,22 @@ class TokenStore {
       await prefs.remove(_kServerUrl);
     } else {
       await prefs.setString(_kServerUrl, url.trim());
+    }
+  }
+
+  /// Whether the desktop navigation sidebar is pinned open (expanded) instead of
+  /// the default collapsed icon-rail. `null` = not chosen (defaults to rail).
+  Future<bool?> getSidebarPinned() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kSidebarPinned);
+  }
+
+  Future<void> setSidebarPinned(bool? pinned) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (pinned == null) {
+      await prefs.remove(_kSidebarPinned);
+    } else {
+      await prefs.setBool(_kSidebarPinned, pinned);
     }
   }
 }
