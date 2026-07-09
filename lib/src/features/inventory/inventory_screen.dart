@@ -774,6 +774,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                       headingRowHeight: 48,
                                       dataRowMinHeight: 52,
                                       dataRowMaxHeight: 58,
+                                      columnSpacing: 18,
+                                      horizontalMargin: 12,
                                       columns: const [
                                         DataColumn(label: Text('Name')),
                                         DataColumn(label: Text('SKU')),

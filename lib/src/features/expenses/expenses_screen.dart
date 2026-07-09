@@ -323,6 +323,11 @@ class ExpensesScreen extends ConsumerWidget {
                   headingRowHeight: 48,
                   dataRowMinHeight: 52,
                   dataRowMaxHeight: 58,
+                  // Match the compact spacing every other table in the app
+                  // uses (Material's default 56/24 was pushing the Action
+                  // column out of the visible width).
+                  columnSpacing: 18,
+                  horizontalMargin: 12,
                   columns: const [
                     DataColumn(label: Text('Date')),
                     DataColumn(label: Text('Category')),

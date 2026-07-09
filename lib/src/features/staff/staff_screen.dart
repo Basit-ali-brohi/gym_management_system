@@ -377,6 +377,8 @@ class StaffScreen extends ConsumerStatefulWidget {
                               headingRowHeight: 48,
                               dataRowMinHeight: 54,
                               dataRowMaxHeight: 60,
+                              columnSpacing: 18,
+                              horizontalMargin: 12,
                               columns: const [
                                 DataColumn(label: Text('Name')),
                                 DataColumn(label: Text('Email')),

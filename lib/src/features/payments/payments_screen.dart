@@ -542,11 +542,17 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                     method: paymentMethod,
                     reference: referenceCtrl.text,
                   );
+              if (!context.mounted) return;
+              final settled = amount >= selectedInvoice!.balance;
+              // Close the dialog FIRST, then invalidate. The dialog's own
+              // body watches unpaidInvoiceSearchProvider (the Consumer at
+              // the top of this function) — invalidating it before the
+              // dialog finishes popping forces that still-mounted Consumer
+              // to rebuild mid-teardown, which is what was throwing the
+              // "_dependents.isEmpty" framework assertion.
+              Navigator.of(context, rootNavigator: true).maybePop();
               // Also refresh the invoices list so status badges update globally.
               ref.invalidate(unpaidInvoiceSearchProvider);
-              if (!context.mounted) return;
-              Navigator.of(context, rootNavigator: true).maybePop();
-              final settled = amount >= selectedInvoice!.balance;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
@@ -905,6 +911,11 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                       headingRowHeight: 48,
                       dataRowMinHeight: 52,
                       dataRowMaxHeight: 58,
+                      // Match the compact spacing every other table in the app
+                      // uses (Material's default 56/24 is far too wide and was
+                      // pushing the Action column out of the visible width).
+                      columnSpacing: 18,
+                      horizontalMargin: 12,
                       columns: const [
                         DataColumn(label: Text('Invoice')),
                         DataColumn(label: Text('Member')),
