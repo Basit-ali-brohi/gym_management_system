@@ -544,15 +544,19 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen> {
                   );
               if (!context.mounted) return;
               final settled = amount >= selectedInvoice!.balance;
-              // Close the dialog FIRST, then invalidate. The dialog's own
-              // body watches unpaidInvoiceSearchProvider (the Consumer at
-              // the top of this function) — invalidating it before the
-              // dialog finishes popping forces that still-mounted Consumer
-              // to rebuild mid-teardown, which is what was throwing the
-              // "_dependents.isEmpty" framework assertion.
+              // NOTE: deliberately not invalidating unpaidInvoiceSearchProvider
+              // here. It's `.autoDispose` and only ever watched by this
+              // dialog's own Consumer above — Riverpod already resets it the
+              // moment that Consumer unmounts, so invalidating it here was
+              // redundant AND unsafe: Navigator.pop() doesn't synchronously
+              // tear down the dialog's Element (that happens on a later
+              // frame), so forcing this provider to notify — in either order
+              // relative to pop() — could still rebuild a Consumer mid-
+              // teardown, which is what threw the "_dependents.isEmpty"
+              // framework assertion. paymentsSummaryProvider (the thing that
+              // actually needs a global refresh) is already invalidated
+              // inside recordPayment() itself.
               Navigator.of(context, rootNavigator: true).maybePop();
-              // Also refresh the invoices list so status badges update globally.
-              ref.invalidate(unpaidInvoiceSearchProvider);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
