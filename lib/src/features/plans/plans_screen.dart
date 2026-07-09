@@ -60,6 +60,10 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
     required int durationDays,
     required double price,
     required double admissionFee,
+    int? sessionCredits,
+    int freezeAllowanceDays = 0,
+    bool autoRenew = false,
+    String? description,
   }) async {
     final token = ref.read(authControllerProvider).token;
     final api = ref.read(apiClientProvider);
@@ -68,6 +72,10 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
       'durationDays': durationDays,
       'price': price,
       'admissionFee': admissionFee,
+      'sessionCredits': sessionCredits,
+      'freezeAllowanceDays': freezeAllowanceDays,
+      'autoRenew': autoRenew,
+      'description': description?.trim().isEmpty == true ? null : description?.trim(),
     });
     await load();
   }
@@ -79,6 +87,10 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
     required double price,
     required double admissionFee,
     required String status,
+    int? sessionCredits,
+    int freezeAllowanceDays = 0,
+    bool autoRenew = false,
+    String? description,
   }) async {
     final token = ref.read(authControllerProvider).token;
     final api = ref.read(apiClientProvider);
@@ -88,6 +100,10 @@ class PlansController extends StateNotifier<AsyncValue<List<Plan>>> {
       'price': price,
       'admissionFee': admissionFee,
       'status': status,
+      'sessionCredits': sessionCredits,
+      'freezeAllowanceDays': freezeAllowanceDays,
+      'autoRenew': autoRenew,
+      'description': description?.trim().isEmpty == true ? null : description?.trim(),
     });
     await load();
   }
@@ -579,6 +595,10 @@ class PlansScreen extends ConsumerStatefulWidget {
               'Duration: ${plan.durationDays} days',
               'Price: ${plan.price}',
               'Admission Fee: ${plan.admissionFee}',
+              'Session Credits: ${plan.isUnlimitedSessions ? 'Unlimited' : plan.sessionCredits}',
+              'Freeze Allowance: ${plan.freezeAllowanceDays} days',
+              'Auto-Renewal: ${plan.autoRenew ? 'On' : 'Off'}',
+              if (plan.description != null) 'Notes: ${plan.description}',
               'Status: ${plan.status}',
             ].join('\n'),
           ),
@@ -595,7 +615,11 @@ class PlansScreen extends ConsumerStatefulWidget {
     final durationCtrl = TextEditingController(text: plan.durationDays.toString());
     final priceCtrl = TextEditingController(text: plan.price.toString());
     final admissionCtrl = TextEditingController(text: plan.admissionFee.toString());
+    final creditsCtrl = TextEditingController(text: plan.isUnlimitedSessions ? '' : plan.sessionCredits.toString());
+    final freezeCtrl = TextEditingController(text: plan.freezeAllowanceDays.toString());
+    final descriptionCtrl = TextEditingController(text: plan.description ?? '');
     var status = plan.status;
+    var autoRenew = plan.autoRenew;
 
     await showAppFormDialog<void>(
       context: context,
@@ -655,6 +679,50 @@ class PlansScreen extends ConsumerStatefulWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 20),
+                  Text('Plan Options', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      field(
+                        TextField(
+                          controller: creditsCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Session / Class Credits (optional)',
+                            hintText: 'Blank or 0 = unlimited',
+                          ),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: freezeCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Freeze Allowance (days) (optional)'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Auto-Renewal'),
+                    subtitle: const Text('Automatically renews when the plan duration ends'),
+                    value: autoRenew,
+                    onChanged: (v) => setModalState(() => autoRenew = v),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: descriptionCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Description (optional)',
+                      hintText: 'e.g. Includes 2 free PT sessions',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
                 ],
               );
             },
@@ -688,6 +756,10 @@ class PlansScreen extends ConsumerStatefulWidget {
                     price: price,
                     admissionFee: admission,
                     status: status,
+                    sessionCredits: int.tryParse(creditsCtrl.text.trim()),
+                    freezeAllowanceDays: int.tryParse(freezeCtrl.text.trim()) ?? 0,
+                    autoRenew: autoRenew,
+                    description: descriptionCtrl.text,
                   );
               if (!context.mounted) return;
               Navigator.of(context, rootNavigator: true).maybePop();
@@ -709,6 +781,9 @@ class PlansScreen extends ConsumerStatefulWidget {
     durationCtrl.dispose();
     priceCtrl.dispose();
     admissionCtrl.dispose();
+    creditsCtrl.dispose();
+    freezeCtrl.dispose();
+    descriptionCtrl.dispose();
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref, Plan plan) async {
@@ -745,7 +820,11 @@ class PlansScreen extends ConsumerStatefulWidget {
     final durationCtrl = TextEditingController(text: '30');
     final priceCtrl = TextEditingController(text: '3000');
     final admissionCtrl = TextEditingController(text: '0');
+    final creditsCtrl = TextEditingController();
+    final freezeCtrl = TextEditingController(text: '0');
+    final descriptionCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    bool autoRenew = false;
 
     Future<void> submit() async {
       if (!formKey.currentState!.validate()) return;
@@ -755,6 +834,10 @@ class PlansScreen extends ConsumerStatefulWidget {
               durationDays: int.parse(durationCtrl.text),
               price: double.parse(priceCtrl.text),
               admissionFee: double.parse(admissionCtrl.text),
+              sessionCredits: int.tryParse(creditsCtrl.text.trim()),
+              freezeAllowanceDays: int.tryParse(freezeCtrl.text.trim()) ?? 0,
+              autoRenew: autoRenew,
+              description: descriptionCtrl.text,
             );
         if (context.mounted) Navigator.of(context, rootNavigator: true).maybePop();
       } on ApiException catch (e) {
@@ -771,72 +854,132 @@ class PlansScreen extends ConsumerStatefulWidget {
       icon: PhosphorIconsRegular.plus,
       title: 'Add Plan',
       subtitle: 'Create membership plan details',
-      body: Form(
-        key: formKey,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final twoCol = constraints.maxWidth >= 680;
-            final fieldWidth = twoCol ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth;
-            Widget field(Widget child) => SizedBox(width: fieldWidth, child: child);
+      body: StatefulBuilder(
+        builder: (context, setModalState) {
+          return Form(
+            key: formKey,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final twoCol = constraints.maxWidth >= 680;
+                final fieldWidth = twoCol ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth;
+                Widget field(Widget child) => SizedBox(width: fieldWidth, child: child);
 
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Plan Details', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    field(
-                      TextFormField(
-                        controller: nameCtrl,
-                        decoration: const InputDecoration(labelText: 'Plan Name'),
-                        validator: (v) => (v == null || v.trim().length < 2) ? 'Name required' : null,
-                      ),
+                    Text('Plan Details', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        field(
+                          TextFormField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(labelText: 'Plan Name'),
+                            validator: (v) => (v == null || v.trim().length < 2) ? 'Name required' : null,
+                          ),
+                        ),
+                        field(
+                          TextFormField(
+                            controller: durationCtrl,
+                            decoration: const InputDecoration(labelText: 'Duration (days)'),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              final n = int.tryParse(v ?? '');
+                              if (n == null || n <= 0) return 'Valid days required';
+                              return null;
+                            },
+                          ),
+                        ),
+                        field(
+                          TextFormField(
+                            controller: priceCtrl,
+                            decoration: const InputDecoration(labelText: 'Price'),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              final n = double.tryParse(v ?? '');
+                              if (n == null || n <= 0) return 'Valid price required';
+                              return null;
+                            },
+                          ),
+                        ),
+                        field(
+                          TextFormField(
+                            controller: admissionCtrl,
+                            decoration: const InputDecoration(labelText: 'Admission Fee'),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              final n = double.tryParse(v ?? '');
+                              if (n == null || n < 0) return 'Valid fee required';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    field(
-                      TextFormField(
-                        controller: durationCtrl,
-                        decoration: const InputDecoration(labelText: 'Duration (days)'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          final n = int.tryParse(v ?? '');
-                          if (n == null || n <= 0) return 'Valid days required';
-                          return null;
-                        },
-                      ),
+                    const SizedBox(height: 20),
+                    Text('Plan Options', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        field(
+                          TextFormField(
+                            controller: creditsCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Session / Class Credits (optional)',
+                              hintText: 'Blank or 0 = unlimited',
+                            ),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return null;
+                              final n = int.tryParse(v.trim());
+                              if (n == null || n < 0) return 'Enter a valid number';
+                              return null;
+                            },
+                          ),
+                        ),
+                        field(
+                          TextFormField(
+                            controller: freezeCtrl,
+                            decoration: const InputDecoration(labelText: 'Freeze Allowance (days) (optional)'),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return null;
+                              final n = int.tryParse(v.trim());
+                              if (n == null || n < 0) return 'Enter a valid number';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    field(
-                      TextFormField(
-                        controller: priceCtrl,
-                        decoration: const InputDecoration(labelText: 'Price'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          final n = double.tryParse(v ?? '');
-                          if (n == null || n <= 0) return 'Valid price required';
-                          return null;
-                        },
-                      ),
+                    const SizedBox(height: 4),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Auto-Renewal'),
+                      subtitle: const Text('Automatically renews when the plan duration ends'),
+                      value: autoRenew,
+                      onChanged: (v) => setModalState(() => autoRenew = v),
                     ),
-                    field(
-                      TextFormField(
-                        controller: admissionCtrl,
-                        decoration: const InputDecoration(labelText: 'Admission Fee'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          final n = double.tryParse(v ?? '');
-                          if (n == null || n < 0) return 'Valid fee required';
-                          return null;
-                        },
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: descriptionCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Description (optional)',
+                        hintText: 'e.g. Includes 2 free PT sessions',
+                        alignLabelWithHint: true,
                       ),
                     ),
                   ],
-                ),
-              ],
-            );
-          },
-        ),
+                );
+              },
+            ),
+          );
+        },
       ),
       actions: [
         TextButton(
@@ -852,6 +995,9 @@ class PlansScreen extends ConsumerStatefulWidget {
     durationCtrl.dispose();
     priceCtrl.dispose();
     admissionCtrl.dispose();
+    creditsCtrl.dispose();
+    freezeCtrl.dispose();
+    descriptionCtrl.dispose();
   }
 }
 

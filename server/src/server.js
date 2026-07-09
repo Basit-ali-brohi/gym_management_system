@@ -411,6 +411,50 @@ const ensureOperationalTables = async () => {
   try {
     await execute("ALTER TABLE members ADD KEY ix_members_frozen_until (frozen_until)");
   } catch {}
+
+  // Plan Options: session credits, freeze allowance, auto-renew, description.
+  // Existing plans default to unlimited credits / 0 freeze days / auto-renew
+  // off, so nothing already saved changes behaviour.
+  try {
+    const sessionCreditsCol = await queryOne("SHOW COLUMNS FROM membership_plans LIKE 'session_credits'");
+    if (!sessionCreditsCol) await execute('ALTER TABLE membership_plans ADD COLUMN session_credits INT UNSIGNED NULL');
+  } catch {}
+  try {
+    const freezeAllowanceCol = await queryOne("SHOW COLUMNS FROM membership_plans LIKE 'freeze_allowance_days'");
+    if (!freezeAllowanceCol) {
+      await execute('ALTER TABLE membership_plans ADD COLUMN freeze_allowance_days INT UNSIGNED NOT NULL DEFAULT 0');
+    }
+  } catch {}
+  try {
+    const autoRenewCol = await queryOne("SHOW COLUMNS FROM membership_plans LIKE 'auto_renew'");
+    if (!autoRenewCol) await execute('ALTER TABLE membership_plans ADD COLUMN auto_renew TINYINT(1) NOT NULL DEFAULT 0');
+  } catch {}
+  try {
+    const planDescriptionCol = await queryOne("SHOW COLUMNS FROM membership_plans LIKE 'description'");
+    if (!planDescriptionCol) await execute('ALTER TABLE membership_plans ADD COLUMN description VARCHAR(500) NULL');
+  } catch {}
+
+  // Stock Details: cost price, category, supplier, per-product low-stock
+  // threshold. Existing products default to threshold=5 (the value the
+  // low-stock check already hardcoded), so nothing changes for them.
+  try {
+    const costPriceCol = await queryOne("SHOW COLUMNS FROM products LIKE 'cost_price'");
+    if (!costPriceCol) await execute('ALTER TABLE products ADD COLUMN cost_price DECIMAL(10,2) NULL');
+  } catch {}
+  try {
+    const categoryCol = await queryOne("SHOW COLUMNS FROM products LIKE 'category'");
+    if (!categoryCol) await execute('ALTER TABLE products ADD COLUMN category VARCHAR(100) NULL');
+  } catch {}
+  try {
+    const supplierCol = await queryOne("SHOW COLUMNS FROM products LIKE 'supplier'");
+    if (!supplierCol) await execute('ALTER TABLE products ADD COLUMN supplier VARCHAR(191) NULL');
+  } catch {}
+  try {
+    const lowStockThresholdCol = await queryOne("SHOW COLUMNS FROM products LIKE 'low_stock_threshold'");
+    if (!lowStockThresholdCol) {
+      await execute('ALTER TABLE products ADD COLUMN low_stock_threshold INT UNSIGNED NOT NULL DEFAULT 5');
+    }
+  } catch {}
 };
 
 const decodeLogoDataUrl = (logoUrl) => {
@@ -546,15 +590,15 @@ const maybeLogLowStock = async ({ tenantId, actorUserId, productId }) => {
   if (!Number.isFinite(tId) || tId <= 0) return;
   if (!Number.isFinite(pId) || pId <= 0) return;
 
-  const threshold = 5;
   const product = await queryOne(
-    `SELECT id, name, status
+    `SELECT id, name, status, low_stock_threshold
      FROM products
      WHERE tenant_id = :tenantId AND id = :id
      LIMIT 1`,
     { tenantId: tId, id: pId }
   );
   if (!product || product.status !== 'active') return;
+  const threshold = Number(product.low_stock_threshold ?? 5);
 
   const stockRow = await queryOne(
     `SELECT COALESCE(SUM(CASE WHEN movement_type = 'in' THEN qty ELSE -qty END), 0) AS on_hand
@@ -636,7 +680,8 @@ const triggerAutomation = async (
 class PlanRepository {
   async getById(tenantId, id) {
     return queryOne(
-      `SELECT id, name, duration_days, price, admission_fee, status
+      `SELECT id, name, duration_days, price, admission_fee, session_credits,
+              freeze_allowance_days, auto_renew, description, status
        FROM membership_plans
        WHERE tenant_id = :tenantId AND id = :id`,
       { tenantId, id }
@@ -645,7 +690,8 @@ class PlanRepository {
 
   async list(tenantId, limit = 200) {
     return queryMany(
-      `SELECT id, name, duration_days, price, admission_fee, status, created_at
+      `SELECT id, name, duration_days, price, admission_fee, session_credits,
+              freeze_allowance_days, auto_renew, description, status, created_at
        FROM membership_plans
        WHERE tenant_id = :tenantId
        ORDER BY id DESC
@@ -1265,7 +1311,8 @@ class ProductRepository {
     }
 
     const rows = await queryMany(
-      `SELECT p.id, p.name, p.sku, p.price, p.status,
+      `SELECT p.id, p.name, p.sku, p.price, p.cost_price, p.category, p.supplier,
+              p.low_stock_threshold, p.status,
               COALESCE((
                 SELECT SUM(CASE WHEN sm.movement_type = 'in' THEN sm.qty ELSE -sm.qty END)
                 FROM stock_movements sm
@@ -1279,14 +1326,24 @@ class ProductRepository {
     );
 
     if (!lowStock) return rows;
-    return rows.filter((r) => Number(r.on_hand ?? 0) < 5);
+    // Each product's own threshold, not a hardcoded value.
+    return rows.filter((r) => Number(r.on_hand ?? 0) < Number(r.low_stock_threshold ?? 5));
   }
 
-  async create(tenantId, { name, sku = null, price = 0, status = 'active' }) {
+  async create(tenantId, {
+    name,
+    sku = null,
+    price = 0,
+    costPrice = null,
+    category = null,
+    supplier = null,
+    lowStockThreshold = 5,
+    status = 'active'
+  }) {
     const result = await execute(
-      `INSERT INTO products (tenant_id, name, sku, price, status)
-       VALUES (:tenantId, :name, :sku, :price, :status)`,
-      { tenantId, name, sku, price, status }
+      `INSERT INTO products (tenant_id, name, sku, price, cost_price, category, supplier, low_stock_threshold, status)
+       VALUES (:tenantId, :name, :sku, :price, :costPrice, :category, :supplier, :lowStockThreshold, :status)`,
+      { tenantId, name, sku, price, costPrice, category, supplier, lowStockThreshold, status }
     );
     return Number(result.insertId);
   }
@@ -1294,15 +1351,28 @@ class ProductRepository {
   async update(tenantId, id, patch) {
     await execute(
       `UPDATE products
-       SET name = :name, sku = :sku, price = :price, status = :status
+       SET name = :name, sku = :sku, price = :price, cost_price = :costPrice,
+           category = :category, supplier = :supplier, low_stock_threshold = :lowStockThreshold,
+           status = :status
        WHERE tenant_id = :tenantId AND id = :id`,
-      { tenantId, id, name: patch.name, sku: patch.sku, price: patch.price, status: patch.status }
+      {
+        tenantId,
+        id,
+        name: patch.name,
+        sku: patch.sku,
+        price: patch.price,
+        costPrice: patch.costPrice ?? null,
+        category: patch.category ?? null,
+        supplier: patch.supplier ?? null,
+        lowStockThreshold: patch.lowStockThreshold ?? 5,
+        status: patch.status
+      }
     );
   }
 
   async getById(tenantId, id) {
     return queryOne(
-      `SELECT id, name, sku, price, status
+      `SELECT id, name, sku, price, cost_price, category, supplier, low_stock_threshold, status
        FROM products
        WHERE tenant_id = :tenantId AND id = :id`,
       { tenantId, id }
@@ -2541,6 +2611,10 @@ app.get('/products', authMiddleware, requireRole('owner', 'admin', 'staff'), asy
       name: r.name,
       sku: r.sku ?? null,
       price: Number(r.price ?? 0),
+      costPrice: r.cost_price == null ? null : Number(r.cost_price),
+      category: r.category ?? null,
+      supplier: r.supplier ?? null,
+      lowStockThreshold: Number(r.low_stock_threshold ?? 5),
       status: r.status,
       onHand: Number(r.on_hand ?? 0)
     }))
@@ -2552,7 +2626,15 @@ app.post('/products', authMiddleware, requireRole('owner', 'admin'), async (req,
     name: z.string().min(1).max(191),
     sku: z.string().max(64).optional().nullable(),
     price: z.number().min(0).optional().default(0),
-    status: z.enum(['active', 'inactive']).optional().default('active')
+    costPrice: z.number().min(0).optional().nullable(),
+    category: z.string().max(100).optional().nullable(),
+    supplier: z.string().max(191).optional().nullable(),
+    lowStockThreshold: z.number().int().min(0).optional().default(5),
+    status: z.enum(['active', 'inactive']).optional().default('active'),
+    // Opening stock is written as a stock_movements row (below), not a
+    // products column — this keeps on-hand quantity single-sourced from the
+    // existing ledger, consistent with every other stock change in the app.
+    openingStock: z.number().int().min(0).optional().default(0)
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -2560,15 +2642,27 @@ app.post('/products', authMiddleware, requireRole('owner', 'admin'), async (req,
     name: parsed.data.name,
     sku: parsed.data.sku ?? null,
     price: Number(parsed.data.price ?? 0),
+    costPrice: parsed.data.costPrice ?? null,
+    category: parsed.data.category?.trim() || null,
+    supplier: parsed.data.supplier?.trim() || null,
+    lowStockThreshold: parsed.data.lowStockThreshold ?? 5,
     status: parsed.data.status
   });
+  if (parsed.data.openingStock > 0) {
+    await stockRepo.move(req.user.tenantId, {
+      productId: id,
+      qty: parsed.data.openingStock,
+      movementType: 'in',
+      reason: 'Opening stock'
+    });
+  }
   await appendSystemLog({
     tenantId: req.user.tenantId,
     actorUserId: req.user.userId,
     action: 'product_create',
     entityType: 'product',
     entityId: id,
-    meta: { name: parsed.data.name, sku: parsed.data.sku ?? null },
+    meta: { name: parsed.data.name, sku: parsed.data.sku ?? null, openingStock: parsed.data.openingStock },
     ip: req.ip,
     userAgent: req.headers['user-agent']?.toString() ?? null
   });
@@ -2582,13 +2676,21 @@ app.patch('/products/:id', authMiddleware, requireRole('owner', 'admin'), async 
     name: z.string().min(1).max(191),
     sku: z.string().max(64).optional().nullable(),
     price: z.number().min(0).optional().default(0),
+    costPrice: z.number().min(0).optional().nullable(),
+    category: z.string().max(100).optional().nullable(),
+    supplier: z.string().max(191).optional().nullable(),
+    lowStockThreshold: z.number().int().min(0).optional().default(5),
     status: z.enum(['active', 'inactive']).optional().default('active')
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
   const exists = await productRepo.getById(req.user.tenantId, id);
   if (!exists) return res.status(404).json({ error: 'product_not_found' });
-  await productRepo.update(req.user.tenantId, id, parsed.data);
+  await productRepo.update(req.user.tenantId, id, {
+    ...parsed.data,
+    category: parsed.data.category?.trim() || null,
+    supplier: parsed.data.supplier?.trim() || null
+  });
   await appendSystemLog({
     tenantId: req.user.tenantId,
     actorUserId: req.user.userId,
@@ -4047,21 +4149,33 @@ app.post('/plans', authMiddleware, requireRole('owner', 'admin'), async (req, re
     name: z.string().min(2).max(191),
     durationDays: z.number().int().positive().max(3660),
     price: z.number().positive(),
-    admissionFee: z.number().min(0).optional().default(0)
+    admissionFee: z.number().min(0).optional().default(0),
+    // null/0 = unlimited sessions.
+    sessionCredits: z.number().int().min(0).optional().nullable(),
+    freezeAllowanceDays: z.number().int().min(0).optional().default(0),
+    autoRenew: z.boolean().optional().default(false),
+    description: z.string().max(500).optional().nullable()
   });
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
 
   try {
     const result = await execute(
-      `INSERT INTO membership_plans (tenant_id, name, duration_days, price, admission_fee)
-       VALUES (:tenantId, :name, :durationDays, :price, :admissionFee)`,
+      `INSERT INTO membership_plans
+         (tenant_id, name, duration_days, price, admission_fee, session_credits,
+          freeze_allowance_days, auto_renew, description)
+       VALUES (:tenantId, :name, :durationDays, :price, :admissionFee, :sessionCredits,
+               :freezeAllowanceDays, :autoRenew, :description)`,
       {
         tenantId: req.user.tenantId,
         name: parsed.data.name,
         durationDays: parsed.data.durationDays,
         price: parsed.data.price,
-        admissionFee: parsed.data.admissionFee
+        admissionFee: parsed.data.admissionFee,
+        sessionCredits: parsed.data.sessionCredits ?? null,
+        freezeAllowanceDays: parsed.data.freezeAllowanceDays ?? 0,
+        autoRenew: parsed.data.autoRenew ? 1 : 0,
+        description: parsed.data.description?.trim() || null
       }
     );
     return res.status(201).json({ id: Number(result.insertId) });
@@ -4091,6 +4205,10 @@ app.patch('/plans/:id', authMiddleware, requireRole('owner', 'admin'), async (re
     durationDays: z.number().int().positive().max(3660),
     price: z.number().min(0),
     admissionFee: z.number().min(0).optional().default(0),
+    sessionCredits: z.number().int().min(0).optional().nullable(),
+    freezeAllowanceDays: z.number().int().min(0).optional().default(0),
+    autoRenew: z.boolean().optional().default(false),
+    description: z.string().max(500).optional().nullable(),
     status: z.enum(['active', 'inactive']).optional().default('active')
   });
   const parsed = bodySchema.safeParse(req.body);
@@ -4108,6 +4226,10 @@ app.patch('/plans/:id', authMiddleware, requireRole('owner', 'admin'), async (re
          duration_days = :durationDays,
          price = :price,
          admission_fee = :admissionFee,
+         session_credits = :sessionCredits,
+         freeze_allowance_days = :freezeAllowanceDays,
+         auto_renew = :autoRenew,
+         description = :description,
          status = :status
      WHERE tenant_id = :tenantId AND id = :id`,
     {
@@ -4117,6 +4239,10 @@ app.patch('/plans/:id', authMiddleware, requireRole('owner', 'admin'), async (re
       durationDays: parsed.data.durationDays,
       price: parsed.data.price,
       admissionFee: parsed.data.admissionFee,
+      sessionCredits: parsed.data.sessionCredits ?? null,
+      freezeAllowanceDays: parsed.data.freezeAllowanceDays ?? 0,
+      autoRenew: parsed.data.autoRenew ? 1 : 0,
+      description: parsed.data.description?.trim() || null,
       status: parsed.data.status
     }
   );

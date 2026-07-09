@@ -110,6 +110,11 @@ class _ProductsController extends StateNotifier<AsyncValue<List<Product>>> {
     String? sku,
     required double price,
     required String status,
+    int openingStock = 0,
+    int lowStockThreshold = 5,
+    String? category,
+    double? costPrice,
+    String? supplier,
   }) async {
     final token = ref.read(authControllerProvider).token;
     if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -119,6 +124,11 @@ class _ProductsController extends StateNotifier<AsyncValue<List<Product>>> {
       'sku': sku?.trim().isEmpty == true ? null : sku?.trim(),
       'price': price,
       'status': status,
+      'openingStock': openingStock,
+      'lowStockThreshold': lowStockThreshold,
+      'category': category?.trim().isEmpty == true ? null : category?.trim(),
+      'costPrice': costPrice,
+      'supplier': supplier?.trim().isEmpty == true ? null : supplier?.trim(),
     });
     await load();
   }
@@ -129,6 +139,10 @@ class _ProductsController extends StateNotifier<AsyncValue<List<Product>>> {
     String? sku,
     required double price,
     required String status,
+    int lowStockThreshold = 5,
+    String? category,
+    double? costPrice,
+    String? supplier,
   }) async {
     final token = ref.read(authControllerProvider).token;
     if (token == null || token.isEmpty) throw ApiException('unauthorized');
@@ -138,6 +152,10 @@ class _ProductsController extends StateNotifier<AsyncValue<List<Product>>> {
       'sku': sku?.trim().isEmpty == true ? null : sku?.trim(),
       'price': price,
       'status': status,
+      'lowStockThreshold': lowStockThreshold,
+      'category': category?.trim().isEmpty == true ? null : category?.trim(),
+      'costPrice': costPrice,
+      'supplier': supplier?.trim().isEmpty == true ? null : supplier?.trim(),
     });
     await load();
   }
@@ -621,7 +639,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                       ),
                                     ),
                                     AppFilterPill(
-                                      label: 'Low stock (<5)',
+                                      label: 'Low stock',
                                       icon: PhosphorIconsRegular.trendDown,
                                       selected: query.lowStock,
                                       accentOverride: StatCategory.atRisk.color,
@@ -819,7 +837,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                                   fontFeatures: const [FontFeature.tabularFigures()],
                                                 ),
                                               )),
-                                              DataCell(_StatusChip(status: p.status, onHand: p.onHand)),
+                                              DataCell(_StatusChip(status: p.status, onHand: p.onHand, lowStockThreshold: p.lowStockThreshold)),
                                               DataCell(
                                                 Row(
                                                   mainAxisSize: MainAxisSize.min,
@@ -899,7 +917,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                                     ),
                                                   ),
                                                   const SizedBox(width: 8),
-                                                  _StatusChip(status: p.status, onHand: p.onHand),
+                                                  _StatusChip(status: p.status, onHand: p.onHand, lowStockThreshold: p.lowStockThreshold),
                                                 ],
                                               ),
                                               const SizedBox(height: 4),
@@ -955,7 +973,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     final nameCtrl = TextEditingController();
     final skuCtrl = TextEditingController();
     final priceCtrl = TextEditingController(text: '0');
+    final openingStockCtrl = TextEditingController(text: '0');
+    final lowStockCtrl = TextEditingController(text: '5');
+    final costPriceCtrl = TextEditingController();
+    final supplierCtrl = TextEditingController();
     String status = 'active';
+    String? category;
 
     await showAppFormDialog<void>(
       context: context,
@@ -1013,6 +1036,56 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 20),
+                  Text('Stock Details', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      field(
+                        TextField(
+                          controller: openingStockCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Opening Stock / Quantity'),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: lowStockCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Low-Stock Threshold'),
+                        ),
+                      ),
+                      field(
+                        DropdownButtonFormField<String>(
+                          key: ValueKey(category),
+                          initialValue: category,
+                          decoration: const InputDecoration(labelText: 'Category (optional)'),
+                          items: const [
+                            DropdownMenuItem(value: 'Supplements', child: Text('Supplements')),
+                            DropdownMenuItem(value: 'Equipment', child: Text('Equipment')),
+                            DropdownMenuItem(value: 'Apparel', child: Text('Apparel')),
+                            DropdownMenuItem(value: 'Accessories', child: Text('Accessories')),
+                          ],
+                          onChanged: (v) => setModalState(() => category = v),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: costPriceCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Cost Price (Rs.) (optional)'),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: supplierCtrl,
+                          decoration: const InputDecoration(labelText: 'Supplier (optional)'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               );
             },
@@ -1029,8 +1102,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           onPressed: () async {
             final name = nameCtrl.text.trim();
             final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
+            final openingStock = int.tryParse(openingStockCtrl.text.trim());
             if (name.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name required')));
+              return;
+            }
+            if (openingStock == null || openingStock < 0) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('Enter a valid opening stock quantity')));
               return;
             }
             try {
@@ -1039,6 +1118,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                     sku: skuCtrl.text,
                     price: price,
                     status: status,
+                    openingStock: openingStock,
+                    lowStockThreshold: int.tryParse(lowStockCtrl.text.trim()) ?? 5,
+                    category: category,
+                    costPrice: double.tryParse(costPriceCtrl.text.trim()),
+                    supplier: supplierCtrl.text,
                   );
               if (!context.mounted) return;
               Navigator.of(context, rootNavigator: true).maybePop();
@@ -1057,6 +1141,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     );
 
     nameCtrl.dispose();
+    openingStockCtrl.dispose();
+    lowStockCtrl.dispose();
+    costPriceCtrl.dispose();
+    supplierCtrl.dispose();
     skuCtrl.dispose();
     priceCtrl.dispose();
   }
@@ -1070,8 +1158,12 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           content: Text(
             [
               if (p.sku != null) 'SKU: ${p.sku}',
+              if (p.category != null) 'Category: ${p.category}',
               'Price: ${p.price}',
+              if (p.costPrice != null) 'Cost Price: ${p.costPrice}',
+              if (p.supplier != null) 'Supplier: ${p.supplier}',
               'On-hand: ${p.onHand}',
+              'Low-stock threshold: ${p.lowStockThreshold}',
               'Status: ${p.status}',
             ].join('\n'),
           ),
@@ -1087,7 +1179,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     final nameCtrl = TextEditingController(text: p.name);
     final skuCtrl = TextEditingController(text: p.sku ?? '');
     final priceCtrl = TextEditingController(text: p.price.toString());
+    final lowStockCtrl = TextEditingController(text: p.lowStockThreshold.toString());
+    final costPriceCtrl = TextEditingController(text: p.costPrice?.toString() ?? '');
+    final supplierCtrl = TextEditingController(text: p.supplier ?? '');
     var status = p.status;
+    String? category = p.category;
 
     await showAppFormDialog<void>(
       context: context,
@@ -1144,6 +1240,49 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 20),
+                  Text('Stock Details', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      field(
+                        TextField(
+                          controller: lowStockCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Low-Stock Threshold'),
+                        ),
+                      ),
+                      field(
+                        DropdownButtonFormField<String>(
+                          key: ValueKey(category),
+                          initialValue: category,
+                          decoration: const InputDecoration(labelText: 'Category (optional)'),
+                          items: const [
+                            DropdownMenuItem(value: 'Supplements', child: Text('Supplements')),
+                            DropdownMenuItem(value: 'Equipment', child: Text('Equipment')),
+                            DropdownMenuItem(value: 'Apparel', child: Text('Apparel')),
+                            DropdownMenuItem(value: 'Accessories', child: Text('Accessories')),
+                          ],
+                          onChanged: (v) => setModalState(() => category = v),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: costPriceCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Cost Price (Rs.) (optional)'),
+                        ),
+                      ),
+                      field(
+                        TextField(
+                          controller: supplierCtrl,
+                          decoration: const InputDecoration(labelText: 'Supplier (optional)'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               );
             },
@@ -1171,6 +1310,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                     sku: skuCtrl.text,
                     price: price,
                     status: status,
+                    lowStockThreshold: int.tryParse(lowStockCtrl.text.trim()) ?? 5,
+                    category: category,
+                    costPrice: double.tryParse(costPriceCtrl.text.trim()),
+                    supplier: supplierCtrl.text,
                   );
               if (!context.mounted) return;
               Navigator.of(context, rootNavigator: true).maybePop();
@@ -1191,6 +1334,9 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     nameCtrl.dispose();
     skuCtrl.dispose();
     priceCtrl.dispose();
+    lowStockCtrl.dispose();
+    costPriceCtrl.dispose();
+    supplierCtrl.dispose();
   }
 
   Future<void> _confirmDeleteProduct(BuildContext context, WidgetRef ref, Product p) async {
@@ -1755,14 +1901,18 @@ class _ProductActionsMenu extends StatelessWidget {
 /// Flat stock-status pill: low stock = at-risk, active = membership,
 /// everything else = neutral operational — same category system app-wide.
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status, required this.onHand});
+  const _StatusChip({required this.status, required this.onHand, this.lowStockThreshold = 5});
 
   final String status;
   final int onHand;
 
+  /// Reads from the product's own threshold (set in Add/Edit Product)
+  /// instead of a hardcoded value.
+  final int lowStockThreshold;
+
   @override
   Widget build(BuildContext context) {
-    final low = onHand < 5;
+    final low = onHand < lowStockThreshold;
     final isActive = status == 'active';
     final category = low
         ? StatCategory.atRisk

@@ -123,6 +123,11 @@ CREATE TABLE IF NOT EXISTS membership_plans (
   duration_days INT UNSIGNED NOT NULL,
   price DECIMAL(10,2) NOT NULL,
   admission_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+  -- NULL/0 = unlimited sessions (unlimited-access plan).
+  session_credits INT UNSIGNED NULL,
+  freeze_allowance_days INT UNSIGNED NOT NULL DEFAULT 0,
+  auto_renew TINYINT(1) NOT NULL DEFAULT 0,
+  description VARCHAR(500) NULL,
   status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -282,6 +287,15 @@ CREATE TABLE IF NOT EXISTS products (
   name VARCHAR(191) NOT NULL,
   sku VARCHAR(64) NULL,
   price DECIMAL(10,2) NOT NULL DEFAULT 0,
+  -- Selling price is `price` above; cost_price is what the gym pays to
+  -- acquire/restock the item (for profit-margin reporting).
+  cost_price DECIMAL(10,2) NULL,
+  category VARCHAR(100) NULL,
+  supplier VARCHAR(191) NULL,
+  -- On-hand quantity is derived from stock_movements (ledger), never stored
+  -- here directly — this is only the per-product threshold that drives the
+  -- "Low" status pill.
+  low_stock_threshold INT UNSIGNED NOT NULL DEFAULT 5,
   status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -365,3 +379,24 @@ CREATE TABLE IF NOT EXISTS system_logs (
   CONSTRAINT fk_system_logs_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   CONSTRAINT fk_system_logs_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Migrations for databases created before the columns above existed.
+-- Safe to re-run: IF NOT EXISTS makes every statement a no-op on a database
+-- that already has the column (requires MySQL 8.0.29+ / MariaDB 10.5+).
+-- Sensible defaults below mean existing products/plans keep working exactly
+-- as before (existing products just adopt the same threshold=5 the low-stock
+-- check already hardcoded; existing plans default to unlimited credits, 0
+-- freeze days, auto-renew off).
+-- ─────────────────────────────────────────────────────────────────────────
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS cost_price DECIMAL(10,2) NULL AFTER price,
+  ADD COLUMN IF NOT EXISTS category VARCHAR(100) NULL AFTER cost_price,
+  ADD COLUMN IF NOT EXISTS supplier VARCHAR(191) NULL AFTER category,
+  ADD COLUMN IF NOT EXISTS low_stock_threshold INT UNSIGNED NOT NULL DEFAULT 5 AFTER supplier;
+
+ALTER TABLE membership_plans
+  ADD COLUMN IF NOT EXISTS session_credits INT UNSIGNED NULL AFTER admission_fee,
+  ADD COLUMN IF NOT EXISTS freeze_allowance_days INT UNSIGNED NOT NULL DEFAULT 0 AFTER session_credits,
+  ADD COLUMN IF NOT EXISTS auto_renew TINYINT(1) NOT NULL DEFAULT 0 AFTER freeze_allowance_days,
+  ADD COLUMN IF NOT EXISTS description VARCHAR(500) NULL AFTER auto_renew;

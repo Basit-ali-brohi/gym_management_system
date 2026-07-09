@@ -109,6 +109,10 @@ class Plan {
     required this.price,
     required this.admissionFee,
     required this.status,
+    this.sessionCredits,
+    this.freezeAllowanceDays = 0,
+    this.autoRenew = false,
+    this.description,
   });
 
   final int id;
@@ -118,6 +122,18 @@ class Plan {
   final num admissionFee;
   final String status;
 
+  /// Null/0 = unlimited sessions (unlimited-access plan).
+  final int? sessionCredits;
+
+  /// Days a member on this plan is allowed to freeze/pause their membership.
+  final int freezeAllowanceDays;
+  final bool autoRenew;
+
+  /// Short staff-facing note shown when selecting this plan at registration.
+  final String? description;
+
+  bool get isUnlimitedSessions => sessionCredits == null || sessionCredits == 0;
+
   factory Plan.fromJson(Map<String, dynamic> json) {
     num parseNum(dynamic v) {
       if (v == null) return 0;
@@ -126,6 +142,15 @@ class Plan {
       return 0;
     }
 
+    bool parseBool(dynamic v) {
+      if (v == null) return false;
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) return v == '1' || v.toLowerCase() == 'true';
+      return false;
+    }
+
+    final rawCredits = json['session_credits'];
     return Plan(
       id: (json['id'] as num).toInt(),
       name: json['name']?.toString() ?? '',
@@ -133,6 +158,10 @@ class Plan {
       price: parseNum(json['price']),
       admissionFee: parseNum(json['admission_fee']),
       status: json['status']?.toString() ?? 'active',
+      sessionCredits: rawCredits == null ? null : parseNum(rawCredits).toInt(),
+      freezeAllowanceDays: parseNum(json['freeze_allowance_days']).toInt(),
+      autoRenew: parseBool(json['auto_renew']),
+      description: (json['description'] as String?)?.trim().isEmpty == true ? null : json['description']?.toString(),
     );
   }
 }
@@ -336,6 +365,10 @@ class Product {
     required this.price,
     required this.status,
     required this.onHand,
+    this.costPrice,
+    this.category,
+    this.supplier,
+    this.lowStockThreshold = 5,
   });
 
   final int id;
@@ -345,7 +378,22 @@ class Product {
   final String status;
   final int onHand;
 
+  /// What the gym pays to acquire/restock this item — separate from [price]
+  /// (the selling price). Null = not tracked for this product.
+  final num? costPrice;
+  final String? category;
+  final String? supplier;
+
+  /// On-hand quantity below this shows the "Low" status pill.
+  final int lowStockThreshold;
+
   factory Product.fromJson(Map<String, dynamic> json) {
+    num? parseNullableNum(dynamic v) {
+      if (v == null) return null;
+      if (v is num) return v;
+      return num.tryParse(v.toString());
+    }
+
     return Product(
       id: (json['id'] as num).toInt(),
       name: json['name']?.toString() ?? '',
@@ -353,6 +401,10 @@ class Product {
       price: json['price'] as num? ?? 0,
       status: json['status']?.toString() ?? 'active',
       onHand: (json['onHand'] as num?)?.toInt() ?? 0,
+      costPrice: parseNullableNum(json['costPrice']),
+      category: json['category']?.toString(),
+      supplier: json['supplier']?.toString(),
+      lowStockThreshold: (json['lowStockThreshold'] as num?)?.toInt() ?? 5,
     );
   }
 }
